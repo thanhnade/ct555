@@ -20,7 +20,7 @@
       <div class="collapse navbar-collapse" id="adminNav">
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#user" role="button" data-bs-toggle="dropdown" aria-expanded="false">User Management</a>
+            <a class="nav-link dropdown-toggle" href="#user" role="button" data-bs-toggle="dropdown" aria-expanded="false">👤User Management</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#user-list">Danh sách user</a></li>
               <li><a class="dropdown-item" href="#user-create">Thêm/Sửa/Xoá user</a></li>
@@ -28,15 +28,15 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#server" role="button" data-bs-toggle="dropdown" aria-expanded="false">Server Management</a>
+            <a class="nav-link dropdown-toggle" href="#server" role="button" data-bs-toggle="dropdown" aria-expanded="false">🖥️Server Management</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#server-list">Danh sách server</a></li>
               <li><a class="dropdown-item" href="#server-crud">Thêm/Xoá server</a></li>
-              <li><a class="dropdown-item" href="#server-ssh">Kiểm tra kết nối SSH</a></li>
+              
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#k8s" role="button" data-bs-toggle="dropdown" aria-expanded="false">Kubernetes Cluster</a>
+            <a class="nav-link dropdown-toggle" href="#k8s" role="button" data-bs-toggle="dropdown" aria-expanded="false">☸️Kubernetes Cluster</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#k8s-create">Tạo cluster</a></li>
               <li><a class="dropdown-item" href="#k8s-status">Xem trạng thái cluster</a></li>
@@ -45,7 +45,7 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#service" role="button" data-bs-toggle="dropdown" aria-expanded="false">Service Management</a>
+            <a class="nav-link dropdown-toggle" href="#service" role="button" data-bs-toggle="dropdown" aria-expanded="false">⚙️Service Management</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#svc-list">Danh sách dịch vụ</a></li>
               <li><a class="dropdown-item" href="#svc-actions">Start/Stop/Restart</a></li>
@@ -53,7 +53,7 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#app" role="button" data-bs-toggle="dropdown" aria-expanded="false">App Deployment</a>
+            <a class="nav-link dropdown-toggle" href="#app" role="button" data-bs-toggle="dropdown" aria-expanded="false">📦App Deployment</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#app-list">Danh sách app</a></li>
               <li><a class="dropdown-item" href="#app-deploy">Triển khai app</a></li>
@@ -61,7 +61,7 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#monitor" role="button" data-bs-toggle="dropdown" aria-expanded="false">Monitoring & Logs</a>
+            <a class="nav-link dropdown-toggle" href="#monitor" role="button" data-bs-toggle="dropdown" aria-expanded="false">📊Monitoring & Logs</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#sys-logs">Xem log hệ thống</a></li>
               <li><a class="dropdown-item" href="#cluster-resources">Xem tài nguyên cluster</a></li>
@@ -159,9 +159,83 @@
         <h1 class="m-0">Quản lý Server</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
-      <div class="card mb-3" id="server-list"><div class="card-body">Danh sách server (đang cập nhật)</div></div>
-      <div class="card mb-3" id="server-crud"><div class="card-body">Thêm/Xoá server (đang cập nhật)</div></div>
-      <div class="card mb-3" id="server-ssh"><div class="card-body">Kiểm tra kết nối SSH (đang cập nhật)</div></div>
+      <div class="card mb-3" id="server-crud">
+        <div class="card-body">
+          <h2 class="h6">Thêm máy chủ</h2>
+          <form id="create-server-form" class="row g-2 mt-2">
+            <div class="col-12 col-md-3">
+              <input class="form-control" name="host" placeholder="Host/IP" required>
+            </div>
+            <div class="col-6 col-md-1">
+              <input class="form-control" type="number" name="port" value="22" min="1" max="65535">
+            </div>
+            <div class="col-6 col-md-2">
+              <input class="form-control" name="username" placeholder="Username" required>
+            </div>
+            <div class="col-12 col-md-3">
+              <input class="form-control" type="password" name="password" placeholder="Password" required>
+            </div>
+            <div class="col-6 col-md-2">
+              <select class="form-select" name="role">
+                <option value="WORKER">WORKER</option>
+                <option value="MASTER">MASTER</option>
+                <option value="STANDALONE">STANDALONE</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <button class="btn btn-success" type="submit">Thêm máy chủ</button>
+            </div>
+          </form>
+          <div id="server-msg" class="mt-2 small"></div>
+        </div>
+      </div>
+
+      <div class="card mb-3" id="server-list">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h2 class="h6 m-0">Servers đang kết nối</h2>
+            <div class="btn-group">
+              <button class="btn btn-sm btn-outline-primary" id="btn-check-status">Kiểm tra trạng thái</button>
+            </div>
+          </div>
+          <div class="table-responsive table-fixed mb-4" style="max-height: 40vh;">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Host</th>
+                  <th>Port</th>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="servers-connected-tbody"></tbody>
+            </table>
+          </div>
+
+          <h2 class="h6" id="servers-history-title">Servers đã từng kết nối</h2>
+          <div class="table-responsive table-fixed" style="max-height: 40vh;">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Host</th>
+                  <th>Port</th>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="servers-history-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      
     </div>
   </div>
 

@@ -1,8 +1,15 @@
 async function fetchJSON(url, options){
   const res = await fetch(url, Object.assign({headers:{'Content-Type':'application/json'}}, options||{}));
   if(!res.ok){
-    const text = await res.text();
-    throw new Error(text || ('HTTP '+res.status));
+    let msg = 'HTTP '+res.status;
+    try {
+      const data = await res.json();
+      if(typeof data === 'string') msg = data; else if(data.message) msg = data.message; else msg = JSON.stringify(data);
+    } catch(e){
+      const text = await res.text();
+      msg = text || msg;
+    }
+    throw new Error(msg);
   }
   return res.status === 204 ? null : res.json();
 }
@@ -33,6 +40,104 @@ async function loadUsers(){
     `;
     tbody.appendChild(tr);
   });
+}
+
+// Server Management
+async function loadServers(){
+  const data = await fetchJSON('/admin/servers');
+  let connectedIds = [];
+  try { connectedIds = await fetchJSON('/admin/servers/connected'); } catch(e) { connectedIds = []; }
+
+  const tbodyConn = document.getElementById('servers-connected-tbody');
+  const tbodyHist = document.getElementById('servers-history-tbody');
+  if(!tbodyConn || !tbodyHist) return;
+  tbodyConn.innerHTML = '';
+  tbodyHist.innerHTML = '';
+
+  (data || []).forEach(s => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${s.id}</td>
+      <td><input class="form-control form-control-sm" value="${s.host}" data-id="${s.id}" data-field="host" /></td>
+      <td><input type="number" class="form-control form-control-sm" value="${s.port}" data-id="${s.id}" data-field="port" /></td>
+      <td><input class="form-control form-control-sm" value="${s.username}" data-id="${s.id}" data-field="username" /></td>
+      <td>
+        <select class="form-select form-select-sm" data-id="${s.id}" data-field="role">
+          <option ${s.role==='WORKER'?'selected':''}>WORKER</option>
+          <option ${s.role==='MASTER'?'selected':''}>MASTER</option>
+          <option ${s.role==='STANDALONE'?'selected':''}>STANDALONE</option>
+        </select>
+      </td>
+      <td>
+        <select class="form-select form-select-sm" data-id="${s.id}" data-field="status">
+          <option ${s.status==='OFFLINE'?'selected':''}>OFFLINE</option>
+          <option ${s.status==='ONLINE'?'selected':''}>ONLINE</option>
+        </select>
+      </td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-primary me-1" onclick="saveServer(${s.id})">Lưu</button>
+        <button class="btn btn-sm btn-danger me-1" onclick="deleteServer(${s.id})">Xoá</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="promptReconnect(${s.id})">Kết nối lại</button>
+      </td>
+    `;
+    if(connectedIds.includes(s.id)) tbodyConn.appendChild(tr); else tbodyHist.appendChild(tr);
+  });
+}
+
+async function promptReconnect(id){
+  const pw = prompt('Nhập mật khẩu để kết nối lại:');
+  if(!pw) return;
+  try{
+    await fetchJSON(`/admin/servers/${id}/reconnect`, {method:'POST', body: JSON.stringify({password: pw})});
+    await loadServers('connected');
+  }catch(err){
+    alert(err.message || 'Kết nối lại thất bại');
+  }
+}
+
+async function createServer(ev){
+  ev.preventDefault();
+  const f = ev.target;
+  const msgEl = document.getElementById('server-msg');
+  msgEl.textContent = '';
+  const body = {
+    host: f.host.value.trim(),
+    port: parseInt(f.port.value, 10),
+    username: f.username.value.trim(),
+    password: f.password.value,
+    role: f.role.value
+  };
+  const btn = f.querySelector('button[type="submit"]');
+  try {
+    btn.disabled = true; btn.textContent = 'Đang thêm...';
+    await fetchJSON('/admin/servers', {method:'POST', body: JSON.stringify(body)});
+    msgEl.textContent = 'Thêm máy chủ thành công';
+    msgEl.className = 'mt-2 small text-success';
+    f.reset(); f.port.value = 22; f.role.value='WORKER';
+    loadServers();
+  } catch(err){
+    msgEl.textContent = err.message || 'Thêm server thất bại';
+    msgEl.className = 'mt-2 small text-danger';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Thêm máy chủ';
+  }
+}
+
+async function saveServer(id){
+  const host = document.querySelector(`input[data-id="${id}"][data-field="host"]`).value.trim();
+  const port = parseInt(document.querySelector(`input[data-id="${id}"][data-field="port"]`).value, 10);
+  const username = document.querySelector(`input[data-id="${id}"][data-field="username"]`).value.trim();
+  const role = document.querySelector(`select[data-id="${id}"][data-field="role"]`).value;
+  const status = document.querySelector(`select[data-id="${id}"][data-field="status"]`).value;
+  const body = {host, port, username, role, status};
+  await fetchJSON(`/admin/servers/${id}`, {method:'PUT', body: JSON.stringify(body)});
+  loadServers();
+}
+
+async function deleteServer(id){
+  if(!confirm('Xoá server này?')) return;
+  await fetch(`/admin/servers/${id}`, {method:'DELETE'});
+  loadServers();
 }
 
 async function createUser(ev){
@@ -94,12 +199,20 @@ document.addEventListener('DOMContentLoaded', () => {
   loadUsers();
   // Section toggling
   const sectionIds = ['user','server','k8s','service','app','monitor'];
-  function showSection(key){
+  async function showSection(key){
     sectionIds.forEach(id => {
       const el = document.getElementById('section-'+id);
       if(el){ el.classList.toggle('d-none', id !== key); }
     });
     if(key==='user'){ loadUsers(); }
+    if(key==='server'){
+      await loadServers();
+      try{
+        // tự động kiểm tra trạng thái sau khi vào tab server
+        await fetchJSON('/admin/servers/check-status', {method:'POST'});
+        await loadServers();
+      }catch(_){ /* ignore */ }
+    }
   }
   document.querySelectorAll('.navbar .dropdown-menu a.dropdown-item, .navbar .nav-link').forEach(a => {
     a.addEventListener('click', (e) => {
@@ -116,6 +229,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   // default
   showSection('user');
+
+  // bind server forms
+  const newSrv = document.getElementById('create-server-form');
+  if(newSrv){ newSrv.addEventListener('submit', createServer); }
+  const btnCheck = document.getElementById('btn-check-status');
+  if(btnCheck){
+    btnCheck.addEventListener('click', async () => {
+      try{
+        btnCheck.disabled = true; btnCheck.textContent = 'Đang kiểm tra...';
+        await fetchJSON('/admin/servers/check-status', {method:'POST'});
+        await loadServers();
+      } finally {
+        btnCheck.disabled = false; btnCheck.textContent = 'Kiểm tra trạng thái';
+      }
+    });
+  }
 });
 
 
