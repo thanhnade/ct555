@@ -68,7 +68,10 @@
             </ul>
           </li>
         </ul>
-        <span class="navbar-text d-none d-lg-inline">Hi, <strong th:text="${username}">Admin</strong></span>
+        <div class="d-flex align-items-center gap-2">
+          <span class="navbar-text">Hi, <strong th:text="${username}">Admin</strong></span>
+          <a href="/auth/logout" class="btn btn-sm btn-outline-light">Đăng xuất</a>
+        </div>
       </div>
     </div>
   </nav>
@@ -198,6 +201,7 @@
               <button class="btn btn-sm btn-outline-primary" id="btn-check-status">Kiểm tra trạng thái</button>
             </div>
           </div>
+          <div id="server-save-msg" class="small mb-2" aria-live="polite"></div>
           <div class="table-responsive table-fixed mb-4" style="max-height: 40vh;">
             <table class="table table-sm align-middle">
               <thead>

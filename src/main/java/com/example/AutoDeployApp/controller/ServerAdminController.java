@@ -74,12 +74,33 @@ public class ServerAdminController {
             }
             connected.add(s.getId());
             session.setAttribute("CONNECTED_SERVERS", connected);
+
+            // Lưu mật khẩu plaintext vào session cache để dùng cho SSH tự động
+            Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
+            java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
+            if (pwAttr instanceof java.util.Map<?, ?> map) {
+                for (var e : map.entrySet()) {
+                    Long key = null;
+                    if (e.getKey() instanceof Number n)
+                        key = n.longValue();
+                    else if (e.getKey() instanceof String str)
+                        try {
+                            key = Long.parseLong(str);
+                        } catch (Exception ignored) {
+                        }
+                    if (key != null && e.getValue() instanceof String sv)
+                        pwCache.put(key, sv);
+                }
+            }
+            pwCache.put(s.getId(), password != null ? password : "");
+            session.setAttribute("SERVER_PW_CACHE", pwCache);
         }
         return ResponseEntity.ok(Map.of("id", s.getId()));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> update(@PathVariable Long id, @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
         String host = (String) body.get("host");
         Integer port = body.get("port") != null ? ((Number) body.get("port")).intValue() : null;
         String username = (String) body.get("username");
@@ -88,6 +109,30 @@ public class ServerAdminController {
         String statusStr = (String) body.get("status");
         Server.ServerRole role = roleStr != null ? Server.ServerRole.valueOf(roleStr) : null;
         Server.ServerStatus status = statusStr != null ? Server.ServerStatus.valueOf(statusStr) : null;
+        // Fallback: nếu không truyền mật khẩu, lấy từ session cache để cho phép sửa
+        // nhanh ở "Servers đang kết nối"
+        if (password == null || password.isBlank()) {
+            var session = request.getSession(false);
+            if (session != null) {
+                Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
+                if (pwAttr instanceof java.util.Map<?, ?> map) {
+                    for (var e : map.entrySet()) {
+                        Long key = null;
+                        if (e.getKey() instanceof Number n)
+                            key = n.longValue();
+                        else if (e.getKey() instanceof String str)
+                            try {
+                                key = Long.parseLong(str);
+                            } catch (Exception ignored) {
+                            }
+                        if (key != null && key.equals(id) && e.getValue() instanceof String sv) {
+                            password = sv;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         Server s = serverService.update(id, host, port, username, password, role, status);
         return ResponseEntity.ok(Map.of("id", s.getId()));
     }
@@ -110,30 +155,60 @@ public class ServerAdminController {
 
     @PostMapping("/check-status")
     public List<Map<String, Object>> checkStatusAll(HttpServletRequest request) {
-        var updated = serverService.checkAllStatuses(2000);
-
-        // Update session CONNECTED_SERVERS for current user (ONLINE only)
-        Long userId = null;
         var session = request.getSession();
+
+        // 1) Ping tất cả server trong DB để cập nhật ONLINE/OFFLINE
+        var allUpdated = serverService.checkAllStatuses(2000);
+
+        // Xây map mật khẩu từ session cache
+        java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
+        Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
+        if (pwAttr instanceof java.util.Map<?, ?> map) {
+            for (var e : map.entrySet()) {
+                Long key = null;
+                if (e.getKey() instanceof Number n)
+                    key = n.longValue();
+                else if (e.getKey() instanceof String str)
+                    try {
+                        key = Long.parseLong(str);
+                    } catch (Exception ignored) {
+                    }
+                if (key != null && e.getValue() instanceof String sv)
+                    pwCache.put(key, sv);
+            }
+        }
+
+        // Lọc server theo user hiện tại
+        Long userId = null;
         Object uid = session.getAttribute("USER_ID");
         if (uid instanceof Long l)
             userId = l;
         else if (uid instanceof Number n)
             userId = n.longValue();
+        var userServers = (userId != null) ? serverService.findAllForUser(userId) : java.util.List.<Server>of();
+
+        // 2) CONNECTED_SERVERS chỉ gồm server ONLINE và SSH thành công (dùng mật khẩu
+        // trong session)
         java.util.LinkedHashSet<Long> connected = new java.util.LinkedHashSet<>();
-        if (userId != null) {
-            for (var s : updated) {
-                if (userId.equals(s.getAddedBy()) && s.getStatus() == Server.ServerStatus.ONLINE) {
-                    connected.add(s.getId());
+        for (var s : userServers) {
+            if (s.getStatus() == Server.ServerStatus.ONLINE) {
+                String pw = pwCache.get(s.getId());
+                if (pw != null && !pw.isBlank()) {
+                    boolean ok = serverService.testSsh(s.getHost(), s.getPort() != null ? s.getPort() : 22,
+                            s.getUsername(), pw, 3000);
+                    if (ok)
+                        connected.add(s.getId());
                 }
             }
         }
         session.setAttribute("CONNECTED_SERVERS", connected);
 
-        return updated.stream().map(s -> Map.<String, Object>of(
+        // Trả về danh sách trạng thái (có thể dùng UI để tham khảo)
+        return allUpdated.stream().map(s -> Map.<String, Object>of(
                 "id", s.getId(),
                 "host", s.getHost(),
-                "status", s.getStatus().name())).toList();
+                "status", s.getStatus().name()))
+                .toList();
     }
 
     @GetMapping("/connected")
@@ -181,6 +256,26 @@ public class ServerAdminController {
             }
             connected.add(s.getId());
             session.setAttribute("CONNECTED_SERVERS", connected);
+
+            // Lưu mật khẩu vào session cache khi đã SSH thành công
+            Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
+            java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
+            if (pwAttr instanceof java.util.Map<?, ?> map) {
+                for (var e : map.entrySet()) {
+                    Long key = null;
+                    if (e.getKey() instanceof Number n)
+                        key = n.longValue();
+                    else if (e.getKey() instanceof String str)
+                        try {
+                            key = Long.parseLong(str);
+                        } catch (Exception ignored) {
+                        }
+                    if (key != null && e.getValue() instanceof String sv)
+                        pwCache.put(key, sv);
+                }
+            }
+            pwCache.put(s.getId(), password != null ? password : "");
+            session.setAttribute("SERVER_PW_CACHE", pwCache);
         }
         return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name()));
     }

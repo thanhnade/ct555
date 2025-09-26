@@ -12,4 +12,9 @@ public interface ServerRepository extends JpaRepository<Server, Long> {
     List<Server> findByAddedBy(Long addedBy);
 
     Optional<Server> findByHostAndUsernameAndAddedBy(String host, String username, Long addedBy);
+
+    boolean existsByHostAndPortAndUsernameAndAddedBy(String host, Integer port, String username, Long addedBy);
+
+    boolean existsByHostAndPortAndUsernameAndAddedByAndIdNot(String host, Integer port, String username, Long addedBy,
+            Long id);
 }

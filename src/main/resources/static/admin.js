@@ -1,13 +1,26 @@
 async function fetchJSON(url, options){
   const res = await fetch(url, Object.assign({headers:{'Content-Type':'application/json'}}, options||{}));
   if(!res.ok){
+    const cloned = res.clone();
     let msg = 'HTTP '+res.status;
     try {
       const data = await res.json();
       if(typeof data === 'string') msg = data; else if(data.message) msg = data.message; else msg = JSON.stringify(data);
     } catch(e){
-      const text = await res.text();
+      const text = await cloned.text().catch(()=> '');
       msg = text || msg;
+    }
+    // Fallback tiếng Việt nếu không có thông điệp rõ ràng
+    const vi = {
+      400: 'Yêu cầu không hợp lệ',
+      401: 'Chưa đăng nhập',
+      403: 'Không có quyền truy cập',
+      404: 'Không tìm thấy tài nguyên',
+      409: 'Xung đột dữ liệu',
+      500: 'Lỗi máy chủ nội bộ'
+    };
+    if(!msg || msg === ('HTTP '+res.status) || msg.startsWith('{') || msg.startsWith('[')){
+      msg = vi[res.status] || ('Lỗi ('+res.status+')');
     }
     throw new Error(msg);
   }
@@ -130,14 +143,33 @@ async function saveServer(id){
   const role = document.querySelector(`select[data-id="${id}"][data-field="role"]`).value;
   const status = document.querySelector(`select[data-id="${id}"][data-field="status"]`).value;
   const body = {host, port, username, role, status};
-  await fetchJSON(`/admin/servers/${id}`, {method:'PUT', body: JSON.stringify(body)});
-  loadServers();
+  const msg = document.getElementById('server-save-msg');
+  try {
+    await fetchJSON(`/admin/servers/${id}`, {method:'PUT', body: JSON.stringify(body)});
+    msg.textContent = `Lưu máy ${id} thành công`;
+    msg.className = 'small mb-2 text-success';
+    msg.scrollIntoView({behavior:'smooth', block:'nearest'});
+    setTimeout(()=>{ if(msg) msg.textContent=''; }, 3000);
+    await loadServers();
+  } catch(e){
+    msg.textContent = e.message || `Lưu máy ${id} thất bại`;
+    msg.className = 'small mb-2 text-danger';
+    msg.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
 }
 
 async function deleteServer(id){
   if(!confirm('Xoá server này?')) return;
-  await fetch(`/admin/servers/${id}`, {method:'DELETE'});
-  loadServers();
+  const msg = document.getElementById('server-save-msg');
+  try{
+    await fetch(`/admin/servers/${id}`, {method:'DELETE'});
+    msg.textContent = `Đã xoá máy ${id}`;
+    msg.className = 'small mb-2 text-success';
+    await loadServers();
+  }catch(e){
+    msg.textContent = `Xoá máy ${id} thất bại`;
+    msg.className = 'small mb-2 text-danger';
+  }
 }
 
 async function createUser(ev){
