@@ -90,7 +90,8 @@ async function loadServers(){
       <td class="text-nowrap">
         <button class="btn btn-sm btn-primary me-1" onclick="saveServer(${s.id})">Lưu</button>
         <button class="btn btn-sm btn-danger me-1" onclick="deleteServer(${s.id})">Xoá</button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="promptReconnect(${s.id})">Kết nối lại</button>
+        <button class="btn btn-sm btn-outline-secondary me-1" onclick="promptReconnect(${s.id})">Kết nối lại</button>
+        ${connectedIds.includes(s.id) ? `<button class="btn btn-sm btn-dark" onclick="openTerminal(${s.id}, true)">CLI</button>` : ''}
       </td>
     `;
     if(connectedIds.includes(s.id)) tbodyConn.appendChild(tr); else tbodyHist.appendChild(tr);
@@ -276,6 +277,118 @@ document.addEventListener('DOMContentLoaded', () => {
         btnCheck.disabled = false; btnCheck.textContent = 'Kiểm tra trạng thái';
       }
     });
+  }
+});
+
+// ================= Web Terminal =================
+let termWS = null;
+let termInfo = {host:'', port:22, username:'', id:null};
+let term = null; // xterm instance
+
+function ensureXTerm(){
+  if(term) return term;
+  const container = document.getElementById('term-output');
+  if(!container) return null;
+  term = new window.Terminal({
+    fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    fontSize: 13,
+    theme: { background: '#0b1020' },
+    cursorBlink: true,
+    convertEol: true,
+  });
+  term.open(container);
+  return term;
+}
+
+function appendTerm(text){
+  const t = ensureXTerm();
+  if(!t) return;
+  t.write(text);
+}
+
+function connectTerminal(){
+  if(termWS && termWS.readyState === WebSocket.OPEN) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  termWS = new WebSocket(proto + '://' + location.host + '/ws/terminal');
+  termWS.onopen = () => {
+    appendTerm('[client] Connected, opening SSH...\n');
+    // If password field exists we can send password login, else require auto via session
+    const passEl = document.getElementById('term-pass');
+    if(passEl){
+      const pass = passEl.value || '';
+      termWS.send(JSON.stringify({host: termInfo.host, port: termInfo.port, username: termInfo.username, password: pass}));
+    } else {
+      termWS.send(JSON.stringify({host: termInfo.host, port: termInfo.port, username: termInfo.username, serverId: termInfo.id}));
+    }
+  };
+  termWS.onmessage = (e) => appendTerm(e.data);
+  termWS.onclose = () => appendTerm('\n[client] Disconnected.\n');
+  termWS.onerror = () => appendTerm('\n[client] Error.\n');
+}
+
+function connectTerminalAuto(){
+  if(termWS && termWS.readyState === WebSocket.OPEN) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  termWS = new WebSocket(proto + '://' + location.host + '/ws/terminal');
+  termWS.onopen = () => {
+    appendTerm('[client] Connected, opening SSH (auto) ...\n');
+    termWS.send(JSON.stringify({host: termInfo.host, port: termInfo.port, username: termInfo.username, serverId: termInfo.id}));
+  };
+  termWS.onmessage = (e) => appendTerm(e.data);
+  termWS.onclose = () => appendTerm('\n[client] Disconnected.\n');
+  termWS.onerror = () => appendTerm('\n[client] Error.\n');
+}
+
+function openTerminal(id, isConnected){
+  // Get current values from row inputs
+  const host = document.querySelector(`input[data-id="${id}"][data-field="host"]`)?.value.trim();
+  const port = parseInt(document.querySelector(`input[data-id="${id}"][data-field="port"]`)?.value || '22', 10);
+  const username = document.querySelector(`input[data-id="${id}"][data-field="username"]`)?.value.trim();
+  termInfo = {host, port, username, id};
+  document.getElementById('term-host').value = host || '';
+  document.getElementById('term-port').value = isNaN(port)?'':String(port);
+  document.getElementById('term-user').value = username || '';
+  document.getElementById('term-pass').value = '';
+  const title = document.getElementById('terminal-title');
+  if(title) title.textContent = `${host || ''}:${port || ''} (${username || ''})`;
+  const out = document.getElementById('term-output');
+  if(out){ out.innerHTML = ''; }
+  if(term){ try { term.dispose(); } catch(_){} term = null; }
+  const modal = new bootstrap.Modal(document.getElementById('terminalModal'));
+  modal.show();
+  if(isConnected){
+    setTimeout(() => connectTerminalAuto(), 200);
+  }
+}
+
+document.addEventListener('submit', (e) => {
+  const f = e.target;
+  if(f && f.id === 'term-input-form'){
+    e.preventDefault();
+    const inp = document.getElementById('term-input');
+    const val = inp.value;
+    if(val && termWS && termWS.readyState === WebSocket.OPEN){
+      termWS.send(val.endsWith('\n') ? val : (val + '\n'));
+    } else if(val && term) {
+      // echo locally if not connected
+      term.write(val + '\r\n');
+    }
+    inp.value = '';
+  }
+});
+
+document.addEventListener('hidden.bs.modal', (e) => {
+  if(e.target && e.target.id === 'terminalModal'){
+    try { termWS?.close(); } catch(_){}
+    termWS = null;
+  }
+});
+
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if(t && t.id === 'term-connect-btn'){
+    e.preventDefault();
+    connectTerminal();
   }
 });
 

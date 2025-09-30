@@ -6,6 +6,7 @@
   <title>Trang quản trị</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
   <link href="/login.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
   <style>
     .table-fixed thead th { position: sticky; top: 0; background: #fff; }
   </style>
@@ -152,7 +153,7 @@
         </div>
       </div>
 
-      <p class="mt-3"><a href="/auth/logout" class="btn btn-link p-0">Đăng xuất</a></p>
+      
     </div>
   </div>
 
@@ -239,7 +240,38 @@
         </div>
       </div>
 
-      
+      <!-- Terminal Modal -->
+      <div class="modal fade" id="terminalModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Terminal - <span id="terminal-title">Server</span></h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="row g-2 mb-2">
+                <div class="col-12 col-md-3"><input id="term-host" class="form-control form-control-sm" placeholder="Host" readonly></div>
+                <div class="col-6 col-md-2"><input id="term-port" type="number" class="form-control form-control-sm" placeholder="Port" readonly></div>
+                <div class="col-6 col-md-3"><input id="term-user" class="form-control form-control-sm" placeholder="Username" readonly></div>
+                <div class="col-12 col-md-4"><input id="term-pass" type="password" class="form-control form-control-sm" placeholder="Password (nhập khi cần)"></div>
+              </div>
+              <div id="term-output" class="p-2" style="background:#0b1020;color:#e5e7eb;overflow:hidden;border:1px solid #dee2e6;border-radius:.5rem;margin:0;"></div>
+            </div>
+            <div class="modal-footer">
+              <button id="term-connect-btn" type="button" class="btn btn-success me-2">Kết nối</button>
+              <form id="term-input-form" class="flex-grow-1">
+                <div class="input-group">
+                  <input id="term-input" class="form-control" placeholder="Nhập lệnh và Enter để gửi">
+                  <button class="btn btn-primary" type="submit">Gửi</button>
+                </div>
+              </form>
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- End Terminal Modal -->
+
     </div>
   </div>
 
@@ -291,7 +323,8 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
-  <script src="/admin.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="/admin.js?v=3"></script>
 </body>
 </html>
 
