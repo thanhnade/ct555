@@ -37,6 +37,10 @@ public class Server {
     @Column(nullable = false, length = 16)
     private ServerRole role = ServerRole.WORKER;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cluster_id")
+    private Cluster cluster;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private ServerStatus status = ServerStatus.OFFLINE;
@@ -94,6 +98,14 @@ public class Server {
 
     public void setRole(ServerRole role) {
         this.role = role;
+    }
+
+    public Cluster getCluster() {
+        return cluster;
+    }
+
+    public void setCluster(Cluster cluster) {
+        this.cluster = cluster;
     }
 
     public ServerStatus getStatus() {

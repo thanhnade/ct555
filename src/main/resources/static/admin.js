@@ -58,8 +58,16 @@ async function loadUsers(){
 // Server Management
 async function loadServers(){
   const data = await fetchJSON('/admin/servers');
+  const clusters = await fetchJSON('/admin/clusters').catch(() => []);
   let connectedIds = [];
   try { connectedIds = await fetchJSON('/admin/servers/connected'); } catch(e) { connectedIds = []; }
+
+  // Populate cluster list in create-server form
+  const createFormClusterSel = document.querySelector('#create-server-form select[name="clusterId"]');
+  if(createFormClusterSel){
+    createFormClusterSel.innerHTML = '<option value="">-- Cluster --</option>' +
+      (clusters||[]).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  }
 
   const tbodyConn = document.getElementById('servers-connected-tbody');
   const tbodyHist = document.getElementById('servers-history-tbody');
@@ -69,11 +77,28 @@ async function loadServers(){
 
   (data || []).forEach(s => {
     const tr = document.createElement('tr');
+    const isConnected = connectedIds.includes(s.id);
+    const statusCell = isConnected
+      ? `<span class="badge bg-success">CONNECTED</span>`
+      : `
+        <select class="form-select form-select-sm" data-id="${s.id}" data-field="status">
+          <option ${s.status==='OFFLINE'?'selected':''}>OFFLINE</option>
+          <option ${s.status==='ONLINE'?'selected':''}>ONLINE</option>
+        </select>`;
+    const reconnectOrDisconnect = isConnected
+      ? `<button class="btn btn-sm btn-outline-danger me-1" onclick="disconnectServer(${s.id})">Ngắt kết nối</button>`
+      : `<button class="btn btn-sm btn-outline-secondary me-1" onclick="promptReconnect(${s.id})">Kết nối lại</button>`;
     tr.innerHTML = `
       <td>${s.id}</td>
       <td><input class="form-control form-control-sm" value="${s.host}" data-id="${s.id}" data-field="host" /></td>
       <td><input type="number" class="form-control form-control-sm" value="${s.port}" data-id="${s.id}" data-field="port" /></td>
       <td><input class="form-control form-control-sm" value="${s.username}" data-id="${s.id}" data-field="username" /></td>
+      <td>
+        <select class="form-select form-select-sm" data-id="${s.id}" data-field="clusterId">
+          <option value="">--</option>
+          ${(clusters||[]).map(c => `<option value="${c.id}" ${s.clusterId===c.id?'selected':''}>${c.name}</option>`).join('')}
+        </select>
+      </td>
       <td>
         <select class="form-select form-select-sm" data-id="${s.id}" data-field="role">
           <option ${s.role==='WORKER'?'selected':''}>WORKER</option>
@@ -81,21 +106,234 @@ async function loadServers(){
           <option ${s.role==='STANDALONE'?'selected':''}>STANDALONE</option>
         </select>
       </td>
-      <td>
-        <select class="form-select form-select-sm" data-id="${s.id}" data-field="status">
-          <option ${s.status==='OFFLINE'?'selected':''}>OFFLINE</option>
-          <option ${s.status==='ONLINE'?'selected':''}>ONLINE</option>
-        </select>
-      </td>
+      <td>${statusCell}</td>
       <td class="text-nowrap">
         <button class="btn btn-sm btn-primary me-1" onclick="saveServer(${s.id})">Lưu</button>
         <button class="btn btn-sm btn-danger me-1" onclick="deleteServer(${s.id})">Xoá</button>
-        <button class="btn btn-sm btn-outline-secondary me-1" onclick="promptReconnect(${s.id})">Kết nối lại</button>
-        ${connectedIds.includes(s.id) ? `<button class="btn btn-sm btn-dark" onclick="openTerminal(${s.id}, true)">CLI</button>` : ''}
+        ${reconnectOrDisconnect}
+        ${isConnected ? `<button class="btn btn-sm btn-dark" onclick="openTerminal(${s.id}, true)">CLI</button>` : ''}
       </td>
     `;
-    if(connectedIds.includes(s.id)) tbodyConn.appendChild(tr); else tbodyHist.appendChild(tr);
+    if(isConnected) tbodyConn.appendChild(tr); else tbodyHist.appendChild(tr);
   });
+}
+
+// ================= Kubernetes Cluster UI =================
+async function loadClustersAndServers(){
+  const [clusters, servers] = await Promise.all([
+    fetchJSON('/admin/clusters').catch(()=>[]),
+    fetchJSON('/admin/servers').catch(()=>[]),
+  ]);
+  // Fill cluster select
+  const sel = document.getElementById('k8s-cluster-select');
+  if(sel){
+    sel.innerHTML = '';
+    (clusters||[]).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = `${c.name}`;
+      sel.appendChild(opt);
+    });
+  }
+  // Render servers table
+  const tbody = document.getElementById('k8s-servers-tbody');
+  if(tbody){
+    tbody.innerHTML = '';
+    (servers||[]).forEach(s => {
+      const cName = (clusters||[]).find(c => Number(c.id) === Number(s.clusterId))?.name || '';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="checkbox" class="k8s-sel" value="${s.id}"></td>
+        <td>${s.id}</td>
+        <td>${s.host}</td>
+        <td>${s.port}</td>
+        <td>${s.username}</td>
+        <td>${cName}</td>
+        <td>${s.status}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+  const chkAll = document.getElementById('k8s-check-all');
+  if(chkAll){
+    chkAll.checked = false;
+    chkAll.addEventListener('change', () => {
+      document.querySelectorAll('#k8s-servers-tbody .k8s-sel').forEach(el => { el.checked = chkAll.checked; });
+    }, { once: true });
+  }
+}
+
+async function loadClusterList(){
+  const clusters = await fetchJSON('/admin/clusters').catch(()=>[]);
+  const tbody = document.getElementById('clusters-tbody');
+  if(!tbody) return;
+  const search = (document.getElementById('cluster-search')?.value || '').toLowerCase();
+  const statusFilter = document.getElementById('cluster-status-filter')?.value || '';
+  tbody.innerHTML = '';
+  (clusters||[])
+    .filter(c => (!search || String(c.name||'').toLowerCase().includes(search))
+              && (!statusFilter || String(c.status||'') === statusFilter))
+    .forEach(c => {
+      const badge = c.status==='HEALTHY' ? 'success' : (c.status==='WARNING' ? 'warning text-dark' : 'danger');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${c.id}</td>
+        <td>${c.name || ''}</td>
+        <td>${c.masterNode || ''}</td>
+        <td>${c.workerCount ?? 0}</td>
+        <td><span class="badge bg-${badge}">${c.status || ''}</span></td>
+        <td class="text-nowrap">
+          <button class="btn btn-sm btn-primary cluster-view-btn" data-id="${c.id}">View</button>
+          <button class="btn btn-sm btn-outline-danger cluster-delete-btn" data-id="${c.id}">Delete</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  // bind search/filter
+  const searchEl = document.getElementById('cluster-search');
+  const filterEl = document.getElementById('cluster-status-filter');
+  if(searchEl && !searchEl.dataset.bound){ searchEl.dataset.bound='1'; searchEl.addEventListener('input', loadClusterList); }
+  if(filterEl && !filterEl.dataset.bound){ filterEl.dataset.bound='1'; filterEl.addEventListener('change', loadClusterList); }
+}
+
+async function showClusterDetail(clusterId){
+  // toggle sections
+  document.getElementById('k8s-list')?.classList.add('d-none');
+  document.getElementById('k8s-create')?.classList.add('d-none');
+  document.getElementById('k8s-assign')?.classList.add('d-none');
+  document.getElementById('k8s-detail')?.classList.remove('d-none');
+
+  const detail = await fetchJSON(`/admin/clusters/${clusterId}/detail`).catch(()=>null);
+  if(!detail){
+    const msg = document.getElementById('cd-msg');
+    if(msg){ msg.textContent = 'Không tải được chi tiết cluster'; msg.className='small text-danger'; }
+    return;
+  }
+  document.getElementById('cd-name').textContent = detail.name || '';
+  document.getElementById('cd-master').textContent = detail.masterNode || '';
+  document.getElementById('cd-workers').textContent = detail.workerCount ?? 0;
+  document.getElementById('cd-status').textContent = detail.status || '';
+  document.getElementById('cd-version').textContent = detail.version || '';
+
+  const tbody = document.getElementById('cd-nodes-tbody');
+  tbody.innerHTML = '';
+  (detail.nodes||[]).forEach(n => {
+    const statusBadge = n.status==='ONLINE'||n.status==='Ready' ? 'success' : (n.status==='WARNING'||n.status==='NotReady' ? 'warning text-dark' : 'danger');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${n.ip}</td>
+      <td>${n.role}</td>
+      <td><span class="badge bg-${statusBadge}">${n.status}</span></td>
+      <td>${n.cpu || '-'}</td>
+      <td>${n.ram || '-'}</td>
+      <td>${n.disk || '-'}</td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">Delete</button>
+        <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">Retry</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  const backBtn = document.getElementById('cd-back');
+  if(backBtn && !backBtn.dataset.bound){
+    backBtn.dataset.bound='1';
+    backBtn.addEventListener('click', async () => {
+      document.getElementById('k8s-detail')?.classList.add('d-none');
+      document.getElementById('k8s-list')?.classList.remove('d-none');
+      document.getElementById('k8s-create')?.classList.remove('d-none');
+      document.getElementById('k8s-assign')?.classList.remove('d-none');
+      await loadClusterList();
+    });
+  }
+}
+
+document.addEventListener('submit', async (e) => {
+  const f = e.target;
+  if(f && f.id === 'create-cluster-form'){
+    e.preventDefault();
+    const body = { name: f.name.value.trim(), description: f.description.value.trim() || null };
+    const msg = document.getElementById('cluster-msg');
+    try{
+      await fetchJSON('/admin/clusters', { method: 'POST', body: JSON.stringify(body) });
+      msg.textContent = 'Đã tạo cluster'; msg.className = 'mt-2 small text-success';
+      f.reset();
+      await loadClustersAndServers();
+    }catch(err){
+      msg.textContent = err.message || 'Tạo cluster thất bại'; msg.className = 'mt-2 small text-danger';
+    }
+  }
+});
+
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  if(t && t.id === 'btn-assign-selected'){
+    e.preventDefault();
+    const clusterSel = document.getElementById('k8s-cluster-select');
+    const clusterId = clusterSel && clusterSel.value ? parseInt(clusterSel.value, 10) : null;
+    const ids = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value,10));
+    const msg = document.getElementById('k8s-assign-msg');
+    if(!ids.length){ if(msg){ msg.textContent='Vui lòng chọn máy chủ'; msg.className='mt-2 small text-danger'; } return; }
+    if(!clusterId){ if(msg){ msg.textContent='Vui lòng chọn cluster'; msg.className='mt-2 small text-danger'; } return; }
+    const btn = t; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Đang gán...';
+    try{
+      await bulkAssignServers(ids, clusterId);
+      if(msg){ msg.textContent = `Đã gán ${ids.length} máy vào cluster`; msg.className='mt-2 small text-success'; }
+      await loadClustersAndServers();
+    }catch(err){
+      if(msg){ msg.textContent = err.message || 'Gán thất bại'; msg.className='mt-2 small text-danger'; }
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+  if(t && t.id === 'btn-remove-selected'){
+    e.preventDefault();
+    const ids = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value,10));
+    const msg = document.getElementById('k8s-assign-msg');
+    if(!ids.length){ if(msg){ msg.textContent='Vui lòng chọn máy chủ'; msg.className='mt-2 small text-danger'; } return; }
+    const btn = t; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Đang bỏ...';
+    try{
+      // use sentinel -1 to indicate clear on backend
+      await bulkAssignServers(ids, -1);
+      if(msg){ msg.textContent = `Đã bỏ ${ids.length} máy khỏi cluster`; msg.className='mt-2 small text-success'; }
+      await loadClustersAndServers();
+    }catch(err){
+      if(msg){ msg.textContent = err.message || 'Bỏ khỏi cluster thất bại'; msg.className='mt-2 small text-danger'; }
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+  if(t && t.classList.contains('cluster-delete-btn')){
+    e.preventDefault();
+    const id = parseInt(t.getAttribute('data-id'), 10);
+    if(isNaN(id)) return;
+    if(!confirm('Xoá cluster này? Các server sẽ được gỡ khỏi cluster.')) return;
+    const msg = document.getElementById('clusters-msg');
+    const btn = t; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Đang xoá...';
+    try{
+      await fetch(`/admin/clusters/${id}`, { method: 'DELETE' });
+      if(msg){ msg.textContent = 'Đã xoá cluster'; msg.className='small text-success'; }
+      await loadClusterList();
+    }catch(err){
+      if(msg){ msg.textContent = err.message || 'Xoá cluster thất bại'; msg.className='small text-danger'; }
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+  if(t && t.classList.contains('cluster-view-btn')){
+    e.preventDefault();
+    const id = parseInt(t.getAttribute('data-id'), 10);
+    if(isNaN(id)) return;
+    await showClusterDetail(id);
+  }
+});
+
+async function bulkAssignServers(ids, clusterId){
+  // naive sequential updates via existing API PUT /admin/servers/{id}
+  for(const id of ids){
+    const body = { clusterId: clusterId };
+    await fetchJSON(`/admin/servers/${id}`, { method:'PUT', body: JSON.stringify(body) }).catch(()=>{});
+  }
 }
 
 async function promptReconnect(id){
@@ -119,7 +357,8 @@ async function createServer(ev){
     port: parseInt(f.port.value, 10),
     username: f.username.value.trim(),
     password: f.password.value,
-    role: f.role.value
+    role: f.role.value,
+    clusterId: (f.clusterId && f.clusterId.value) ? parseInt(f.clusterId.value, 10) : null
   };
   const btn = f.querySelector('button[type="submit"]');
   try {
@@ -141,9 +380,12 @@ async function saveServer(id){
   const host = document.querySelector(`input[data-id="${id}"][data-field="host"]`).value.trim();
   const port = parseInt(document.querySelector(`input[data-id="${id}"][data-field="port"]`).value, 10);
   const username = document.querySelector(`input[data-id="${id}"][data-field="username"]`).value.trim();
+  const clusterSel = document.querySelector(`select[data-id="${id}"][data-field="clusterId"]`);
+  const clusterId = clusterSel && clusterSel.value ? parseInt(clusterSel.value, 10) : null;
   const role = document.querySelector(`select[data-id="${id}"][data-field="role"]`).value;
-  const status = document.querySelector(`select[data-id="${id}"][data-field="status"]`).value;
-  const body = {host, port, username, role, status};
+  const statusSel = document.querySelector(`select[data-id="${id}"][data-field="status"]`);
+  const body = {host, port, username, role, clusterId};
+  if(statusSel){ body.status = statusSel.value; }
   const msg = document.getElementById('server-save-msg');
   try {
     await fetchJSON(`/admin/servers/${id}`, {method:'PUT', body: JSON.stringify(body)});
@@ -169,6 +411,19 @@ async function deleteServer(id){
     await loadServers();
   }catch(e){
     msg.textContent = `Xoá máy ${id} thất bại`;
+    msg.className = 'small mb-2 text-danger';
+  }
+}
+
+async function disconnectServer(id){
+  const msg = document.getElementById('server-save-msg');
+  try{
+    await fetchJSON(`/admin/servers/${id}/disconnect`, { method: 'POST' });
+    msg.textContent = `Đã ngắt kết nối máy ${id}`;
+    msg.className = 'small mb-2 text-success';
+    await loadServers();
+  }catch(e){
+    msg.textContent = e.message || `Ngắt kết nối máy ${id} thất bại`;
     msg.className = 'small mb-2 text-danger';
   }
 }
@@ -245,6 +500,9 @@ document.addEventListener('DOMContentLoaded', () => {
         await fetchJSON('/admin/servers/check-status', {method:'POST'});
         await loadServers();
       }catch(_){ /* ignore */ }
+    }
+    if(key==='k8s'){
+      await Promise.all([loadClusterList(), loadClustersAndServers()]);
     }
   }
   document.querySelectorAll('.navbar .dropdown-menu a.dropdown-item, .navbar .nav-link').forEach(a => {

@@ -1,27 +1,36 @@
 <!doctype html>
 <html lang="vi">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Trang quản trị</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+    crossorigin="anonymous">
   <link href="/login.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
   <style>
-    .table-fixed thead th { position: sticky; top: 0; background: #fff; }
+    .table-fixed thead th {
+      position: sticky;
+      top: 0;
+      background: #fff;
+    }
   </style>
 </head>
+
 <body class="p-4">
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
     <div class="container-fluid">
       <a class="navbar-brand" href="#">Admin Dashboard</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#adminNav" aria-controls="adminNav" aria-expanded="false" aria-label="Toggle navigation">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#adminNav"
+        aria-controls="adminNav" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="adminNav">
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#user" role="button" data-bs-toggle="dropdown" aria-expanded="false">👤User Management</a>
+            <a class="nav-link dropdown-toggle" href="#user" role="button" data-bs-toggle="dropdown"
+              aria-expanded="false">👤User Management</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#user-list">Danh sách user</a></li>
               <li><a class="dropdown-item" href="#user-create">Thêm/Sửa/Xoá user</a></li>
@@ -29,15 +38,17 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#server" role="button" data-bs-toggle="dropdown" aria-expanded="false">🖥️Server Management</a>
+            <a class="nav-link dropdown-toggle" href="#server" role="button" data-bs-toggle="dropdown"
+              aria-expanded="false">🖥️Server Management</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#server-list">Danh sách server</a></li>
               <li><a class="dropdown-item" href="#server-crud">Thêm/Xoá server</a></li>
-              
+
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#k8s" role="button" data-bs-toggle="dropdown" aria-expanded="false">☸️Kubernetes Cluster</a>
+            <a class="nav-link dropdown-toggle" href="#k8s" role="button" data-bs-toggle="dropdown"
+              aria-expanded="false">☸️Kubernetes Cluster</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#k8s-create">Tạo cluster</a></li>
               <li><a class="dropdown-item" href="#k8s-status">Xem trạng thái cluster</a></li>
@@ -46,7 +57,8 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#service" role="button" data-bs-toggle="dropdown" aria-expanded="false">⚙️Service Management</a>
+            <a class="nav-link dropdown-toggle" href="#service" role="button" data-bs-toggle="dropdown"
+              aria-expanded="false">⚙️Service Management</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#svc-list">Danh sách dịch vụ</a></li>
               <li><a class="dropdown-item" href="#svc-actions">Start/Stop/Restart</a></li>
@@ -54,7 +66,8 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#app" role="button" data-bs-toggle="dropdown" aria-expanded="false">📦App Deployment</a>
+            <a class="nav-link dropdown-toggle" href="#app" role="button" data-bs-toggle="dropdown"
+              aria-expanded="false">📦App Deployment</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#app-list">Danh sách app</a></li>
               <li><a class="dropdown-item" href="#app-deploy">Triển khai app</a></li>
@@ -62,7 +75,8 @@
             </ul>
           </li>
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#monitor" role="button" data-bs-toggle="dropdown" aria-expanded="false">📊Monitoring & Logs</a>
+            <a class="nav-link dropdown-toggle" href="#monitor" role="button" data-bs-toggle="dropdown"
+              aria-expanded="false">📊Monitoring & Logs</a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="#sys-logs">Xem log hệ thống</a></li>
               <li><a class="dropdown-item" href="#cluster-resources">Xem tài nguyên cluster</a></li>
@@ -70,7 +84,6 @@
           </li>
         </ul>
         <div class="d-flex align-items-center gap-2">
-          <span class="navbar-text">Hi, <strong th:text="${username}">Admin</strong></span>
           <a href="/auth/logout" class="btn btn-sm btn-outline-light">Đăng xuất</a>
         </div>
       </div>
@@ -153,7 +166,7 @@
         </div>
       </div>
 
-      
+
     </div>
   </div>
 
@@ -186,6 +199,11 @@
                 <option value="STANDALONE">STANDALONE</option>
               </select>
             </div>
+            <div class="col-12 col-md-2">
+              <select class="form-select" name="clusterId" title="Cluster">
+                <option value="">-- Cluster --</option>
+              </select>
+            </div>
             <div class="col-12">
               <button class="btn btn-success" type="submit">Thêm máy chủ</button>
             </div>
@@ -211,6 +229,7 @@
                   <th>Host</th>
                   <th>Port</th>
                   <th>Username</th>
+                  <th>Cluster</th>
                   <th>Role</th>
                   <th>Status</th>
                   <th>Hành động</th>
@@ -229,6 +248,7 @@
                   <th>Host</th>
                   <th>Port</th>
                   <th>Username</th>
+                  <th>Cluster</th>
                   <th>Role</th>
                   <th>Status</th>
                   <th>Hành động</th>
@@ -250,12 +270,18 @@
             </div>
             <div class="modal-body">
               <div class="row g-2 mb-2">
-                <div class="col-12 col-md-3"><input id="term-host" class="form-control form-control-sm" placeholder="Host" readonly></div>
-                <div class="col-6 col-md-2"><input id="term-port" type="number" class="form-control form-control-sm" placeholder="Port" readonly></div>
-                <div class="col-6 col-md-3"><input id="term-user" class="form-control form-control-sm" placeholder="Username" readonly></div>
-                <div class="col-12 col-md-4"><input id="term-pass" type="password" class="form-control form-control-sm" placeholder="Password (nhập khi cần)"></div>
+                <div class="col-12 col-md-3"><input id="term-host" class="form-control form-control-sm"
+                    placeholder="Host" readonly></div>
+                <div class="col-6 col-md-2"><input id="term-port" type="number" class="form-control form-control-sm"
+                    placeholder="Port" readonly></div>
+                <div class="col-6 col-md-3"><input id="term-user" class="form-control form-control-sm"
+                    placeholder="Username" readonly></div>
+                <div class="col-12 col-md-4"><input id="term-pass" type="password" class="form-control form-control-sm"
+                    placeholder="Password (nhập khi cần)"></div>
               </div>
-              <div id="term-output" class="p-2" style="background:#0b1020;color:#e5e7eb;overflow:hidden;border:1px solid #dee2e6;border-radius:.5rem;margin:0;"></div>
+              <div id="term-output" class="p-2"
+                style="background:#0b1020;color:#e5e7eb;overflow:hidden;border:1px solid #dee2e6;border-radius:.5rem;margin:0;">
+              </div>
             </div>
             <div class="modal-footer">
               <button id="term-connect-btn" type="button" class="btn btn-success me-2">Kết nối</button>
@@ -281,10 +307,122 @@
         <h1 class="m-0">Kubernetes Cluster</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
-      <div class="card mb-3" id="k8s-create"><div class="card-body">Tạo cluster (đang cập nhật)</div></div>
-      <div class="card mb-3" id="k8s-status"><div class="card-body">Xem trạng thái cluster (đang cập nhật)</div></div>
-      <div class="card mb-3" id="k8s-add-node"><div class="card-body">Thêm node (đang cập nhật)</div></div>
-      <div class="card mb-3" id="k8s-delete"><div class="card-body">Xoá cluster (đang cập nhật)</div></div>
+      <div class="card mb-3" id="k8s-list">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h2 class="h6 m-0">Danh sách Cluster</h2>
+            <div class="d-flex align-items-center gap-2">
+              <input id="cluster-search" class="form-control form-control-sm" placeholder="Tìm theo tên...">
+              <select id="cluster-status-filter" class="form-select form-select-sm">
+                <option value="">Tất cả trạng thái</option>
+                <option value="HEALTHY">Healthy</option>
+                <option value="WARNING">Warning</option>
+                <option value="ERROR">Error</option>
+              </select>
+            </div>
+          </div>
+          <div id="clusters-msg" class="small mb-2" aria-live="polite"></div>
+          <div class="table-responsive table-fixed" style="max-height: 50vh;">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Cluster Name</th>
+                  <th>Master Node</th>
+                  <th>Số Worker</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="clusters-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="card mb-3" id="k8s-create">
+        <div class="card-body">
+          <h2 class="h6">Tạo Cluster</h2>
+          <form id="create-cluster-form" class="row g-2 mt-2">
+            <div class="col-12 col-md-3"><input class="form-control" name="name" placeholder="Tên cluster" required>
+            </div>
+            <div class="col-12 col-md-6"><input class="form-control" name="description" placeholder="Mô tả (tuỳ chọn)">
+            </div>
+            <div class="col-12 col-md-3"><button class="btn btn-success w-100" type="submit">Tạo</button></div>
+          </form>
+          <div id="cluster-msg" class="mt-2 small"></div>
+        </div>
+      </div>
+
+      <div class="card mb-3" id="k8s-assign">
+        <div class="card-body">
+          <h2 class="h6">Gán máy chủ vào Cluster</h2>
+          <div class="row g-2 align-items-end mb-2">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Chọn Cluster</label>
+              <select class="form-select" id="k8s-cluster-select"></select>
+            </div>
+            <div class="col-12 col-md-8 text-md-end">
+              <button class="btn btn-primary me-2" id="btn-assign-selected">Gán vào Cluster</button>
+              <button class="btn btn-outline-danger" id="btn-remove-selected">Bỏ khỏi Cluster</button>
+            </div>
+          </div>
+          <div id="k8s-assign-msg" class="mt-2 small" aria-live="polite"></div>
+          <div class="table-responsive" style="max-height: 60vh;">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th style="width:36px;"><input type="checkbox" id="k8s-check-all"></th>
+                  <th>ID</th>
+                  <th>Host</th>
+                  <th>Port</th>
+                  <th>Username</th>
+                  <th>Cluster</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="k8s-servers-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3 d-none" id="k8s-detail">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h2 class="h6 m-0">Chi tiết Cluster: <span id="cd-name"></span></h2>
+            <button class="btn btn-sm btn-outline-secondary" id="cd-back">Quay lại danh sách</button>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-md-3"><div class="form-control">Master: <strong id="cd-master"></strong></div></div>
+            <div class="col-6 col-md-2"><div class="form-control">Workers: <strong id="cd-workers"></strong></div></div>
+            <div class="col-6 col-md-2"><div class="form-control">Status: <strong id="cd-status"></strong></div></div>
+            <div class="col-12 col-md-5"><div class="form-control">K8s Version: <strong id="cd-version"></strong></div></div>
+          </div>
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h3 class="h6 m-0">Nodes</h3>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-success" id="cd-add-node">Thêm Node</button>
+            </div>
+          </div>
+          <div id="cd-msg" class="small mb-2" aria-live="polite"></div>
+          <div class="table-responsive" style="max-height: 50vh;">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Node IP</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>CPU</th>
+                  <th>RAM</th>
+                  <th>Disk</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="cd-nodes-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -294,9 +432,15 @@
         <h1 class="m-0">Service Management</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
-      <div class="card mb-3" id="svc-list"><div class="card-body">Danh sách dịch vụ (đang cập nhật)</div></div>
-      <div class="card mb-3" id="svc-actions"><div class="card-body">Start/Stop/Restart (đang cập nhật)</div></div>
-      <div class="card mb-3" id="svc-logs"><div class="card-body">Xem log dịch vụ (đang cập nhật)</div></div>
+      <div class="card mb-3" id="svc-list">
+        <div class="card-body">Danh sách dịch vụ (đang cập nhật)</div>
+      </div>
+      <div class="card mb-3" id="svc-actions">
+        <div class="card-body">Start/Stop/Restart (đang cập nhật)</div>
+      </div>
+      <div class="card mb-3" id="svc-logs">
+        <div class="card-body">Xem log dịch vụ (đang cập nhật)</div>
+      </div>
     </div>
   </div>
 
@@ -306,9 +450,15 @@
         <h1 class="m-0">App Deployment</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
-      <div class="card mb-3" id="app-list"><div class="card-body">Danh sách app (đang cập nhật)</div></div>
-      <div class="card mb-3" id="app-deploy"><div class="card-body">Triển khai app (đang cập nhật)</div></div>
-      <div class="card mb-3" id="app-ns"><div class="card-body">Quản lý namespace/quota (đang cập nhật)</div></div>
+      <div class="card mb-3" id="app-list">
+        <div class="card-body">Danh sách app (đang cập nhật)</div>
+      </div>
+      <div class="card mb-3" id="app-deploy">
+        <div class="card-body">Triển khai app (đang cập nhật)</div>
+      </div>
+      <div class="card mb-3" id="app-ns">
+        <div class="card-body">Quản lý namespace/quota (đang cập nhật)</div>
+      </div>
     </div>
   </div>
 
@@ -318,14 +468,18 @@
         <h1 class="m-0">Monitoring & Logs</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
-      <div class="card mb-3" id="sys-logs"><div class="card-body">Xem log hệ thống (đang cập nhật)</div></div>
-      <div class="card mb-3" id="cluster-resources"><div class="card-body">Xem tài nguyên cluster (đang cập nhật)</div></div>
+      <div class="card mb-3" id="sys-logs">
+        <div class="card-body">Xem log hệ thống (đang cập nhật)</div>
+      </div>
+      <div class="card mb-3" id="cluster-resources">
+        <div class="card-body">Xem tài nguyên cluster (đang cập nhật)</div>
+      </div>
     </div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script src="/admin.js?v=3"></script>
+  <script src="/admin.js?v=4"></script>
 </body>
+
 </html>
-
-

@@ -2,6 +2,8 @@ package com.example.AutoDeployApp.service;
 
 import com.example.AutoDeployApp.entity.Server;
 import com.example.AutoDeployApp.repository.ServerRepository;
+import com.example.AutoDeployApp.repository.ClusterRepository;
+import com.example.AutoDeployApp.entity.Cluster;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -17,19 +19,21 @@ public class ServerService {
 
     private final ServerRepository serverRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    private final ClusterRepository clusterRepository;
 
-    public ServerService(ServerRepository serverRepository) {
+    public ServerService(ServerRepository serverRepository, ClusterRepository clusterRepository) {
         this.serverRepository = serverRepository;
+        this.clusterRepository = clusterRepository;
     }
 
     public List<Server> findAll() {
-        return serverRepository.findAll();
+        return serverRepository.findAllWithCluster();
     }
 
     public List<Server> findAllForUser(Long userId) {
         if (userId == null)
             return List.of();
-        return serverRepository.findByAddedBy(userId);
+        return serverRepository.findByAddedByWithCluster(userId);
     }
 
     public Server findById(Long id) {
@@ -38,7 +42,7 @@ public class ServerService {
 
     @Transactional
     public Server create(String host, Integer port, String username, String rawPassword, Server.ServerRole role,
-            Long addedBy) {
+            Long addedBy, Long clusterId) {
         int resolvedPort = (port != null ? port : 22);
         boolean canSsh = testSsh(host, resolvedPort, username, rawPassword, 5000);
         if (!canSsh) {
@@ -58,13 +62,22 @@ public class ServerService {
             s.setRole(role);
         if (addedBy != null)
             s.setAddedBy(addedBy);
+        if (clusterId != null) {
+            Cluster c = clusterRepository.findById(clusterId).orElse(null);
+            // Nếu không tìm thấy cluster, để null (bỏ qua)
+            if (c != null) {
+                s.setCluster(c);
+            } else {
+                s.setCluster(null);
+            }
+        }
         s.setStatus(Server.ServerStatus.ONLINE);
         return serverRepository.saveAndFlush(s);
     }
 
     @Transactional
     public Server update(Long id, String host, Integer port, String username, String rawPassword,
-            Server.ServerRole role, Server.ServerStatus status) {
+            Server.ServerRole role, Server.ServerStatus status, Long clusterId) {
         Server s = serverRepository.findById(id).orElseThrow();
         Long addedBy = s.getAddedBy();
         if (host != null && !host.isBlank() && port != null && username != null && !username.isBlank()) {
@@ -98,6 +111,16 @@ public class ServerService {
         s.setPassword(passwordEncoder.encode(rawPassword));
         if (role != null)
             s.setRole(role);
+        if (clusterId != null) {
+            if (clusterId >= 0) {
+                // Nếu không tìm thấy cluster, coi như null (xoá liên kết)
+                Cluster c = clusterRepository.findById(clusterId).orElse(null);
+                s.setCluster(c);
+            } else {
+                // sentinel (<0) means clear cluster assignment
+                s.setCluster(null);
+            }
+        }
         // Set ONLINE due to successful validation; ignore manual status if provided
         s.setStatus(Server.ServerStatus.ONLINE);
         return serverRepository.saveAndFlush(s);
@@ -121,6 +144,43 @@ public class ServerService {
 
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * Execute a simple command over SSH and return stdout as string (may return
+     * null on failure).
+     */
+    public String execCommand(String host, int port, String username, String rawPassword, String command,
+            int timeoutMs) {
+        Session session = null;
+        com.jcraft.jsch.ChannelExec channel = null;
+        try {
+            JSch jsch = new JSch();
+            session = jsch.getSession(username, host, port);
+            session.setConfig("StrictHostKeyChecking", "no");
+            session.setPassword(rawPassword);
+            session.connect(timeoutMs);
+            channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
+            channel.setCommand(command);
+            java.io.InputStream in = channel.getInputStream();
+            channel.connect(timeoutMs);
+            byte[] buf = in.readAllBytes();
+            String out = new String(buf, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return out;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            try {
+                if (channel != null && channel.isConnected())
+                    channel.disconnect();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (session != null && session.isConnected())
+                    session.disconnect();
+            } catch (Exception ignored) {
+            }
         }
     }
 

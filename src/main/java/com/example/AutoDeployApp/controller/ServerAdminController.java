@@ -30,14 +30,19 @@ public class ServerAdminController {
             else if (uid instanceof Number n)
                 userId = n.longValue();
         }
-        return serverService.findAllForUser(userId).stream().map(s -> Map.<String, Object>of(
-                "id", s.getId(),
-                "host", java.util.Objects.toString(s.getHost(), ""),
-                "port", s.getPort() != null ? s.getPort() : 22,
-                "username", java.util.Objects.toString(s.getUsername(), ""),
-                "role", s.getRole() != null ? s.getRole().name() : "WORKER",
-                "status", s.getStatus() != null ? s.getStatus().name() : "OFFLINE"))
-                .toList();
+        return serverService.findAllForUser(userId).stream().map(s -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", s.getId());
+            m.put("host", java.util.Objects.toString(s.getHost(), ""));
+            m.put("port", s.getPort() != null ? s.getPort() : 22);
+            m.put("username", java.util.Objects.toString(s.getUsername(), ""));
+            m.put("role", s.getRole() != null ? s.getRole().name() : "WORKER");
+            m.put("status", s.getStatus() != null ? s.getStatus().name() : "OFFLINE");
+            if (s.getCluster() != null && s.getCluster().getId() != null) {
+                m.put("clusterId", s.getCluster().getId());
+            }
+            return m;
+        }).toList();
     }
 
     @PostMapping
@@ -47,7 +52,21 @@ public class ServerAdminController {
         String username = (String) body.get("username");
         String password = (String) body.get("password");
         String roleStr = (String) body.getOrDefault("role", "WORKER");
-        Server.ServerRole role = Server.ServerRole.valueOf(roleStr);
+        Server.ServerRole role;
+        try {
+            role = Server.ServerRole.valueOf(roleStr);
+        } catch (Exception ex) {
+            role = Server.ServerRole.WORKER; // fallback an toàn nếu client gửi sai
+        }
+        Long clusterId = null;
+        if (body.containsKey("clusterId")) {
+            Object v = body.get("clusterId");
+            if (v == null) {
+                clusterId = -1L; // sentinel: clear cluster
+            } else if (v instanceof Number n) {
+                clusterId = n.longValue();
+            }
+        }
         Long addedBy = null;
         if (request.getSession(false) != null) {
             Object uid = request.getSession(false).getAttribute("USER_ID");
@@ -56,7 +75,7 @@ public class ServerAdminController {
             else if (uid instanceof Number n)
                 addedBy = n.longValue();
         }
-        Server s = serverService.create(host, port, username, password, role, addedBy);
+        Server s = serverService.create(host, port, username, password, role, addedBy, clusterId);
         var session = request.getSession();
         synchronized (session) {
             Object attr = session.getAttribute("CONNECTED_SERVERS");
@@ -107,8 +126,24 @@ public class ServerAdminController {
         String password = (String) body.get("password");
         String roleStr = (String) body.get("role");
         String statusStr = (String) body.get("status");
-        Server.ServerRole role = roleStr != null ? Server.ServerRole.valueOf(roleStr) : null;
+        Server.ServerRole role = null;
+        if (roleStr != null && !roleStr.isBlank()) {
+            try {
+                role = Server.ServerRole.valueOf(roleStr);
+            } catch (Exception ignored) {
+                role = null;
+            }
+        }
         Server.ServerStatus status = statusStr != null ? Server.ServerStatus.valueOf(statusStr) : null;
+        Long clusterId = null;
+        if (body.containsKey("clusterId")) {
+            Object v = body.get("clusterId");
+            if (v == null) {
+                clusterId = -1L; // sentinel: clear cluster
+            } else if (v instanceof Number n) {
+                clusterId = n.longValue();
+            }
+        }
         // Fallback: nếu không truyền mật khẩu, lấy từ session cache để cho phép sửa
         // nhanh ở "Servers đang kết nối"
         if (password == null || password.isBlank()) {
@@ -133,7 +168,7 @@ public class ServerAdminController {
                 }
             }
         }
-        Server s = serverService.update(id, host, port, username, password, role, status);
+        Server s = serverService.update(id, host, port, username, password, role, status, clusterId);
         return ResponseEntity.ok(Map.of("id", s.getId()));
     }
 
@@ -278,5 +313,48 @@ public class ServerAdminController {
             session.setAttribute("SERVER_PW_CACHE", pwCache);
         }
         return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name()));
+    }
+
+    @PostMapping("/{id}/disconnect")
+    public ResponseEntity<?> disconnect(@PathVariable Long id, HttpServletRequest request) {
+        var session = request.getSession(false);
+        if (session != null) {
+            synchronized (session) {
+                Object attr = session.getAttribute("CONNECTED_SERVERS");
+                if (attr instanceof java.util.Set<?> set) {
+                    java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+                    for (Object o : set) {
+                        if (o instanceof Number n)
+                            ids.add(n.longValue());
+                        else if (o instanceof String str)
+                            try {
+                                ids.add(Long.parseLong(str));
+                            } catch (Exception ignored) {
+                            }
+                    }
+                    ids.remove(id);
+                    session.setAttribute("CONNECTED_SERVERS", ids);
+                }
+                // Optional: xoá mật khẩu cache cho server này
+                Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
+                if (pwAttr instanceof java.util.Map<?, ?> map) {
+                    java.util.LinkedHashMap<Long, String> pwCache = new java.util.LinkedHashMap<>();
+                    for (var e : map.entrySet()) {
+                        Long key = null;
+                        if (e.getKey() instanceof Number n)
+                            key = n.longValue();
+                        else if (e.getKey() instanceof String str)
+                            try {
+                                key = Long.parseLong(str);
+                            } catch (Exception ignored) {
+                            }
+                        if (key != null && !key.equals(id) && e.getValue() instanceof String sv)
+                            pwCache.put(key, sv);
+                    }
+                    session.setAttribute("SERVER_PW_CACHE", pwCache);
+                }
+            }
+        }
+        return ResponseEntity.ok(Map.of("id", id));
     }
 }
