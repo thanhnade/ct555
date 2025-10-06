@@ -17,6 +17,10 @@ public class Server {
         ONLINE, OFFLINE
     }
 
+    public enum AuthType {
+        PASSWORD, KEY
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -32,6 +36,14 @@ public class Server {
 
     @Column(nullable = false, length = 255)
     private String password; // store hashed/encoded
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_type", nullable = false, length = 16)
+    private AuthType authType = AuthType.PASSWORD;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ssh_key_id")
+    private SshKey sshKey;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
@@ -51,6 +63,9 @@ public class Server {
 
     @Column(name = "added_by")
     private Long addedBy; // user_id of creator
+
+    @Column(name = "last_connected")
+    private java.sql.Timestamp lastConnected;
 
     public Long getId() {
         return id;
@@ -92,6 +107,22 @@ public class Server {
         this.password = password;
     }
 
+    public AuthType getAuthType() {
+        return authType;
+    }
+
+    public void setAuthType(AuthType authType) {
+        this.authType = authType;
+    }
+
+    public SshKey getSshKey() {
+        return sshKey;
+    }
+
+    public void setSshKey(SshKey sshKey) {
+        this.sshKey = sshKey;
+    }
+
     public ServerRole getRole() {
         return role;
     }
@@ -130,5 +161,13 @@ public class Server {
 
     public void setAddedBy(Long addedBy) {
         this.addedBy = addedBy;
+    }
+
+    public java.sql.Timestamp getLastConnected() {
+        return lastConnected;
+    }
+
+    public void setLastConnected(java.sql.Timestamp lastConnected) {
+        this.lastConnected = lastConnected;
     }
 }

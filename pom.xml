@@ -72,13 +72,12 @@
 			<artifactId>spring-security-crypto</artifactId>
 		</dependency>
 
-		<!-- JSch for SSH connection test -->
+		<!-- Modern JSch fork with RSA-SHA2/ED25519 support -->
 		<dependency>
-			<groupId>com.jcraft</groupId>
+			<groupId>com.github.mwiede</groupId>
 			<artifactId>jsch</artifactId>
-			<version>0.1.55</version>
+			<version>0.2.11</version>
 		</dependency>
-		
 		
 
 		<dependency>

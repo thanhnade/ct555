@@ -38,6 +38,11 @@ public class ServerAdminController {
             m.put("username", java.util.Objects.toString(s.getUsername(), ""));
             m.put("role", s.getRole() != null ? s.getRole().name() : "WORKER");
             m.put("status", s.getStatus() != null ? s.getStatus().name() : "OFFLINE");
+            m.put("authType", s.getAuthType() != null ? s.getAuthType().name() : "PASSWORD");
+            if (s.getSshKey() != null && s.getSshKey().getId() != null)
+                m.put("sshKeyId", s.getSshKey().getId());
+            if (s.getLastConnected() != null)
+                m.put("lastConnected", s.getLastConnected());
             if (s.getCluster() != null && s.getCluster().getId() != null) {
                 m.put("clusterId", s.getCluster().getId());
             }
@@ -58,6 +63,19 @@ public class ServerAdminController {
         } catch (Exception ex) {
             role = Server.ServerRole.WORKER; // fallback an toàn nếu client gửi sai
         }
+        String authStr = (String) body.getOrDefault("authType", "PASSWORD");
+        Server.AuthType authType;
+        try {
+            authType = Server.AuthType.valueOf(authStr);
+        } catch (Exception ex) {
+            authType = Server.AuthType.PASSWORD;
+        }
+        Long sshKeyId = null;
+        if (body.containsKey("sshKeyId") && body.get("sshKeyId") != null) {
+            Object v = body.get("sshKeyId");
+            if (v instanceof Number n)
+                sshKeyId = n.longValue();
+        }
         Long clusterId = null;
         if (body.containsKey("clusterId")) {
             Object v = body.get("clusterId");
@@ -75,7 +93,7 @@ public class ServerAdminController {
             else if (uid instanceof Number n)
                 addedBy = n.longValue();
         }
-        Server s = serverService.create(host, port, username, password, role, addedBy, clusterId);
+        Server s = serverService.create(host, port, username, password, role, addedBy, clusterId, authType, sshKeyId);
         var session = request.getSession();
         synchronized (session) {
             Object attr = session.getAttribute("CONNECTED_SERVERS");
@@ -135,6 +153,24 @@ public class ServerAdminController {
             }
         }
         Server.ServerStatus status = statusStr != null ? Server.ServerStatus.valueOf(statusStr) : null;
+        String authStr = (String) body.get("authType");
+        Server.AuthType authType = null;
+        if (authStr != null && !authStr.isBlank()) {
+            try {
+                authType = Server.AuthType.valueOf(authStr);
+            } catch (Exception ignored) {
+                authType = null;
+            }
+        }
+        Long sshKeyId = null;
+        if (body.containsKey("sshKeyId")) {
+            Object v = body.get("sshKeyId");
+            if (v == null) {
+                sshKeyId = -1L; // sentinel clear
+            } else if (v instanceof Number n) {
+                sshKeyId = n.longValue();
+            }
+        }
         Long clusterId = null;
         if (body.containsKey("clusterId")) {
             Object v = body.get("clusterId");
@@ -168,8 +204,56 @@ public class ServerAdminController {
                 }
             }
         }
-        Server s = serverService.update(id, host, port, username, password, role, status, clusterId);
-        return ResponseEntity.ok(Map.of("id", s.getId()));
+        Server s = serverService.update(id, host, port, username, password, role, status, clusterId, authType,
+                sshKeyId);
+
+        // Sau khi cập nhật và xác thực thành công, đưa máy vào CONNECTED_SERVERS để UI
+        // hiển thị ở danh sách đang kết nối
+        var session = request.getSession();
+        synchronized (session) {
+            Object attr = session.getAttribute("CONNECTED_SERVERS");
+            java.util.LinkedHashSet<Long> connected = new java.util.LinkedHashSet<>();
+            if (attr instanceof java.util.Set<?> set) {
+                for (Object o : set) {
+                    if (o instanceof Number n)
+                        connected.add(n.longValue());
+                    else if (o instanceof String str)
+                        try {
+                            connected.add(Long.parseLong(str));
+                        } catch (Exception ignored) {
+                        }
+                }
+            }
+            if (s.getStatus() == Server.ServerStatus.ONLINE) {
+                connected.add(s.getId());
+            }
+            session.setAttribute("CONNECTED_SERVERS", connected);
+
+            // Nếu có mật khẩu gửi lên (để fallback sau này), lưu vào SERVER_PW_CACHE
+            if (password != null && !password.isBlank()) {
+                Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
+                java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
+                if (pwAttr instanceof java.util.Map<?, ?> map) {
+                    for (var e : map.entrySet()) {
+                        Long key = null;
+                        if (e.getKey() instanceof Number n)
+                            key = n.longValue();
+                        else if (e.getKey() instanceof String str)
+                            try {
+                                key = Long.parseLong(str);
+                            } catch (Exception ignored) {
+                            }
+                        if (key != null && e.getValue() instanceof String sv)
+                            pwCache.put(key, sv);
+                    }
+                }
+                pwCache.put(s.getId(), password);
+                session.setAttribute("SERVER_PW_CACHE", pwCache);
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name(),
+                "authType", s.getAuthType() != null ? s.getAuthType().name() : "PASSWORD"));
     }
 
     @DeleteMapping("/{id}")
@@ -186,6 +270,20 @@ public class ServerAdminController {
         String password = (String) body.get("password");
         boolean ok = serverService.testSsh(host, port, username, password, 5000);
         return ResponseEntity.ok(Map.of("ok", ok));
+    }
+
+    @PostMapping("/{id}/enable-publickey")
+    public ResponseEntity<?> enablePublicKey(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        String sudoPassword = (String) body.get("sudoPassword");
+        if (sudoPassword == null || sudoPassword.isBlank()) {
+            return ResponseEntity.badRequest().body("Vui lòng nhập mật khẩu sudo");
+        }
+        try {
+            String out = serverService.enableSshdPublicKey(id, sudoPassword, 8000);
+            return ResponseEntity.ok(Map.of("ok", true, "output", out));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("ok", false, "message", String.valueOf(e.getMessage())));
+        }
     }
 
     @PostMapping("/check-status")
@@ -222,19 +320,14 @@ public class ServerAdminController {
             userId = n.longValue();
         var userServers = (userId != null) ? serverService.findAllForUser(userId) : java.util.List.<Server>of();
 
-        // 2) CONNECTED_SERVERS chỉ gồm server ONLINE và SSH thành công (dùng mật khẩu
-        // trong session)
+        // 2) CONNECTED_SERVERS: ưu tiên thử SSH bằng KEY; nếu thất bại thì fallback mật
+        // khẩu. Thử cho tất cả server của user (không phụ thuộc ping ONLINE/OFFLINE)
         java.util.LinkedHashSet<Long> connected = new java.util.LinkedHashSet<>();
         for (var s : userServers) {
-            if (s.getStatus() == Server.ServerStatus.ONLINE) {
-                String pw = pwCache.get(s.getId());
-                if (pw != null && !pw.isBlank()) {
-                    boolean ok = serverService.testSsh(s.getHost(), s.getPort() != null ? s.getPort() : 22,
-                            s.getUsername(), pw, 3000);
-                    if (ok)
-                        connected.add(s.getId());
-                }
-            }
+            String pw = pwCache.get(s.getId());
+            boolean ok = serverService.tryConnectPreferKey(s, pw, 3000);
+            if (ok)
+                connected.add(s.getId());
         }
         session.setAttribute("CONNECTED_SERVERS", connected);
 
@@ -313,6 +406,52 @@ public class ServerAdminController {
             session.setAttribute("SERVER_PW_CACHE", pwCache);
         }
         return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name()));
+    }
+
+    @PostMapping("/{id}/test-key")
+    public ResponseEntity<?> testKey(@PathVariable Long id) {
+        try {
+            Server s = serverService.findById(id);
+            if (s.getSshKey() == null || s.getSshKey().getEncryptedPrivateKey() == null
+                    || s.getSshKey().getEncryptedPrivateKey().isBlank()) {
+                return ResponseEntity.ok(Map.of(
+                        "ok", false,
+                        "message", "Chưa có SSH key cho máy này"));
+            }
+            boolean ok = serverService.testSshWithKey(
+                    s.getHost(),
+                    s.getPort() != null ? s.getPort() : 22,
+                    s.getUsername(),
+                    s.getSshKey().getEncryptedPrivateKey(),
+                    4000);
+            return ResponseEntity.ok(Map.of(
+                    "ok", ok,
+                    "message", ok ? "SSH key hoạt động" : "SSH key không kết nối được"));
+        } catch (Exception ex) {
+            return ResponseEntity.ok(Map.of(
+                    "ok", false,
+                    "message", String.valueOf(ex.getMessage())));
+        }
+    }
+
+    @GetMapping("/{id}/ssh-key")
+    public ResponseEntity<?> getSshKey(@PathVariable Long id) {
+        try {
+            Server s = serverService.findById(id);
+            if (s.getSshKey() == null || s.getSshKey().getPublicKey() == null
+                    || s.getSshKey().getPublicKey().isBlank()) {
+                return ResponseEntity.ok(Map.of(
+                        "ok", false,
+                        "message", "Chưa có public key cho máy này"));
+            }
+            return ResponseEntity.ok(Map.of(
+                    "ok", true,
+                    "publicKey", s.getSshKey().getPublicKey()));
+        } catch (Exception ex) {
+            return ResponseEntity.ok(Map.of(
+                    "ok", false,
+                    "message", String.valueOf(ex.getMessage())));
+        }
     }
 
     @PostMapping("/{id}/disconnect")

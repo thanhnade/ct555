@@ -69,6 +69,8 @@ async function loadServers(){
       (clusters||[]).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
   }
 
+  // Auth/SSH key selection removed; password is required on create for first-time setup
+
   const tbodyConn = document.getElementById('servers-connected-tbody');
   const tbodyHist = document.getElementById('servers-history-tbody');
   if(!tbodyConn || !tbodyHist) return;
@@ -90,26 +92,30 @@ async function loadServers(){
       : `<button class="btn btn-sm btn-outline-secondary me-1" onclick="promptReconnect(${s.id})">Kết nối lại</button>`;
     tr.innerHTML = `
       <td>${s.id}</td>
-      <td><input class="form-control form-control-sm" value="${s.host}" data-id="${s.id}" data-field="host" /></td>
-      <td><input type="number" class="form-control form-control-sm" value="${s.port}" data-id="${s.id}" data-field="port" /></td>
-      <td><input class="form-control form-control-sm" value="${s.username}" data-id="${s.id}" data-field="username" /></td>
+      <td><input class="form-control form-control-sm" value="${s.host}" data-id="${s.id}" data-field="host" data-old-host="${s.host||''}" /></td>
+      <td><input type="number" class="form-control form-control-sm" value="${s.port}" data-id="${s.id}" data-field="port" data-old-port="${s.port!=null?s.port:''}" /></td>
+      <td><input class="form-control form-control-sm" value="${s.username}" data-id="${s.id}" data-field="username" data-old-username="${s.username||''}" /></td>
       <td>
-        <select class="form-select form-select-sm" data-id="${s.id}" data-field="clusterId">
+        <select class="form-select form-select-sm" data-id="${s.id}" data-field="clusterId" data-old-clusterid="${s.clusterId!=null?s.clusterId:''}">
           <option value="">--</option>
           ${(clusters||[]).map(c => `<option value="${c.id}" ${s.clusterId===c.id?'selected':''}>${c.name}</option>`).join('')}
         </select>
       </td>
       <td>
-        <select class="form-select form-select-sm" data-id="${s.id}" data-field="role">
-          <option ${s.role==='WORKER'?'selected':''}>WORKER</option>
-          <option ${s.role==='MASTER'?'selected':''}>MASTER</option>
-          <option ${s.role==='STANDALONE'?'selected':''}>STANDALONE</option>
+        <select class="form-select form-select-sm" data-id="${s.id}" data-field="role" data-old-role="${s.role||''}">
+          <option value="WORKER" ${s.role==='WORKER'?'selected':''}>WORKER</option>
+          <option value="MASTER" ${s.role==='MASTER'?'selected':''}>MASTER</option>
+          <option value="STANDALONE" ${s.role==='STANDALONE'?'selected':''}>STANDALONE</option>
         </select>
       </td>
       <td>${statusCell}</td>
+      <td>${s.lastConnected ? new Date(s.lastConnected).toLocaleString() : ''}</td>
       <td class="text-nowrap">
-        <button class="btn btn-sm btn-primary me-1" onclick="saveServer(${s.id})">Lưu</button>
+        <button class="btn btn-sm btn-primary me-1" onclick="saveServer(${s.id}, this)">Lưu</button>
         <button class="btn btn-sm btn-danger me-1" onclick="deleteServer(${s.id})">Xoá</button>
+        <button class="btn btn-sm btn-outline-primary me-1" onclick="testKey(${s.id})">Test Key</button>
+        <button class="btn btn-sm btn-outline-warning me-1" onclick="enablePublicKey(${s.id})">Enable PublicKey</button>
+        <button class="btn btn-sm btn-outline-secondary me-1" onclick="showKey(${s.id})">Show Key</button>
         ${reconnectOrDisconnect}
         ${isConnected ? `<button class="btn btn-sm btn-dark" onclick="openTerminal(${s.id}, true)">CLI</button>` : ''}
       </td>
@@ -337,13 +343,78 @@ async function bulkAssignServers(ids, clusterId){
 }
 
 async function promptReconnect(id){
-  const pw = prompt('Nhập mật khẩu để kết nối lại:');
+  // Thử key-first bằng check-status nhanh cho riêng server này nếu cần (đơn giản: gọi check-status toàn cục)
+  try{
+    await fetchJSON('/admin/servers/check-status', {method:'POST'});
+    const connected = await fetchJSON('/admin/servers/connected').catch(()=>[]);
+    if(Array.isArray(connected) && connected.includes(id)){
+      await loadServers('connected');
+      return;
+    }
+  }catch(_){ /* ignore */ }
+  const pw = prompt('SSH key không khả dụng hoặc kết nối bằng key thất bại. Nhập mật khẩu để kết nối lại:');
   if(!pw) return;
   try{
     await fetchJSON(`/admin/servers/${id}/reconnect`, {method:'POST', body: JSON.stringify({password: pw})});
     await loadServers('connected');
   }catch(err){
     alert(err.message || 'Kết nối lại thất bại');
+  }
+}
+
+async function testKey(id){
+  const msg = document.getElementById('server-save-msg');
+  try{
+    const res = await fetchJSON(`/admin/servers/${id}/test-key`, {method:'POST'});
+    if(res && res.ok){
+      msg.textContent = res.message || `SSH key cho máy ${id} hoạt động`;
+      msg.className = 'small mb-2 text-success';
+      await loadServers();
+    } else {
+      msg.textContent = res.message || `SSH key cho máy ${id} không hoạt động`;
+      msg.className = 'small mb-2 text-danger';
+    }
+  }catch(e){
+    msg.textContent = e.message || `SSH key cho máy ${id} không hoạt động`;
+    msg.className = 'small mb-2 text-danger';
+  }
+}
+
+async function enablePublicKey(id){
+  const msg = document.getElementById('server-save-msg');
+  const sudoPassword = prompt('Nhập mật khẩu sudo để bật PublicKey trên máy đích:');
+  if(!sudoPassword) return;
+  try{
+    const res = await fetchJSON(`/admin/servers/${id}/enable-publickey`, {method:'POST', body: JSON.stringify({ sudoPassword })});
+    if(res && res.ok){
+      msg.textContent = 'Đã bật PublicKey trên máy đích. Thử Test Key lại.';
+      msg.className = 'small mb-2 text-success';
+    } else {
+      msg.textContent = res.message || 'Bật PublicKey thất bại';
+      msg.className = 'small mb-2 text-danger';
+    }
+  }catch(e){
+    msg.textContent = e.message || 'Bật PublicKey thất bại';
+    msg.className = 'small mb-2 text-danger';
+  }
+}
+
+async function showKey(id){
+  try{
+    const res = await fetchJSON(`/admin/servers/${id}/ssh-key`);
+    if(res && res.ok && res.publicKey){
+      const msg = document.getElementById('server-save-msg');
+      msg.textContent = res.publicKey;
+      msg.className = 'small mb-2 text-monospace';
+    } else {
+      const msg = document.getElementById('server-save-msg');
+      msg.textContent = res.message || 'Chưa có public key';
+      msg.className = 'small mb-2 text-danger';
+    }
+  }catch(e){
+    const msg = document.getElementById('server-save-msg');
+    msg.textContent = e.message || 'Không lấy được public key';
+    msg.className = 'small mb-2 text-danger';
   }
 }
 
@@ -376,29 +447,52 @@ async function createServer(ev){
   }
 }
 
-async function saveServer(id){
-  const host = document.querySelector(`input[data-id="${id}"][data-field="host"]`).value.trim();
-  const port = parseInt(document.querySelector(`input[data-id="${id}"][data-field="port"]`).value, 10);
-  const username = document.querySelector(`input[data-id="${id}"][data-field="username"]`).value.trim();
-  const clusterSel = document.querySelector(`select[data-id="${id}"][data-field="clusterId"]`);
+async function saveServer(id, btn){
+  const row = btn ? btn.closest('tr') : null;
+  const q = (sel) => row ? row.querySelector(sel) : document.querySelector(sel);
+  const hostEl = q(`input[data-id="${id}"][data-field="host"]`);
+  const portEl = q(`input[data-id="${id}"][data-field="port"]`);
+  const userEl = q(`input[data-id="${id}"][data-field="username"]`);
+  const clusterSel = q(`select[data-id="${id}"][data-field="clusterId"]`);
+  const roleSel = q(`select[data-id="${id}"][data-field="role"]`);
+
+  const host = hostEl.value.trim();
+  const port = parseInt(portEl.value, 10);
+  const username = userEl.value.trim();
   const clusterId = clusterSel && clusterSel.value ? parseInt(clusterSel.value, 10) : null;
-  const role = document.querySelector(`select[data-id="${id}"][data-field="role"]`).value;
-  const statusSel = document.querySelector(`select[data-id="${id}"][data-field="status"]`);
+  const role = roleSel.value; // ensure it's one of WORKER/MASTER/STANDALONE
+
+  const oldHost = hostEl.getAttribute('data-old-host') || '';
+  const oldPortStr = portEl.getAttribute('data-old-port') || '';
+  const oldPort = oldPortStr === '' ? null : parseInt(oldPortStr, 10);
+  const oldUsername = userEl.getAttribute('data-old-username') || '';
+  const oldClusterStr = clusterSel?.getAttribute('data-old-clusterid') || '';
+  const oldClusterId = oldClusterStr === '' ? null : parseInt(oldClusterStr, 10);
+  const oldRole = roleSel.getAttribute('data-old-role') || '';
+
+  const statusSel = q(`select[data-id="${id}"][data-field="status"]`);
   const body = {host, port, username, role, clusterId};
   if(statusSel){ body.status = statusSel.value; }
   const msg = document.getElementById('server-save-msg');
   try {
+    btn && (btn.disabled = true);
     await fetchJSON(`/admin/servers/${id}`, {method:'PUT', body: JSON.stringify(body)});
-    msg.textContent = `Lưu máy ${id} thành công`;
+    const changes = [];
+    if(oldHost !== host) changes.push(`host: "${oldHost}" -> "${host}"`);
+    if((oldPort ?? null) !== (isNaN(port)?null:port)) changes.push(`port: "${oldPort ?? ''}" -> "${isNaN(port)?'':port}"`);
+    if(oldUsername !== username) changes.push(`username: "${oldUsername}" -> "${username}"`);
+    if((oldClusterId ?? null) !== (clusterId ?? null)) changes.push(`clusterId: "${oldClusterId ?? ''}" -> "${clusterId ?? ''}"`);
+    if(oldRole !== role) changes.push(`role: "${oldRole}" -> "${role}"`);
+    msg.textContent = changes.length ? `Đã lưu máy ${id}: ${changes.join(', ')}` : `Lưu máy ${id} thành công`;
     msg.className = 'small mb-2 text-success';
     msg.scrollIntoView({behavior:'smooth', block:'nearest'});
-    setTimeout(()=>{ if(msg) msg.textContent=''; }, 3000);
+    setTimeout(()=>{ if(msg) msg.textContent=''; }, 4000);
     await loadServers();
   } catch(e){
     msg.textContent = e.message || `Lưu máy ${id} thất bại`;
     msg.className = 'small mb-2 text-danger';
     msg.scrollIntoView({behavior:'smooth', block:'nearest'});
-  }
+  } finally { if(btn) btn.disabled = false; }
 }
 
 async function deleteServer(id){
