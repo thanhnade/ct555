@@ -1,5 +1,7 @@
 package com.example.AutoDeployApp.ws;
 
+import com.example.AutoDeployApp.entity.Server;
+import com.example.AutoDeployApp.service.ServerService;
 import com.jcraft.jsch.ChannelShell;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
@@ -17,18 +19,6 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * A simple WebSocket -> JSch shell bridge.
- * Protocol:
- * - First message from client must be a JSON string:
- * {"host":"ip","port":22,"username":"u","password":"p"}
- * You can also send {"host":..., "username":..., "passwordB64":"..."}
- * Or include {"serverId":123} and omit password to use password cached in HTTP
- * session
- * - Subsequent messages are plain text to write to the shell (e.g., "ls
- * -la\n").
- * - Server pushes back shell output as text frames.
- */
 public class TerminalWebSocketHandler extends TextWebSocketHandler {
 
     private static class SshBinding {
@@ -40,6 +30,11 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
     }
 
     private final Map<String, SshBinding> connectionMap = new ConcurrentHashMap<>();
+    private final ServerService serverService;
+
+    public TerminalWebSocketHandler(ServerService serverService) {
+        this.serverService = serverService;
+    }
 
     @Override
     public void afterConnectionEstablished(@NonNull WebSocketSession session) throws Exception {
@@ -93,17 +88,76 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
                 }
             }
 
-            if (host == null || username == null || (password == null || password.isBlank())) {
-                ws.sendMessage(new TextMessage("[server] Missing host/username/password.\n"));
+            if (host == null || username == null) {
+                ws.sendMessage(new TextMessage("[server] Missing host/username.\n"));
                 ws.close(CloseStatus.BAD_DATA);
                 return;
             }
 
-            JSch jsch = new JSch();
-            Session ssh = jsch.getSession(username, host, port);
-            ssh.setConfig("StrictHostKeyChecking", "no");
-            ssh.setPassword(password);
-            ssh.connect(5000);
+            // Prefer KEY first if server has one; fallback to password.
+            Session ssh = null;
+            boolean connected = false;
+            boolean usedKey = false;
+            try {
+                if (serverId != null) {
+                    String pem = null;
+                    try {
+                        pem = serverService.resolveServerPrivateKeyPem(serverId);
+                    } catch (Exception ignored) {
+                    }
+                    if (pem != null && !pem.isBlank()) {
+                        try {
+                            JSch jsch = new JSch();
+                            byte[] prv = pem.getBytes(StandardCharsets.UTF_8);
+                            jsch.addIdentity("inmem-key", prv, null, null);
+                            ssh = jsch.getSession(username, host, port);
+                            ssh.setConfig("StrictHostKeyChecking", "no");
+                            ssh.connect(5000);
+                            connected = ssh.isConnected();
+                            usedKey = connected;
+                        } catch (Exception ignored) {
+                            // key attempt failed; will fallback to password
+                            if (ssh != null && ssh.isConnected())
+                                try {
+                                    ssh.disconnect();
+                                } catch (Exception ignore) {
+                                }
+                            ssh = null;
+                        }
+                    }
+                }
+
+                if (!connected) {
+                    if (password == null || password.isBlank()) {
+                        ws.sendMessage(
+                                new TextMessage("[server] Missing password and SSH key not available/failed.\n"));
+                        ws.close(CloseStatus.BAD_DATA);
+                        return;
+                    }
+                    JSch jsch = new JSch();
+                    ssh = jsch.getSession(username, host, port);
+                    ssh.setConfig("StrictHostKeyChecking", "no");
+                    ssh.setPassword(password);
+                    ssh.connect(5000);
+                    connected = ssh.isConnected();
+                }
+            } catch (Exception ex) {
+                try {
+                    ws.sendMessage(
+                            new TextMessage("[server] SSH connect failed: " + String.valueOf(ex.getMessage()) + "\n"));
+                } catch (Exception ignored) {
+                }
+                try {
+                    ws.close(CloseStatus.SERVER_ERROR);
+                } catch (Exception ignored) {
+                }
+                if (ssh != null && ssh.isConnected())
+                    try {
+                        ssh.disconnect();
+                    } catch (Exception ignored) {
+                    }
+                return;
+            }
 
             ChannelShell channel = (ChannelShell) ssh.openChannel("shell");
             channel.setPty(true);
@@ -123,7 +177,8 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
             pump.start();
 
             connectionMap.put(sid, b);
-            ws.sendMessage(new TextMessage("[server] SSH connected to " + host + "\n"));
+            ws.sendMessage(
+                    new TextMessage("[server] SSH connected to " + host + (usedKey ? " (key)" : " (password)") + "\n"));
             return;
         }
 

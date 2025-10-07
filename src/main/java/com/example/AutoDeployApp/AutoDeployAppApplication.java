@@ -10,5 +10,4 @@ public class AutoDeployAppApplication {
 		SpringApplication.run(AutoDeployAppApplication.class, args);
 		System.out.println("AutoDeployAppApplication started: http://localhost:8080");
 	}
-
 }

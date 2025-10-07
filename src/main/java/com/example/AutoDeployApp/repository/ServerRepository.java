@@ -27,4 +27,7 @@ public interface ServerRepository extends JpaRepository<Server, Long> {
     List<Server> findAllWithCluster();
 
     List<Server> findByCluster_Id(Long clusterId);
+
+    @Query("select s from Server s left join fetch s.sshKey where s.id = :id")
+    Optional<Server> findByIdWithSshKey(@Param("id") Long id);
 }

@@ -48,6 +48,13 @@ public class ServerService {
         return serverRepository.findById(id).orElseThrow();
     }
 
+    @Transactional(readOnly = true)
+    public String resolveServerPrivateKeyPem(Long serverId) {
+        return serverRepository.findByIdWithSshKey(serverId)
+                .map(s -> (s.getSshKey() != null ? s.getSshKey().getEncryptedPrivateKey() : null))
+                .orElse(null);
+    }
+
     @Transactional
     public Server create(String host, Integer port, String username, String rawPassword, Server.ServerRole role,
             Long addedBy, Long clusterId, Server.AuthType authType, Long sshKeyId) {

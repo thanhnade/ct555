@@ -1,5 +1,6 @@
 package com.example.AutoDeployApp.config;
 
+import com.example.AutoDeployApp.service.ServerService;
 import com.example.AutoDeployApp.ws.TerminalWebSocketHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,9 +14,15 @@ import org.springframework.web.socket.server.support.HttpSessionHandshakeInterce
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
+    private final ServerService serverService;
+
+    public WebSocketConfig(ServerService serverService) {
+        this.serverService = serverService;
+    }
+
     @Bean
     public TerminalWebSocketHandler terminalWebSocketHandler() {
-        return new TerminalWebSocketHandler();
+        return new TerminalWebSocketHandler(serverService);
     }
 
     @Override
