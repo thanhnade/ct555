@@ -6,7 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "servers")
+@Table(name = "servers", uniqueConstraints = @UniqueConstraint(columnNames = { "host", "port", "username" }))
 public class Server {
 
     public enum ServerRole {

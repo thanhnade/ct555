@@ -20,6 +20,9 @@ public interface ServerRepository extends JpaRepository<Server, Long> {
     boolean existsByHostAndPortAndUsernameAndAddedByAndIdNot(String host, Integer port, String username, Long addedBy,
             Long id);
 
+    // Global check for duplicate server (across all users)
+    boolean existsByHostAndPortAndUsername(String host, Integer port, String username);
+
     @Query("select s from Server s left join fetch s.cluster where s.addedBy = :addedBy")
     List<Server> findByAddedByWithCluster(@Param("addedBy") Long addedBy);
 

@@ -24,15 +24,19 @@ public class ClusterService {
     }
 
     @Transactional
-    public Cluster create(String name, String description) {
+    public Cluster create(String name, String description, Long createdBy) {
+        if (clusterRepository.existsByName(name)) {
+            throw new IllegalArgumentException("Tên cluster '" + name + "' đã tồn tại. Vui lòng chọn tên khác.");
+        }
         Cluster c = new Cluster();
         c.setName(name);
-        c.setDescription(description);
+        c.setDescription(description != null && !description.trim().isEmpty() ? description.trim() : null);
+        c.setCreatedBy(createdBy);
         return clusterRepository.saveAndFlush(c);
     }
 
     public record ClusterSummary(Long id, String name, String description, String masterNode, int workerCount,
-            String status) {
+            String status, Long createdBy) {
     }
 
     public List<ClusterSummary> listSummaries() {
@@ -54,7 +58,9 @@ public class ClusterService {
                 status = "WARNING";
             else
                 status = "HEALTHY";
-            return new ClusterSummary(c.getId(), c.getName(), c.getDescription(), master, workerCount, status);
+            return new ClusterSummary(c.getId(), c.getName(), c.getDescription() != null ? c.getDescription() : "",
+                    master, workerCount, status,
+                    c.getCreatedBy());
         }).toList();
     }
 

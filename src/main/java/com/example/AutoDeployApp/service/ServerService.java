@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.net.InetAddress;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +45,12 @@ public class ServerService {
         return serverRepository.findByAddedByWithCluster(userId);
     }
 
+    public List<Server> findByClusterId(Long clusterId) {
+        if (clusterId == null)
+            return List.of();
+        return serverRepository.findByCluster_Id(clusterId);
+    }
+
     public Server findById(Long id) {
         return serverRepository.findById(id).orElseThrow();
     }
@@ -64,16 +71,17 @@ public class ServerService {
             canSsh = testSsh(host, resolvedPort, username, rawPassword, 5000);
             if (!canSsh) {
                 throw new IllegalArgumentException(
-                        "Không thể kết nối SSH tới server, vui lòng kiểm tra host/port/username/password");
+                        "Không thể kết nối tới server, vui lòng kiểm tra host/port/username/password");
             }
         } else {
             // KEY mode: tạm thời bỏ qua kiểm tra SSH do chưa giải mã private key trên
             // server
             canSsh = false;
         }
-        // Reject if duplicate (host, port, username) already exists for this user
-        if (serverRepository.existsByHostAndPortAndUsernameAndAddedBy(host, resolvedPort, username, addedBy)) {
-            throw new IllegalArgumentException("Máy chủ đã tồn tại (trùng host/port/username)");
+        // Reject if duplicate (host, port, username) already exists globally
+        if (serverRepository.existsByHostAndPortAndUsername(host, resolvedPort, username)) {
+            throw new IllegalArgumentException(
+                    "Máy chủ đã tồn tại trong hệ thống. Vui lòng sử dụng máy chủ khác hoặc liên hệ admin để được hỗ trợ.");
         }
         Server s = new Server();
         s.setHost(host);
@@ -135,10 +143,18 @@ public class ServerService {
         Server s = serverRepository.findById(id).orElseThrow();
         Long addedBy = s.getAddedBy();
         if (host != null && !host.isBlank() && port != null && username != null && !username.isBlank()) {
+            // Check if another server (different ID) already uses this host/port/username
             boolean dup = serverRepository.existsByHostAndPortAndUsernameAndAddedByAndIdNot(host, port, username,
                     addedBy, id);
             if (dup) {
                 throw new IllegalArgumentException("Máy chủ đã tồn tại (host/port/username trùng)");
+            }
+
+            // Also check global uniqueness (across all users)
+            Optional<Server> existingServer = serverRepository.findByHostAndUsername(host, username);
+            if (existingServer.isPresent() && !existingServer.get().getId().equals(id)) {
+                throw new IllegalArgumentException(
+                        "Máy chủ đã tồn tại trong hệ thống. Vui lòng sử dụng máy chủ khác hoặc liên hệ admin để được hỗ trợ.");
             }
         }
         // Build effective connection params (new values or existing)
@@ -200,15 +216,24 @@ public class ServerService {
         }
         if (role != null)
             s.setRole(role);
+        // Xử lý clusterId: null để clear cluster, hoặc giá trị cụ thể để gán cluster
+        System.out.println("DEBUG: Processing clusterId=" + clusterId + " for server " + s.getId());
         if (clusterId != null) {
             if (clusterId >= 0) {
                 // Nếu không tìm thấy cluster, coi như null (xoá liên kết)
                 Cluster c = clusterRepository.findById(clusterId).orElse(null);
                 s.setCluster(c);
+                System.out.println(
+                        "DEBUG: Set cluster to " + (c != null ? c.getId() : "null") + " for server " + s.getId());
             } else {
                 // sentinel (<0) means clear cluster assignment
                 s.setCluster(null);
+                System.out.println("DEBUG: Cleared cluster (sentinel) for server " + s.getId());
             }
+        } else {
+            // clusterId = null từ request body means clear cluster assignment
+            s.setCluster(null);
+            System.out.println("DEBUG: Cleared cluster (null) for server " + s.getId());
         }
         // Cập nhật trạng thái: nếu vừa xác thực (do có thay đổi kết nối hoặc có mật
         // khẩu mới)
@@ -283,6 +308,41 @@ public class ServerService {
             session = jsch.getSession(username, host, port);
             session.setConfig("StrictHostKeyChecking", "no");
             session.setPassword(rawPassword);
+            session.connect(timeoutMs);
+            channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
+            channel.setCommand(command);
+            java.io.InputStream in = channel.getInputStream();
+            channel.connect(timeoutMs);
+            byte[] buf = in.readAllBytes();
+            String out = new String(buf, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return out;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            try {
+                if (channel != null && channel.isConnected())
+                    channel.disconnect();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (session != null && session.isConnected())
+                    session.disconnect();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    public String execCommandWithKey(String host, int port, String username, String privateKeyPem, String command,
+            int timeoutMs) {
+        Session session = null;
+        com.jcraft.jsch.ChannelExec channel = null;
+        try {
+            JSch jsch = new JSch();
+            // Load key from PEM string
+            byte[] prv = privateKeyPem.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            jsch.addIdentity("inmem-key", prv, null, null);
+            session = jsch.getSession(username, host, port);
+            session.setConfig("StrictHostKeyChecking", "no");
             session.connect(timeoutMs);
             channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
             channel.setCommand(command);

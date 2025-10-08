@@ -28,6 +28,9 @@ public class Cluster {
     @Column(name = "updated_at", columnDefinition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "created_by")
+    private Long createdBy; // user_id of creator
+
     public Long getId() {
         return id;
     }
@@ -66,5 +69,13 @@ public class Cluster {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public Long getCreatedBy() {
+        return createdBy;
+    }
+
+    public void setCreatedBy(Long createdBy) {
+        this.createdBy = createdBy;
     }
 }
