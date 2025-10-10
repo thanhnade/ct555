@@ -523,9 +523,130 @@ public class ServerService {
         entity.setKeyType(SshKey.KeyType.RSA);
         entity.setKeyLength(2048);
         entity.setPublicKey(publicKey);
-        entity.setEncryptedPrivateKey(privateKeyPem); // NOTE: not encrypted in this demo
+        entity.setEncryptedPrivateKey(privateKeyPem);
         entity.setAesSalt(null);
         entity.setStatus(SshKey.KeyStatus.ACTIVE);
         return entity;
+    }
+
+    /**
+     * Thực thi lệnh với SSH key và mật khẩu sudo
+     */
+    public String execCommandWithKeyAndSudo(String host, int port, String username, String privateKeyPem,
+            String command, String sudoPassword, int timeoutMs) {
+        Session session = null;
+        com.jcraft.jsch.ChannelExec channel = null;
+        try {
+            JSch jsch = new JSch();
+            // Load key from PEM string
+            byte[] prv = privateKeyPem.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            jsch.addIdentity("inmem-key", prv, null, null);
+
+            session = jsch.getSession(username, host, port);
+            session.setConfig("StrictHostKeyChecking", "no");
+            session.connect(timeoutMs);
+
+            channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
+
+            // Tạo lệnh với sudo và echo password
+            String sudoCommand = createSudoCommand(command, sudoPassword);
+            channel.setCommand(sudoCommand);
+
+            java.io.InputStream in = channel.getInputStream();
+            channel.connect(timeoutMs);
+
+            byte[] buf = in.readAllBytes();
+            String out = new String(buf, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return out;
+
+        } catch (Exception e) {
+            System.err.println("Lỗi thực thi lệnh với SSH key và sudo: " + e.getMessage());
+            return null;
+        } finally {
+            try {
+                if (channel != null && channel.isConnected())
+                    channel.disconnect();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (session != null && session.isConnected())
+                    session.disconnect();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * Thực thi lệnh với password và mật khẩu sudo
+     */
+    public String execCommandWithSudo(String host, int port, String username, String sshPassword,
+            String command, String sudoPassword, int timeoutMs) {
+        Session session = null;
+        com.jcraft.jsch.ChannelExec channel = null;
+        try {
+            JSch jsch = new JSch();
+            session = jsch.getSession(username, host, port);
+            session.setConfig("StrictHostKeyChecking", "no");
+            session.setPassword(sshPassword);
+            session.connect(timeoutMs);
+
+            channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
+
+            // Tạo lệnh với sudo và echo password
+            String sudoCommand = createSudoCommand(command, sudoPassword);
+            channel.setCommand(sudoCommand);
+
+            java.io.InputStream in = channel.getInputStream();
+            channel.connect(timeoutMs);
+
+            byte[] buf = in.readAllBytes();
+            String out = new String(buf, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return out;
+
+        } catch (Exception e) {
+            System.err.println("Lỗi thực thi lệnh với password và sudo: " + e.getMessage());
+            return null;
+        } finally {
+            try {
+                if (channel != null && channel.isConnected())
+                    channel.disconnect();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (session != null && session.isConnected())
+                    session.disconnect();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * Tạo lệnh sudo với echo password
+     */
+    private String createSudoCommand(String command, String sudoPassword) {
+        if (sudoPassword == null || sudoPassword.trim().isEmpty()) {
+            return command; // Không có sudo password, chạy lệnh bình thường
+        }
+
+        // Escape special characters trong password
+        String escapedPassword = sudoPassword.replace("'", "'\"'\"'");
+
+        // Tạo lệnh với echo password và sudo -S
+        return String.format("echo '%s' | sudo -S %s", escapedPassword, command);
+    }
+
+    /**
+     * Kiểm tra SSH key với sudo password
+     */
+    public boolean testSshWithKeyAndSudo(String host, int port, String username, String privateKeyPem,
+            String sudoPassword, int timeoutMs) {
+        try {
+            String testCommand = "sudo whoami";
+            String result = execCommandWithKeyAndSudo(host, port, username, privateKeyPem, testCommand, sudoPassword,
+                    timeoutMs);
+            return result != null && result.trim().equals("root");
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

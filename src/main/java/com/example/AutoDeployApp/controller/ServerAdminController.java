@@ -76,6 +76,12 @@ public class ServerAdminController {
             if (v instanceof Number n)
                 sshKeyId = n.longValue();
         }
+        Long clusterId = null;
+        if (body.containsKey("clusterId") && body.get("clusterId") != null) {
+            Object v = body.get("clusterId");
+            if (v instanceof Number n)
+                clusterId = n.longValue();
+        }
         Long addedBy = null;
         if (request.getSession(false) != null) {
             Object uid = request.getSession(false).getAttribute("USER_ID");
@@ -84,7 +90,7 @@ public class ServerAdminController {
             else if (uid instanceof Number n)
                 addedBy = n.longValue();
         }
-        Server s = serverService.create(host, port, username, password, role, addedBy, null, authType, sshKeyId);
+        Server s = serverService.create(host, port, username, password, role, addedBy, clusterId, authType, sshKeyId);
         var session = request.getSession();
         synchronized (session) {
             Object attr = session.getAttribute("CONNECTED_SERVERS");

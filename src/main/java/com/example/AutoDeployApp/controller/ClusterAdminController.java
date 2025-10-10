@@ -3,6 +3,7 @@ package com.example.AutoDeployApp.controller;
 import com.example.AutoDeployApp.entity.Cluster;
 import com.example.AutoDeployApp.service.ClusterService;
 import com.example.AutoDeployApp.service.ServerService;
+import com.example.AutoDeployApp.service.AnsibleInstallationService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,22 +27,30 @@ public class ClusterAdminController {
             String username,
             com.example.AutoDeployApp.entity.Server.ServerRole role,
             com.example.AutoDeployApp.entity.Server.ServerStatus status,
-            String sshPrivateKey) {
+            String sshPrivateKey,
+            boolean isConnected) {
     }
 
     private final ClusterService clusterService;
     private final ServerService serverService;
+    private final AnsibleInstallationService ansibleInstallationService;
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
 
     // Constants for timeouts and commands
     private static final int SSH_TIMEOUT = 10000; // Tăng timeout cho combined commands
-    private static final String COMBINED_METRICS_COMMAND = "echo \"CPU:$(nproc)\"; echo \"RAM:$(free -h | awk '/^Mem:/{print $2}')\"; echo \"DISK:$(df -h / | awk 'NR==2{print $2}')\"";
+    private static final String COMBINED_METRICS_COMMAND = "echo \"CPU_CORES:$(nproc)\"; " +
+            "echo \"CPU_LOAD:$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')\"; " +
+            "echo \"RAM_TOTAL:$(free -h | awk '/^Mem:/{print $2}')\"; " +
+            "echo \"RAM_USED:$(free -h | awk '/^Mem:/{print $3}')\"; " +
+            "echo \"DISK_PERCENT:$(df / | awk 'NR==2{print $5}')\"";
     private static final String KUBELET_VERSION_COMMAND = "kubelet --version 2>/dev/null | awk '{print $2}'";
     private static final String KUBEADM_VERSION_COMMAND = "kubeadm version -o short 2>/dev/null";
 
-    public ClusterAdminController(ClusterService clusterService, ServerService serverService) {
+    public ClusterAdminController(ClusterService clusterService, ServerService serverService,
+            AnsibleInstallationService ansibleInstallationService) {
         this.clusterService = clusterService;
         this.serverService = serverService;
+        this.ansibleInstallationService = ansibleInstallationService;
     }
 
     @PreDestroy
@@ -62,13 +71,13 @@ public class ClusterAdminController {
     /**
      * Lấy thông số server (CPU, RAM, Disk) sử dụng lệnh kết hợp để giảm số lần SSH
      */
-    private CompletableFuture<Map<String, String>> getServerMetricsAsync(ServerData serverData,
+    private CompletableFuture<Map<String, Object>> getServerMetricsAsync(ServerData serverData,
             Map<Long, String> pwCache) {
-        return CompletableFuture.supplyAsync(() -> {
+        return CompletableFuture.<Map<String, Object>>supplyAsync(() -> {
             try {
                 // Thử SSH key trước
                 if (serverData.sshPrivateKey != null && !serverData.sshPrivateKey.isBlank()) {
-                    Map<String, String> metrics = executeCombinedMetricsWithKey(
+                    Map<String, Object> metrics = executeCombinedMetricsWithKey(
                             serverData.host, serverData.port, serverData.username, serverData.sshPrivateKey);
                     if (metrics != null) {
                         return metrics;
@@ -87,25 +96,30 @@ public class ClusterAdminController {
             }
 
             // Trả về giá trị mặc định nếu tất cả phương thức đều thất bại
-            return Map.of("cpu", "-", "ram", "-", "disk", "-");
+            return Map.of("cpu", "-", "ram", "-", "ramPercentage", 0, "disk", "-");
         }, executorService).orTimeout(15, TimeUnit.SECONDS)
                 .exceptionally(throwable -> {
                     System.err.println("Timeout hoặc lỗi lấy thông số server " + serverData.host + ": "
                             + throwable.getMessage());
-                    return Map.of("cpu", "-", "ram", "-", "disk", "-");
+                    return Map.of("cpu", "-", "ram", "-", "ramPercentage", 0, "disk", "-");
                 });
     }
 
     /**
      * Thực thi lệnh metrics kết hợp sử dụng SSH key (giảm từ 3 lần SSH xuống 1 lần)
      */
-    private Map<String, String> executeCombinedMetricsWithKey(String host, int port, String user,
+    private Map<String, Object> executeCombinedMetricsWithKey(String host, int port, String user,
             String privateKeyPem) {
         try {
             String output = serverService.execCommandWithKey(host, port, user, privateKeyPem, COMBINED_METRICS_COMMAND,
                     SSH_TIMEOUT);
             if (output != null && !output.isBlank()) {
-                return parseCombinedMetricsOutput(output);
+                Map<String, Object> result = parseCombinedMetricsOutput(output);
+                return Map.of(
+                        "cpu", (String) result.get("cpu"),
+                        "ram", (String) result.get("ram"),
+                        "ramPercentage", (Integer) result.get("ramPercentage"),
+                        "disk", (String) result.get("disk"));
             }
         } catch (Exception e) {
             System.err.println("Xác thực SSH key thất bại cho " + host + ": " + e.getMessage());
@@ -117,7 +131,7 @@ public class ClusterAdminController {
      * Thực thi lệnh metrics kết hợp sử dụng password (giảm từ 3 lần SSH xuống 1
      * lần)
      */
-    private Map<String, String> executeCombinedMetricsWithPassword(String host, int port, String user,
+    private Map<String, Object> executeCombinedMetricsWithPassword(String host, int port, String user,
             String password) {
         try {
             String output = serverService.execCommand(host, port, user, password, COMBINED_METRICS_COMMAND,
@@ -128,33 +142,120 @@ public class ClusterAdminController {
         } catch (Exception e) {
             System.err.println("Xác thực password thất bại cho " + host + ": " + e.getMessage());
         }
-        return Map.of("cpu", "-", "ram", "-", "disk", "-");
+        return Map.of("cpu", "-", "ram", "-", "ramPercentage", 0, "disk", "-");
     }
 
     /**
      * Phân tích kết quả metrics kết hợp từ lệnh shell
-     * Định dạng mong đợi: "CPU:4\nRAM:8.0G\nDISK:50G"
+     * Định dạng mong đợi:
+     * "CPU_CORES:4\nCPU_LOAD:1.2\nRAM_TOTAL:8.0G\nRAM_USED:2.1G\nDISK_TOTAL:50G\nDISK_USED:20G\nDISK_PERCENT:45%"
      */
-    private Map<String, String> parseCombinedMetricsOutput(String output) {
-        String cpu = "-", ram = "-", disk = "-";
+    private Map<String, Object> parseCombinedMetricsOutput(String output) {
+        String cpuCores = "-", cpuLoad = "-", ramTotal = "-", ramUsed = "-", diskPercent = "-";
 
         try {
             String[] lines = output.split("\n");
             for (String line : lines) {
                 line = line.trim();
-                if (line.startsWith("CPU:")) {
-                    cpu = line.substring(4).trim();
-                } else if (line.startsWith("RAM:")) {
-                    ram = line.substring(4).trim();
-                } else if (line.startsWith("DISK:")) {
-                    disk = line.substring(5).trim();
+                if (line.startsWith("CPU_CORES:")) {
+                    cpuCores = line.substring(10).trim();
+                } else if (line.startsWith("CPU_LOAD:")) {
+                    cpuLoad = line.substring(9).trim();
+                } else if (line.startsWith("RAM_TOTAL:")) {
+                    ramTotal = line.substring(10).trim();
+                } else if (line.startsWith("RAM_USED:")) {
+                    ramUsed = line.substring(9).trim();
+                } else if (line.startsWith("DISK_PERCENT:")) {
+                    diskPercent = line.substring(13).trim();
                 }
+                // Bỏ qua DISK_TOTAL và DISK_USED vì chỉ cần DISK_PERCENT
             }
         } catch (Exception e) {
             System.err.println("Lỗi phân tích kết quả metrics: " + e.getMessage());
         }
 
-        return Map.of("cpu", cpu, "ram", ram, "disk", disk);
+        // Format hiển thị: CPU (Cores / Load), RAM (Used/Total (X%)), Disk (%)
+        String cpu = cpuCores.equals("-") ? "-" : cpuCores + " cores / " + cpuLoad + " load";
+        Map<String, Object> ramData = formatRamUsageWithPercentage(ramUsed, ramTotal);
+        String disk = diskPercent.equals("-") ? "-" : diskPercent;
+
+        return Map.of(
+                "cpu", cpu,
+                "ram", (String) ramData.get("formatted"),
+                "ramPercentage", (Integer) ramData.get("percentage"),
+                "disk", disk);
+    }
+
+    /**
+     * Format RAM usage với phần trăm chính xác và trả về cả percentage để color
+     * coding
+     * Ví dụ: "554Mi / 3.8Gi (~14%)"
+     */
+    private Map<String, Object> formatRamUsageWithPercentage(String ramUsed, String ramTotal) {
+        if (ramUsed.equals("-") || ramTotal.equals("-")) {
+            return Map.of("formatted", "-", "percentage", 0);
+        }
+
+        try {
+            // Parse RAM values (remove 'G', 'M', 'K' and convert to bytes)
+            double usedBytes = parseMemoryValue(ramUsed);
+            double totalBytes = parseMemoryValue(ramTotal);
+
+            if (usedBytes <= 0 || totalBytes <= 0) {
+                return Map.of("formatted", ramUsed + " / " + ramTotal, "percentage", 0);
+            }
+
+            // Calculate percentage
+            double percentage = (usedBytes / totalBytes) * 100;
+            int roundedPercentage = (int) Math.round(percentage);
+
+            // Format với ~ để chỉ gần đúng
+            String formatted = ramUsed + " / " + ramTotal + " (~" + roundedPercentage + "%)";
+
+            return Map.of("formatted", formatted, "percentage", roundedPercentage);
+        } catch (Exception e) {
+            // Fallback to simple format if parsing fails
+            return Map.of("formatted", ramUsed + " / " + ramTotal, "percentage", 0);
+        }
+    }
+
+    /**
+     * Parse memory value to bytes
+     * Supports G, M, K suffixes
+     */
+    private double parseMemoryValue(String memoryStr) {
+        if (memoryStr == null || memoryStr.trim().isEmpty()) {
+            return 0;
+        }
+
+        String clean = memoryStr.trim().toUpperCase();
+        double multiplier = 1.0;
+
+        if (clean.endsWith("GI")) {
+            multiplier = 1024 * 1024 * 1024; // GiB to bytes
+            clean = clean.substring(0, clean.length() - 2);
+        } else if (clean.endsWith("MI")) {
+            multiplier = 1024 * 1024; // MiB to bytes
+            clean = clean.substring(0, clean.length() - 2);
+        } else if (clean.endsWith("KI")) {
+            multiplier = 1024; // KiB to bytes
+            clean = clean.substring(0, clean.length() - 2);
+        } else if (clean.endsWith("G")) {
+            multiplier = 1024 * 1024 * 1024; // GB to bytes
+            clean = clean.substring(0, clean.length() - 1);
+        } else if (clean.endsWith("M")) {
+            multiplier = 1024 * 1024; // MB to bytes
+            clean = clean.substring(0, clean.length() - 1);
+        } else if (clean.endsWith("K")) {
+            multiplier = 1024; // KB to bytes
+            clean = clean.substring(0, clean.length() - 1);
+        }
+
+        try {
+            return Double.parseDouble(clean) * multiplier;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /**
@@ -306,6 +407,24 @@ public class ClusterAdminController {
         // Lấy servers cho cluster này (query tối ưu)
         var clusterServers = serverService.findByClusterId(id);
 
+        // Lấy danh sách connected servers từ session
+        java.util.Set<Long> connectedIds = new java.util.HashSet<>();
+        if (session != null) {
+            Object connectedAttr = session.getAttribute("CONNECTED_SERVERS");
+            if (connectedAttr instanceof java.util.Set<?> set) {
+                for (Object o : set) {
+                    if (o instanceof Number n) {
+                        connectedIds.add(n.longValue());
+                    } else if (o instanceof String str) {
+                        try {
+                            connectedIds.add(Long.parseLong(str));
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+        }
+
         // Trích xuất dữ liệu server trong main thread để tránh vấn đề JPA session trong
         // các luồng song song
         var serverData = clusterServers.stream()
@@ -318,7 +437,8 @@ public class ClusterAdminController {
                         server.getStatus(),
                         server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null
                                 ? server.getSshKey().getEncryptedPrivateKey()
-                                : null))
+                                : null,
+                        connectedIds.contains(server.getId())))
                 .toList();
 
         // Xử lý servers song song để tăng hiệu suất
@@ -336,8 +456,10 @@ public class ClusterAdminController {
                                     "ip", serverDataItem.host,
                                     "role", serverDataItem.role.name(),
                                     "status", serverDataItem.status.name(),
+                                    "isConnected", serverDataItem.isConnected,
                                     "cpu", metrics.get("cpu"),
                                     "ram", metrics.get("ram"),
+                                    "ramPercentage", metrics.get("ramPercentage"),
                                     "disk", metrics.get("disk"),
                                     "version", version);
                         }))
@@ -366,16 +488,19 @@ public class ClusterAdminController {
                         .println("Lỗi xử lý metrics server cho " + serverDataItem.host + ": " + e.getMessage());
 
                 // Thêm dữ liệu fallback cho server thất bại để duy trì cluster view
-                nodes.add(java.util.Map.of(
-                        "id", serverDataItem.id,
-                        "ip", serverDataItem.host,
-                        "role", serverDataItem.role.name(),
-                        "status", "ERROR", // Đánh dấu là trạng thái lỗi
-                        "cpu", "-",
-                        "ram", "-",
-                        "disk", "-",
-                        "version", "",
-                        "error", "Không thể lấy metrics: " + e.getMessage()));
+                var fallbackNode = new java.util.HashMap<String, Object>();
+                fallbackNode.put("id", serverDataItem.id);
+                fallbackNode.put("ip", serverDataItem.host);
+                fallbackNode.put("role", serverDataItem.role.name());
+                fallbackNode.put("status", serverDataItem.status.name());
+                fallbackNode.put("isConnected", serverDataItem.isConnected);
+                fallbackNode.put("cpu", "-");
+                fallbackNode.put("ram", "-");
+                fallbackNode.put("ramPercentage", 0);
+                fallbackNode.put("disk", "-");
+                fallbackNode.put("version", "");
+                fallbackNode.put("error", "Không thể lấy metrics: " + e.getMessage());
+                nodes.add(fallbackNode);
             }
         }
 
@@ -414,5 +539,120 @@ public class ClusterAdminController {
             }
         }
         return pwCache;
+    }
+
+    /**
+     * Kiểm tra trạng thái cài đặt Ansible với thông tin chi tiết cho tất cả servers
+     */
+    @GetMapping("/{id}/ansible-status")
+    public ResponseEntity<?> getAnsibleStatus(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            System.out.println("DEBUG: Checking Ansible status for cluster ID: " + id);
+
+            var session = request.getSession(false);
+            if (session == null) {
+                System.out.println("DEBUG: No session found");
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Không có session. Vui lòng đăng nhập lại."));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            System.out.println("DEBUG: Password cache size: " + pwCache.size());
+
+            // Lấy thông tin cluster
+            var clusterServers = serverService.findByClusterId(id);
+            System.out.println("DEBUG: Cluster servers count: " + clusterServers.size());
+
+            if (clusterServers.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Cluster không có servers nào."));
+            }
+
+            // Nếu không có password cache, thử kiểm tra với SSH key
+            if (pwCache.isEmpty()) {
+                System.out.println("DEBUG: No password cache, trying SSH key authentication");
+                // Tạo empty password cache để thử SSH key
+                pwCache = new java.util.HashMap<>();
+            }
+
+            Map<String, Object> status = ansibleInstallationService.checkAnsibleInstallation(id, pwCache);
+
+            // Thêm thông tin cluster
+            status.put("clusterInfo", Map.of(
+                    "totalServers", clusterServers.size(),
+                    "masterCount",
+                    clusterServers.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .count(),
+                    "workerCount",
+                    clusterServers.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER)
+                            .count()));
+
+            return ResponseEntity.ok(status);
+
+        } catch (Exception e) {
+            String errorMessage = e.getMessage();
+            if (errorMessage == null) {
+                errorMessage = e.getClass().getSimpleName() + " occurred";
+            }
+            System.err.println("ERROR: Exception in getAnsibleStatus: " + errorMessage);
+            e.printStackTrace();
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Lỗi kiểm tra trạng thái Ansible: " + errorMessage));
+        }
+    }
+
+    /**
+     * Cài đặt Ansible cho cluster với sudo password
+     */
+    @PostMapping("/{id}/install-ansible")
+    public ResponseEntity<?> installAnsible(@PathVariable Long id, @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        try {
+            // Lấy password cache từ session
+            var session = request.getSession(false);
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+
+            if (pwCache.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Không có thông tin xác thực. Vui lòng kết nối lại các server."));
+            }
+
+            // Lấy sudo passwords từ request body
+            @SuppressWarnings("unchecked")
+            Map<String, String> sudoPasswords = (Map<String, String>) body.get("sudoPasswords");
+
+            if (sudoPasswords == null || sudoPasswords.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Vui lòng cung cấp mật khẩu sudo cho các server."));
+            }
+
+            // Convert sudo passwords to Map<Long, String>
+            java.util.Map<Long, String> sudoPasswordCache = new java.util.HashMap<>();
+            var clusterServers = serverService.findByClusterId(id);
+            for (com.example.AutoDeployApp.entity.Server server : clusterServers) {
+                String sudoPassword = sudoPasswords.get(server.getHost());
+                if (sudoPassword != null && !sudoPassword.trim().isEmpty()) {
+                    sudoPasswordCache.put(server.getId(), sudoPassword);
+                }
+            }
+
+            // Bắt đầu cài đặt Ansible
+            ansibleInstallationService.installAnsibleOnCluster(id, pwCache, sudoPasswordCache);
+
+            // Trả về ngay lập tức với task ID
+            String taskId = "ansible-install-" + id + "-" + System.currentTimeMillis();
+
+            return ResponseEntity.ok(Map.of(
+                    "taskId", taskId,
+                    "status", "STARTED",
+                    "message", "Đang cài đặt Ansible trên cluster...",
+                    "clusterId", id));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Lỗi bắt đầu cài đặt Ansible: " + e.getMessage()));
+        }
     }
 }

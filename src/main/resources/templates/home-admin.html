@@ -15,6 +15,138 @@
       top: 0;
       background: #fff;
     }
+    
+    /* Ansible Status Cards */
+    .ansible-status-card {
+      transition: all 0.3s ease;
+    }
+    
+    .ansible-status-card.pending {
+      border-left: 4px solid #6c757d;
+      background-color: #f8f9fa;
+    }
+    
+    .ansible-status-card.installed {
+      border-left: 4px solid #198754;
+      background-color: #d1e7dd;
+    }
+    
+    .ansible-status-card.not-installed {
+      border-left: 4px solid #dc3545;
+      background-color: #f8d7da;
+    }
+    
+    /* Ansible Output Console */
+    .ansible-output-line {
+      margin-bottom: 1px;
+      padding: 1px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    
+    .ansible-output-line .timestamp {
+      color: #6c757d;
+      margin-right: 8px;
+    }
+    
+    .ansible-output-line .server-label {
+      color: #0dcaf0;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+    
+    /* Terminal prompt styling */
+    .ansible-output-line.terminal-prompt {
+      color: #e9ecef;
+    }
+    
+    .ansible-output-line.terminal-prompt .prompt {
+      color: #198754;
+      font-weight: bold;
+    }
+    
+    .ansible-output-line.terminal-prompt .command {
+      color: #ffc107;
+      font-weight: bold;
+    }
+    
+    /* Sudo prompt styling */
+    .ansible-output-line.sudo-prompt {
+      color: #e9ecef;
+    }
+    
+    .ansible-output-line.sudo-prompt .sudo-message {
+      color: #fd7e14;
+      font-style: italic;
+    }
+    
+    .ansible-output-line.sudo-prompt .password-mask {
+      color: #dc3545;
+      font-weight: bold;
+    }
+    
+    /* Terminal output styling */
+    .ansible-output-line.terminal-output {
+      color: #e9ecef;
+    }
+    
+    .ansible-output-line.terminal-output .output-text {
+      color: #f8f9fa;
+      white-space: pre-wrap;
+    }
+    
+    /* Terminal prompt end styling */
+    .ansible-output-line.terminal-prompt-end {
+      color: #e9ecef;
+    }
+    
+    .ansible-output-line.terminal-prompt-end .prompt {
+      color: #198754;
+      font-weight: bold;
+    }
+    
+    /* Info messages */
+    .ansible-output-line.info {
+      color: #0dcaf0;
+    }
+    
+    .ansible-output-line.success {
+      color: #198754;
+    }
+    
+    .ansible-output-line.error {
+      color: #dc3545;
+    }
+    
+    .ansible-output-line.warning {
+      color: #ffc107;
+    }
+    
+    /* Console styling */
+    #ansible-output-console {
+      background-color: #1a1a1a !important;
+      color: #e9ecef;
+      border: 1px solid #495057;
+      border-radius: 0.375rem;
+    }
+    
+    #ansible-output-console::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    #ansible-output-console::-webkit-scrollbar-track {
+      background: #2d3748;
+    }
+    
+    #ansible-output-console::-webkit-scrollbar-thumb {
+      background: #4a5568;
+      border-radius: 4px;
+    }
+    
+    #ansible-output-console::-webkit-scrollbar-thumb:hover {
+      background: #718096;
+    }
   </style>
 </head>
 
@@ -398,10 +530,55 @@
             <div class="col-6 col-md-2"><div class="form-control">Status: <strong id="cd-status"></strong></div></div>
             <div class="col-12 col-md-5"><div class="form-control">K8s Version: <strong id="cd-version"></strong></div></div>
           </div>
+
+          <!-- Ansible Installation Section -->
+          <div class="card mb-3">
+            <div class="card-header">
+              <div class="d-flex align-items-center justify-content-between">
+                <h4 class="h6 m-0">
+                  <i class="bi bi-download text-primary"></i> Cài đặt Ansible
+                </h4>
+             <div class="d-flex gap-2">
+               <button class="btn btn-sm btn-outline-info" id="cd-check-ansible" onclick="checkAnsibleStatus(currentClusterId)">
+                 <i class="bi bi-search"></i> Kiểm tra trạng thái
+               </button>
+             </div>
+              </div>
+            </div>
+            <div class="card-body">
+           <div id="ansible-status-display" class="mb-3">
+             <div class="text-muted text-center py-3">
+               <i class="bi bi-info-circle"></i> Click "Kiểm tra trạng thái" để xem thông tin Ansible trên các MASTER servers
+             </div>
+           </div>
+              
+              <!-- Ansible Status Table -->
+              <div id="ansible-status-table" class="d-none">
+                <h6 class="mb-2">Chi tiết server:</h6>
+                <div class="table-responsive">
+                  <table class="table table-sm">
+                    <thead>
+                      <tr>
+                        <th>Server</th>
+                        <th>Role</th>
+                        <th>Trạng thái Ansible</th>
+                        <th>Phiên bản</th>
+                        <th>Hành động</th>
+                      </tr>
+                    </thead>
+                    <tbody id="ansible-status-tbody">
+                      <!-- Sẽ được populate bằng JavaScript -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="d-flex align-items-center justify-content-between mb-2">
             <h3 class="h6 m-0">Nodes</h3>
             <div class="d-flex gap-2">
-              <button class="btn btn-sm btn-success" id="cd-add-node">Thêm Node</button>
+              <button class="btn btn-sm btn-success" id="cd-add-node" data-bs-toggle="modal" data-bs-target="#addNodeModal">Thêm Node</button>
             </div>
           </div>
           <div id="cd-msg" class="small mb-2" aria-live="polite"></div>
@@ -412,17 +589,227 @@
                   <th>Node IP</th>
                   <th>Role</th>
                   <th>Status</th>
-                  <th>CPU</th>
-                  <th>RAM</th>
-                  <th>Disk</th>
+                  <th>CPU (Cores / Load)</th>
+                  <th>RAM (Used/Total)</th>
+                  <th>Disk (%)</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="cd-nodes-tbody"></tbody>
             </table>
           </div>
+
+          
         </div>
       </div>
+      
+
+      <!-- Add Node Modal -->
+      <div class="modal fade" id="addNodeModal" tabindex="-1" aria-labelledby="addNodeModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="addNodeModalLabel">Thêm Node vào Cluster: <span id="add-node-cluster-name"></span></h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <!-- Tabs Navigation -->
+              <ul class="nav nav-tabs" id="addNodeTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" id="select-existing-tab" data-bs-toggle="tab" data-bs-target="#select-existing" type="button" role="tab" aria-controls="select-existing" aria-selected="true">
+                    <i class="bi bi-list-check"></i> Chọn Node có sẵn
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="add-new-tab" data-bs-toggle="tab" data-bs-target="#add-new" type="button" role="tab" aria-controls="add-new" aria-selected="false">
+                    <i class="bi bi-plus-circle"></i> Thêm Node mới
+                  </button>
+                </li>
+              </ul>
+
+              <!-- Tab Content -->
+              <div class="tab-content" id="addNodeTabContent">
+                <!-- Tab 1: Chọn Node có sẵn -->
+                <div class="tab-pane fade show active" id="select-existing" role="tabpanel" aria-labelledby="select-existing-tab">
+                  <div class="mt-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                      <h6 class="mb-0">Chọn từ các node chưa thuộc cluster:</h6>
+                      <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-existing-nodes">
+                        <i class="bi bi-arrow-clockwise"></i> Làm mới
+                      </button>
+                    </div>
+                    
+                    <div id="existing-nodes-loading" class="text-center py-3 d-none">
+                      <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                      <span>Đang tải danh sách nodes...</span>
+                    </div>
+                    
+                    <div id="existing-nodes-container">
+                      <div class="table-responsive" style="max-height: 300px;">
+                        <table class="table table-sm">
+                          <thead class="table-light">
+                            <tr>
+                              <th style="width: 40px;">
+                                <input type="checkbox" id="select-all-existing" class="form-check-input">
+                              </th>
+                              <th>Host</th>
+                              <th>Username</th>
+                              <th>Status</th>
+                              <th>Role</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody id="existing-nodes-tbody">
+                            <!-- Nodes sẽ được load động -->
+                          </tbody>
+                        </table>
+                      </div>
+                      <div id="no-existing-nodes" class="text-center text-muted py-3 d-none">
+                        <i class="bi bi-info-circle"></i> Không có node nào chưa thuộc cluster
+                      </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                      <label for="selected-nodes-role" class="form-label">Role cho các node được chọn:</label>
+                      <select class="form-select" id="selected-nodes-role">
+                        <option value="WORKER" selected>WORKER</option>
+                        <option value="MASTER">MASTER</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Tab 2: Thêm Node mới -->
+                <div class="tab-pane fade" id="add-new" role="tabpanel" aria-labelledby="add-new-tab">
+                  <div class="mt-3">
+                    <form id="add-node-form">
+                      <input type="hidden" id="add-node-cluster-id" name="clusterId">
+                      <div class="mb-3">
+                        <label for="add-node-host" class="form-label">Host<span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="add-node-host" name="host" placeholder="192.168.1.100" required>
+                      </div>
+                      <div class="mb-3">
+                        <label for="add-node-port" class="form-label">Port</label>
+                        <input type="number" class="form-control" id="add-node-port" name="port" value="22" min="1" max="65535">
+                      </div>
+                      <div class="mb-3">
+                        <label for="add-node-username" class="form-label">Username <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="add-node-username" name="username" placeholder="root" required>
+                      </div>
+                      <div class="mb-3">
+                        <label for="add-node-password" class="form-label">Password <span class="text-danger">*</span></label>
+                        <input type="password" class="form-control" id="add-node-password" name="password" placeholder="Password" required>
+                      </div>
+                      <div class="mb-3">
+                        <label for="add-node-role" class="form-label">Role <span class="text-danger">*</span></label>
+                        <select class="form-select" id="add-node-role" name="role" required>
+                          <option value="WORKER" selected>WORKER</option>
+                          <option value="MASTER">MASTER</option>
+                        </select>
+                        <div class="form-text">Chọn MASTER nếu là master node, WORKER cho worker nodes</div>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Messages -->
+              <div id="add-node-msg" class="small mt-3"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+              <button type="button" class="btn btn-success" id="add-existing-nodes-btn" style="display: none;">
+                <i class="bi bi-list-check"></i> Thêm Node đã chọn
+              </button>
+              <button type="submit" form="add-node-form" class="btn btn-success" id="add-node-submit-btn">
+                <i class="bi bi-plus-circle"></i> Thêm Node mới
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- End Add Node Modal -->
+
+      <!-- Ansible Installation Modal -->
+      <div class="modal fade" id="ansibleInstallModal" tabindex="-1" aria-labelledby="ansibleInstallModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="ansibleInstallModalLabel">
+                <i class="bi bi-download"></i> Cài đặt Ansible - Real-time Monitoring
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <!-- Sudo Password Input Section -->
+              <div id="sudo-password-section" class="mb-4">
+                <h6 class="mb-3">Nhập mật khẩu sudo cho các server:</h6>
+                <div id="sudo-password-inputs" class="row">
+                  <!-- Sẽ được populate bằng JavaScript -->
+                </div>
+                <div class="d-flex justify-content-end mt-3">
+                  <button type="button" class="btn btn-primary" id="start-ansible-install-btn">
+                    <i class="bi bi-play-fill"></i> Bắt đầu cài đặt
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Real-time Output Section -->
+              <div id="ansible-output-section" class="d-none">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h6 class="mb-0">Tiến trình cài đặt:</h6>
+                  <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clear-output-btn">
+                      <i class="bi bi-trash"></i> Xóa log
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="download-log-btn">
+                      <i class="bi bi-download"></i> Tải log
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Progress Bar -->
+                <div class="progress mb-3" style="height: 25px;">
+                  <div id="ansible-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                       role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                    <span id="progress-text">Chuẩn bị...</span>
+                  </div>
+                </div>
+                
+                <!-- Server Status Cards -->
+                <div id="server-status-cards" class="row mb-3">
+                  <!-- Sẽ được populate bằng JavaScript -->
+                </div>
+                
+                <!-- Real-time Output Console -->
+                <div class="card">
+                  <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">Output Console</h6>
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" id="auto-scroll-switch" checked>
+                      <label class="form-check-label" for="auto-scroll-switch">Auto-scroll</label>
+                    </div>
+                  </div>
+                  <div class="card-body p-0">
+                    <div id="ansible-output-console" class="bg-dark text-light p-3" 
+                         style="height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px;">
+                      <!-- Output sẽ được hiển thị ở đây -->
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+              <button type="button" class="btn btn-success d-none" id="ansible-complete-btn" onclick="ansibleInstallComplete()">
+                <i class="bi bi-check-circle"></i> Hoàn thành
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- End Ansible Installation Modal -->
+
     </div>
   </div>
 

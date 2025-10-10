@@ -222,17 +222,40 @@ async function loadClusterList(){
 }
 
 async function showClusterDetail(clusterId){
+  // Set current cluster ID for Ansible functions
+  currentClusterId = clusterId;
+  
   // Chuyển đổi sections
   document.getElementById('k8s-list')?.classList.add('d-none');
   document.getElementById('k8s-create')?.classList.add('d-none');
   document.getElementById('k8s-assign')?.classList.add('d-none');
   document.getElementById('k8s-detail')?.classList.remove('d-none');
 
+  // Hiển thị loading state
+  const msgElement = document.getElementById('cd-msg');
+  if(msgElement) {
+    msgElement.innerHTML = `
+      <div class="d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></div>
+        <span>Đang tải dữ liệu của cụm...</span>
+      </div>
+    `;
+    msgElement.className = 'alert alert-info mb-2';
+  }
+
   const detail = await fetchJSON(`/admin/clusters/${clusterId}/detail`).catch(()=>null);
   if(!detail){
-    const msg = document.getElementById('cd-msg');
-    if(msg){ msg.textContent = 'Không tải được chi tiết cluster'; msg.className='small text-danger'; }
+    if(msgElement) { 
+      msgElement.innerHTML = '<span class="text-danger">❌ Không tải được chi tiết cluster</span>';
+      msgElement.className = 'alert alert-danger mb-2';
+    }
     return;
+  }
+  
+  // Xóa loading state khi có dữ liệu
+  if(msgElement) {
+    msgElement.innerHTML = '';
+    msgElement.className = 'small mb-2';
   }
   document.getElementById('cd-name').textContent = detail.name || '';
   document.getElementById('cd-master').textContent = detail.masterNode || '';
@@ -243,14 +266,32 @@ async function showClusterDetail(clusterId){
   const tbody = document.getElementById('cd-nodes-tbody');
   tbody.innerHTML = '';
   (detail.nodes||[]).forEach(n => {
-    const statusBadge = n.status==='ONLINE'||n.status==='Ready' ? 'success' : (n.status==='WARNING'||n.status==='NotReady' ? 'warning text-dark' : 'danger');
+    // Chỉ hiển thị connection status
+    const connectionStatus = n.isConnected ? 'CONNECTED' : 'OFFLINE';
+    const connectionBadge = n.isConnected ? 'success' : 'secondary';
+    
+    // Color coding cho RAM usage
+    const ramPercentage = n.ramPercentage || 0;
+    let ramColorClass = '';
+    if (ramPercentage >= 90) {
+      ramColorClass = 'text-danger fw-bold'; // Đỏ đậm nếu > 90%
+    } else if (ramPercentage >= 80) {
+      ramColorClass = 'text-danger'; // Đỏ nếu > 80%
+    } else if (ramPercentage >= 70) {
+      ramColorClass = 'text-warning'; // Vàng nếu > 70%
+    } else if (ramPercentage >= 50) {
+      ramColorClass = 'text-info'; // Xanh nhạt nếu > 50%
+    } else {
+      ramColorClass = 'text-success'; // Xanh lá nếu < 50%
+    }
+    
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${n.ip}</td>
       <td>${n.role}</td>
-      <td><span class="badge bg-${statusBadge}">${n.status}</span></td>
+      <td><span class="badge bg-${connectionBadge}">${connectionStatus}</span></td>
       <td>${n.cpu || '-'}</td>
-      <td>${n.ram || '-'}</td>
+      <td class="${ramColorClass}">${n.ram || '-'}</td>
       <td>${n.disk || '-'}</td>
       <td class="text-nowrap">
         <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">Delete</button>
@@ -268,8 +309,354 @@ async function showClusterDetail(clusterId){
       document.getElementById('k8s-list')?.classList.remove('d-none');
       document.getElementById('k8s-create')?.classList.remove('d-none');
       document.getElementById('k8s-assign')?.classList.remove('d-none');
-      await loadClusterList();
+      
+      // Reload cả cluster list và server assignment table để cập nhật dữ liệu
+      await Promise.all([loadClusterList(), loadClustersAndServers()]);
     });
+  }
+
+  // Thêm event listeners cho các nút retry
+  document.querySelectorAll('.cd-retry-node').forEach(btn => {
+    if(!btn.dataset.bound) {
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', async (e) => {
+        const nodeId = e.target.dataset.id;
+        const clusterId = e.target.dataset.cluster;
+        
+        // Hiển thị loading state cho nút retry
+        const originalText = e.target.innerHTML;
+        e.target.innerHTML = `
+          <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+          Đang retry...
+        `;
+        e.target.disabled = true;
+        
+        try {
+          // Reload cluster detail
+          await showClusterDetail(clusterId);
+        } catch (error) {
+          console.error('Error retrying node:', error);
+        } finally {
+          // Restore button state
+          e.target.innerHTML = originalText;
+          e.target.disabled = false;
+        }
+      });
+    }
+  });
+
+  // Thêm event listeners cho các nút remove node
+  document.querySelectorAll('.cd-remove-node').forEach(btn => {
+    if(!btn.dataset.bound) {
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', async (e) => {
+        const nodeId = e.target.dataset.id;
+        const clusterId = e.target.dataset.cluster;
+        
+        if(!confirm('Bỏ node này khỏi cluster?')) return;
+        
+        // Hiển thị loading state cho nút delete
+        const originalText = e.target.innerHTML;
+        e.target.innerHTML = `
+          <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+          Đang xóa...
+        `;
+        e.target.disabled = true;
+        
+        try {
+          // Lấy dữ liệu server hiện tại để giữ nguyên role
+          const servers = await fetchJSON('/admin/servers').catch(() => []);
+          const server = servers.find(s => s.id === parseInt(nodeId, 10));
+          const currentRole = server ? server.role : 'WORKER';
+          
+          // Bỏ node khỏi cluster (giữ nguyên role)
+          const body = { clusterId: null, role: currentRole };
+          await fetchJSON(`/admin/servers/${nodeId}`, { method: 'PUT', body: JSON.stringify(body) });
+          
+          // Hiển thị thông báo thành công
+          const msgElement = document.getElementById('cd-msg');
+          if(msgElement) {
+            msgElement.innerHTML = `<span class="text-success">✓ Đã bỏ node khỏi cluster</span>`;
+            msgElement.className = 'alert alert-success small mb-2';
+            setTimeout(() => {
+              msgElement.innerHTML = '';
+              msgElement.className = 'small mb-2';
+            }, 3000);
+          }
+          
+          // Reload cluster detail để cập nhật dữ liệu
+          await showClusterDetail(clusterId);
+        } catch (error) {
+          console.error('Error removing node:', error);
+          const msgElement = document.getElementById('cd-msg');
+          if(msgElement) {
+            msgElement.innerHTML = `<span class="text-danger">❌ ${error.message || 'Không thể xóa node'}</span>`;
+            msgElement.className = 'alert alert-danger small mb-2';
+          }
+          // Restore button state nếu có lỗi
+          e.target.innerHTML = originalText;
+          e.target.disabled = false;
+        }
+      });
+    }
+  });
+
+  // Cập nhật thông tin cluster cho modal thêm node
+  const addNodeBtn = document.getElementById('cd-add-node');
+  if(addNodeBtn && !addNodeBtn.dataset.clusterBound) {
+    addNodeBtn.dataset.clusterBound = '1';
+    addNodeBtn.addEventListener('click', () => {
+      // Lưu cluster ID và tên vào modal
+      document.getElementById('add-node-cluster-id').value = clusterId;
+      document.getElementById('add-node-cluster-name').textContent = detail.name || '';
+      
+      // Reset form thêm node mới
+      const form = document.getElementById('add-node-form');
+      if(form) {
+        form.reset();
+        document.getElementById('add-node-port').value = '22';
+        document.getElementById('add-node-role').value = 'WORKER';
+      }
+      
+      // Reset tab và load danh sách nodes có sẵn
+      resetAddNodeModal();
+      loadExistingNodes();
+      
+      // Clear message
+      const msgEl = document.getElementById('add-node-msg');
+      if(msgEl) {
+        msgEl.textContent = '';
+        msgEl.className = 'small';
+      }
+    });
+  }
+}
+
+// ================= Add Node Modal Functions =================
+
+// Helper function để reload server assignment table khi cần thiết
+async function refreshServerAssignmentTable() {
+  try {
+    await loadClustersAndServers();
+  } catch (error) {
+    console.error('Error refreshing server assignment table:', error);
+  }
+}
+
+// Reset modal về trạng thái ban đầu
+function resetAddNodeModal() {
+  // Reset về tab đầu tiên
+  const selectExistingTab = document.getElementById('select-existing-tab');
+  const addNewTab = document.getElementById('add-new-tab');
+  const selectExistingPane = document.getElementById('select-existing');
+  const addNewPane = document.getElementById('add-new');
+  
+  if(selectExistingTab && addNewTab && selectExistingPane && addNewPane) {
+    selectExistingTab.classList.add('active');
+    selectExistingTab.setAttribute('aria-selected', 'true');
+    addNewTab.classList.remove('active');
+    addNewTab.setAttribute('aria-selected', 'false');
+    
+    selectExistingPane.classList.add('show', 'active');
+    addNewPane.classList.remove('show', 'active');
+  }
+  
+  // Reset checkboxes
+  const selectAllCheckbox = document.getElementById('select-all-existing');
+  if(selectAllCheckbox) {
+    selectAllCheckbox.checked = false;
+  }
+  
+  // Reset role dropdown
+  const selectedNodesRole = document.getElementById('selected-nodes-role');
+  if(selectedNodesRole) {
+    selectedNodesRole.value = 'WORKER';
+  }
+  
+  // Hide/show buttons
+  const addExistingBtn = document.getElementById('add-existing-nodes-btn');
+  const addNewBtn = document.getElementById('add-node-submit-btn');
+  if(addExistingBtn && addNewBtn) {
+    addExistingBtn.style.display = 'none';
+    addNewBtn.style.display = 'inline-block';
+  }
+}
+
+// Load danh sách nodes chưa thuộc cluster nào
+async function loadExistingNodes() {
+  const loadingEl = document.getElementById('existing-nodes-loading');
+  const containerEl = document.getElementById('existing-nodes-container');
+  const noNodesEl = document.getElementById('no-existing-nodes');
+  const tbodyEl = document.getElementById('existing-nodes-tbody');
+  
+  if(!loadingEl || !containerEl || !noNodesEl || !tbodyEl) return;
+  
+  // Show loading
+  loadingEl.classList.remove('d-none');
+  containerEl.classList.add('d-none');
+  noNodesEl.classList.add('d-none');
+  
+  try {
+    // Load tất cả servers
+    const servers = await fetchJSON('/admin/servers').catch(() => []);
+    
+    // Lọc các server chưa thuộc cluster nào (clusterId null hoặc undefined)
+    const availableNodes = servers.filter(server => 
+      !server.clusterId || server.clusterId === null || server.clusterId === undefined
+    );
+    
+    // Clear tbody
+    tbodyEl.innerHTML = '';
+    
+    if(availableNodes.length === 0) {
+      // Không có node nào available
+      loadingEl.classList.add('d-none');
+      noNodesEl.classList.remove('d-none');
+      return;
+    }
+    
+    // Render nodes
+    availableNodes.forEach(node => {
+      const statusBadge = node.status === 'ONLINE' ? 'success' : 'secondary';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>
+          <input type="checkbox" class="form-check-input existing-node-checkbox" value="${node.id}">
+        </td>
+        <td>${node.host || ''}</td>
+        <td>${node.username || ''}</td>
+        <td><span class="badge bg-${statusBadge}">${node.status || 'OFFLINE'}</span></td>
+        <td><span class="badge bg-info">${node.role || 'WORKER'}</span></td>
+        <td>
+          <button class="btn btn-sm btn-outline-primary add-single-node" data-id="${node.id}">
+            <i class="bi bi-plus"></i> Thêm
+          </button>
+        </td>
+      `;
+      tbodyEl.appendChild(tr);
+    });
+    
+    // Hide loading, show table
+    loadingEl.classList.add('d-none');
+    containerEl.classList.remove('d-none');
+    
+    // Bind events
+    bindExistingNodesEvents();
+    
+  } catch(error) {
+    console.error('Error loading existing nodes:', error);
+    loadingEl.classList.add('d-none');
+    noNodesEl.classList.remove('d-none');
+    noNodesEl.innerHTML = '<i class="bi bi-exclamation-triangle text-warning"></i> Lỗi khi tải danh sách nodes';
+  }
+}
+
+// Bind events cho existing nodes
+function bindExistingNodesEvents() {
+  // Select all checkbox
+  const selectAllCheckbox = document.getElementById('select-all-existing');
+  if(selectAllCheckbox && !selectAllCheckbox.dataset.bound) {
+    selectAllCheckbox.dataset.bound = '1';
+    selectAllCheckbox.addEventListener('change', () => {
+      const checkboxes = document.querySelectorAll('.existing-node-checkbox');
+      checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+      updateAddExistingButton();
+    });
+  }
+  
+  // Individual checkboxes
+  document.querySelectorAll('.existing-node-checkbox').forEach(checkbox => {
+    if(!checkbox.dataset.bound) {
+      checkbox.dataset.bound = '1';
+      checkbox.addEventListener('change', () => {
+        updateSelectAllState();
+        updateAddExistingButton();
+      });
+    }
+  });
+  
+  // Add single node buttons
+  document.querySelectorAll('.add-single-node').forEach(btn => {
+    if(!btn.dataset.bound) {
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', async (e) => {
+        const nodeId = parseInt(e.target.closest('button').dataset.id, 10);
+        const role = document.getElementById('selected-nodes-role').value;
+        await addExistingNodesToCluster([nodeId], role);
+      });
+    }
+  });
+}
+
+// Update select all checkbox state
+function updateSelectAllState() {
+  const selectAllCheckbox = document.getElementById('select-all-existing');
+  const checkboxes = document.querySelectorAll('.existing-node-checkbox');
+  
+  if(selectAllCheckbox && checkboxes.length > 0) {
+    const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
+    selectAllCheckbox.checked = checkedCount === checkboxes.length;
+    selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+  }
+}
+
+// Update add existing button visibility
+function updateAddExistingButton() {
+  const checkboxes = document.querySelectorAll('.existing-node-checkbox:checked');
+  const addExistingBtn = document.getElementById('add-existing-nodes-btn');
+  
+  if(addExistingBtn) {
+    if(checkboxes.length > 0) {
+      addExistingBtn.style.display = 'inline-block';
+      addExistingBtn.innerHTML = `<i class="bi bi-list-check"></i> Thêm ${checkboxes.length} Node đã chọn`;
+    } else {
+      addExistingBtn.style.display = 'none';
+    }
+  }
+}
+
+// Add existing nodes to cluster
+async function addExistingNodesToCluster(nodeIds, role) {
+  const msgEl = document.getElementById('add-node-msg');
+  const addExistingBtn = document.getElementById('add-existing-nodes-btn');
+  
+  if(!msgEl || !addExistingBtn) return;
+  
+  msgEl.textContent = '';
+  msgEl.className = 'small';
+  
+  try {
+    addExistingBtn.disabled = true;
+    addExistingBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang thêm...';
+    
+    // Cập nhật từng node
+    for(const nodeId of nodeIds) {
+      const body = { clusterId: parseInt(document.getElementById('add-node-cluster-id').value, 10), role: role };
+      await fetchJSON(`/admin/servers/${nodeId}`, { method: 'PUT', body: JSON.stringify(body) });
+    }
+    
+    msgEl.textContent = `✓ Đã thêm ${nodeIds.length} node vào cluster`;
+    msgEl.className = 'small text-success';
+    
+    // Reload danh sách và đóng modal sau 1 giây
+    setTimeout(async () => {
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addNodeModal'));
+      if(modal) modal.hide();
+      
+      // Reload cluster detail
+      const currentClusterId = parseInt(document.getElementById('add-node-cluster-id').value, 10);
+      if(!isNaN(currentClusterId)) {
+        await showClusterDetail(currentClusterId);
+      }
+    }, 1000);
+    
+  } catch(error) {
+    console.error('Error adding existing nodes:', error);
+    msgEl.textContent = error.message || 'Thêm node thất bại';
+    msgEl.className = 'small text-danger';
+  } finally {
+    addExistingBtn.disabled = false;
+    addExistingBtn.innerHTML = '<i class="bi bi-list-check"></i> Thêm Node đã chọn';
   }
 }
 
@@ -302,10 +689,103 @@ document.addEventListener('submit', async (e) => {
       btn.disabled = false; btn.textContent = 'Tạo';
     }
   }
+  
+  // Xử lý form thêm node vào cluster
+  if(f && f.id === 'add-node-form'){
+    e.preventDefault();
+    const msgEl = document.getElementById('add-node-msg');
+    const btn = document.getElementById('add-node-submit-btn');
+    
+    if(!msgEl || !btn) {
+      console.error('add-node-msg or add-node-submit-btn element not found');
+      return;
+    }
+    
+    msgEl.textContent = '';
+    msgEl.className = 'small';
+    
+    const clusterId = parseInt(document.getElementById('add-node-cluster-id').value, 10);
+    if(isNaN(clusterId)) {
+      msgEl.textContent = 'Cluster ID không hợp lệ';
+      msgEl.className = 'small text-danger';
+      return;
+    }
+    
+    const body = {
+      host: f.host.value.trim(),
+      port: parseInt(f.port.value, 10),
+      username: f.username.value.trim(),
+      password: f.password.value,
+      clusterId: clusterId,
+      role: f.role.value
+    };
+    
+    try {
+      btn.disabled = true; 
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang thêm...';
+      
+      // Tạo server mới và gán vào cluster với role
+      const result = await fetchJSON('/admin/servers', {method:'POST', body: JSON.stringify(body)});
+      
+      msgEl.textContent = '✓ Đã thêm node thành công'; 
+      msgEl.className = 'small text-success';
+      
+      // Reset form
+      f.reset();
+      f.port.value = 22;
+      f.role.value = 'WORKER';
+      
+      // Đóng modal sau 1 giây
+      setTimeout(() => {
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addNodeModal'));
+        if(modal) modal.hide();
+        
+        // Reload cluster detail để hiển thị node mới
+        const currentClusterId = parseInt(document.getElementById('add-node-cluster-id').value, 10);
+        if(!isNaN(currentClusterId)) {
+          showClusterDetail(currentClusterId);
+        }
+      }, 1000);
+      
+    } catch(err){
+      console.error('Add node error:', err);
+      msgEl.textContent = err.message || 'Thêm node thất bại'; 
+      msgEl.className = 'small text-danger';
+    } finally {
+      btn.disabled = false; 
+      btn.innerHTML = 'Thêm Node';
+    }
+  }
 });
 
 document.addEventListener('click', async (e) => {
   const t = e.target;
+  
+  // Handle refresh existing nodes button
+  if(t && t.id === 'refresh-existing-nodes'){
+    e.preventDefault();
+    await loadExistingNodes();
+  }
+  
+  // Handle add existing nodes button
+  if(t && t.id === 'add-existing-nodes-btn'){
+    e.preventDefault();
+    const checkboxes = document.querySelectorAll('.existing-node-checkbox:checked');
+    const nodeIds = Array.from(checkboxes).map(cb => parseInt(cb.value, 10));
+    const role = document.getElementById('selected-nodes-role').value;
+    
+    if(nodeIds.length === 0) {
+      const msgEl = document.getElementById('add-node-msg');
+      if(msgEl) {
+        msgEl.textContent = 'Vui lòng chọn ít nhất một node';
+        msgEl.className = 'small text-warning';
+      }
+      return;
+    }
+    
+    await addExistingNodesToCluster(nodeIds, role);
+  }
+  
   if(t && t.id === 'btn-assign-selected'){
     e.preventDefault();
     const clusterSel = document.getElementById('k8s-cluster-select');
@@ -446,7 +926,6 @@ async function bulkAssignServers(ids, clusterId){
       const server = servers.find(s => s.id === id);
       const currentRole = server ? server.role : 'WORKER'; // Dự phòng WORKER nếu không tìm thấy
       body.role = currentRole;
-      console.log('Đang bỏ nhiều máy chủ khỏi cluster (giữ nguyên role):', { id, currentRole });
     }
     await fetchJSON(`/admin/servers/${id}`, { method:'PUT', body: JSON.stringify(body) }).catch(()=>{});
   }
@@ -469,7 +948,6 @@ async function bulkAssignServersToCluster(ids, clusterId){
     const server = servers.find(s => s.id === id);
     const currentRole = server ? server.role : 'WORKER'; // Dự phòng WORKER nếu không tìm thấy
     const body = { clusterId: clusterId, role: currentRole };
-    console.log('Đang gán máy chủ vào cluster:', { id, clusterId, currentRole });
     await fetchJSON(`/admin/servers/${id}`, { method:'PUT', body: JSON.stringify(body) }).catch(()=>{});
   }
 }
@@ -486,7 +964,6 @@ async function bulkUpdateServerRoles(ids, newRole){
     if (currentClusterId) {
       body.clusterId = currentClusterId; // Giữ nguyên cluster hiện tại
     }
-    console.log('Đang cập nhật role máy chủ:', { id, newRole, currentClusterId, body });
     await fetchJSON(`/admin/servers/${id}`, { method:'PUT', body: JSON.stringify(body) }).catch(()=>{});
   }
 }
@@ -511,7 +988,6 @@ async function saveServerRole(serverId){
   
   try{
     const body = { role: newRole };
-    console.log('Đang lưu role máy chủ:', { serverId, newRole, body });
     await fetchJSON(`/admin/servers/${serverId}`, { method:'PUT', body: JSON.stringify(body) });
     
     if(msg) {
@@ -563,7 +1039,6 @@ async function saveServerClusterAndRole(serverId){
       body.clusterId = null; // Bỏ khỏi cluster
     }
     
-    console.log('Đang lưu cluster và role máy chủ:', { serverId, newClusterId, newRole, body });
     await fetchJSON(`/admin/servers/${serverId}`, { method:'PUT', body: JSON.stringify(body) });
     
     if(msg) {
@@ -606,7 +1081,6 @@ async function removeSingleServerFromCluster(serverId){
     const currentRole = server ? server.role : 'WORKER'; // Dự phòng WORKER nếu không tìm thấy
     
     const body = { clusterId: null, role: currentRole };
-    console.log('Đang bỏ máy chủ đơn lẻ khỏi cluster (giữ nguyên role):', { serverId, currentRole, body });
     await fetchJSON(`/admin/servers/${serverId}`, { method:'PUT', body: JSON.stringify(body) });
     
     if(msg) {
@@ -860,7 +1334,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Tự động kết nối các máy chủ khi đăng nhập vào home-admin
   async function autoConnectServers() {
     try{
-      console.log('Đang tự động kết nối máy chủ...');
       
       // Hiển thị indicator nếu đang ở tab server hoặc k8s
       const currentSection = document.querySelector('.section:not(.d-none)')?.id;
@@ -871,7 +1344,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       
       await fetchJSON('/admin/servers/check-status', {method:'POST'});
-      console.log('Tự động kết nối máy chủ hoàn thành');
       
       // Reload server data in current visible tab
       if (currentSection === 'section-server') {
@@ -945,6 +1417,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       } finally {
         btnCheck.disabled = false; btnCheck.textContent = 'Kiểm tra trạng thái';
       }
+    });
+  }
+  
+  // Handle tab changes in add node modal
+  const selectExistingTab = document.getElementById('select-existing-tab');
+  const addNewTab = document.getElementById('add-new-tab');
+  const addExistingBtn = document.getElementById('add-existing-nodes-btn');
+  const addNewBtn = document.getElementById('add-node-submit-btn');
+  
+  if(selectExistingTab && addNewTab && addExistingBtn && addNewBtn) {
+    selectExistingTab.addEventListener('shown.bs.tab', () => {
+      addExistingBtn.style.display = 'inline-block';
+      addNewBtn.style.display = 'none';
+    });
+    
+    addNewTab.addEventListener('shown.bs.tab', () => {
+      addExistingBtn.style.display = 'none';
+      addNewBtn.style.display = 'inline-block';
     });
   }
 });
@@ -1060,5 +1550,716 @@ document.addEventListener('click', (e) => {
     connectTerminal();
   }
 });
+
+// ================= Ansible Installation Functions =================
+
+let ansibleWebSocket = null;
+let ansibleLogData = [];
+let currentClusterId = null;
+
+// Check Ansible Status
+async function checkAnsibleStatus(clusterId) {
+  const checkBtn = document.getElementById('cd-check-ansible');
+  const statusDisplay = document.getElementById('ansible-status-display');
+  const statusTable = document.getElementById('ansible-status-table');
+  
+  try {
+    checkBtn.disabled = true;
+    checkBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang kiểm tra...';
+    
+    
+    const ansibleStatus = await fetchJSON(`/admin/clusters/${clusterId}/ansible-status`);
+    
+    
+    // Hide default message
+    statusDisplay.classList.add('d-none');
+    
+    // Show status table
+    statusTable.classList.remove('d-none');
+    
+    // Update status table
+    updateAnsibleStatusTable(ansibleStatus);
+    
+  } catch (error) {
+    console.error('Lỗi kiểm tra trạng thái Ansible:', error);
+    
+    // Hiển thị lỗi chi tiết hơn
+    let errorMessage = error.message;
+    if (error.message.includes('Yêu cầu không hợp lệ')) {
+      errorMessage = 'Không có thông tin xác thực. Vui lòng kết nối lại các server trước khi kiểm tra Ansible.';
+    }
+    
+    statusDisplay.innerHTML = `
+      <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i> Lỗi kiểm tra trạng thái Ansible: ${errorMessage}
+        <br><small class="text-muted">Vui lòng đảm bảo các server đã được kết nối và có thể SSH.</small>
+      </div>
+    `;
+    statusDisplay.classList.remove('d-none');
+    
+    // Hide status table on error
+    statusTable.classList.add('d-none');
+    
+  } finally {
+    checkBtn.disabled = false;
+    checkBtn.innerHTML = '<i class="bi bi-search"></i> Kiểm tra trạng thái';
+  }
+}
+
+
+function updateAnsibleStatusTable(ansibleStatus) {
+  const tbody = document.getElementById('ansible-status-tbody');
+  tbody.innerHTML = '';
+  
+  Object.entries(ansibleStatus.ansibleStatus).forEach(([host, status]) => {
+    const tr = document.createElement('tr');
+    tr.className = status.installed ? 'table-success' : 'table-danger';
+    
+    tr.innerHTML = `
+      <td><strong>${host}</strong></td>
+      <td>
+        <span class="badge bg-${status.role === 'MASTER' ? 'primary' : 'secondary'}">
+          ${status.role}
+        </span>
+      </td>
+      <td>
+        <span class="badge bg-${status.installed ? 'success' : 'danger'}">
+          <i class="bi bi-${status.installed ? 'check-circle' : 'x-circle'}"></i>
+          ${status.installed ? 'Đã cài đặt' : 'Chưa cài đặt'}
+        </span>
+      </td>
+      <td>${status.installed ? `<code>${status.version}</code>` : 'N/A'}</td>
+      <td>
+        ${status.installed ? 
+          '<button class="btn btn-sm btn-outline-warning" onclick="reinstallAnsibleOnServer(\'' + host + '\')">Cài đặt lại</button>' :
+          '<button class="btn btn-sm btn-outline-primary" onclick="installAnsibleOnServer(\'' + host + '\')">Cài đặt</button>'
+        }
+      </td>
+    `;
+    
+    tbody.appendChild(tr);
+  });
+}
+
+// Install Ansible on single server
+async function installAnsibleOnServer(host) {
+  
+  if (!currentClusterId) {
+    alert('Không tìm thấy thông tin cluster');
+    return;
+  }
+  
+  
+  // Show modal for single server installation
+  await showAnsibleInstallModalForServer(currentClusterId, host, false);
+}
+
+// Reinstall Ansible on single server
+async function reinstallAnsibleOnServer(host) {
+  
+  if (!currentClusterId) {
+    alert('Không tìm thấy thông tin cluster');
+    return;
+  }
+  
+  
+  // Show modal for single server reinstallation
+  await showAnsibleInstallModalForServer(currentClusterId, host, true);
+}
+
+// Show Ansible Install Modal for single server
+async function showAnsibleInstallModalForServer(clusterId, targetHost, isReinstall) {
+  
+  currentClusterId = clusterId;
+  
+  try {
+    // Lấy thông tin cluster
+    const clusterDetail = await fetchJSON(`/admin/clusters/${clusterId}/detail`);
+    
+    // Tìm server cần cài đặt
+    const targetServer = clusterDetail.nodes.find(node => node.ip === targetHost);
+    if (!targetServer) {
+      alert('Không tìm thấy server: ' + targetHost);
+      return;
+    }
+    
+  
+    // Populate sudo password input chỉ cho server này
+    const sudoInputsContainer = document.getElementById('sudo-password-inputs');
+    sudoInputsContainer.innerHTML = '';
+    
+    const colDiv = document.createElement('div');
+    colDiv.className = 'col-12 mb-3';
+    colDiv.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <h6 class="card-title">${targetServer.ip} <span class="badge bg-${targetServer.role === 'MASTER' ? 'primary' : 'secondary'}">${targetServer.role}</span></h6>
+          <input type="password" class="form-control sudo-password-input" 
+                 data-host="${targetServer.ip}" placeholder="Nhập mật khẩu sudo">
+        </div>
+      </div>
+    `;
+    sudoInputsContainer.appendChild(colDiv);
+    
+    // Update modal title
+    const modalTitle = document.querySelector('#ansibleInstallModal .modal-title');
+    modalTitle.innerHTML = `<i class="bi bi-download"></i> ${isReinstall ? 'Cài đặt lại' : 'Cài đặt'} Ansible - ${targetHost}`;
+    
+    // Reset modal state
+    document.getElementById('sudo-password-section').classList.remove('d-none');
+    document.getElementById('ansible-output-section').classList.add('d-none');
+    document.getElementById('ansible-complete-btn').classList.add('d-none');
+    
+    // Store target server info
+    window.currentTargetServer = targetServer;
+    window.isReinstallMode = isReinstall;
+    
+    
+    // Show modal
+    const modalElement = document.getElementById('ansibleInstallModal');
+    
+    if (!modalElement) {
+      alert('Lỗi: Không tìm thấy modal element');
+      return;
+    }
+    
+    try {
+      const modal = new bootstrap.Modal(modalElement);
+      modal.show();
+      
+      // Force modal visibility as fallback
+      setTimeout(() => {
+        modalElement.style.display = 'block';
+        modalElement.classList.add('show');
+        modalElement.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('modal-open');
+      }, 100);
+      
+    } catch (bootstrapError) {
+      alert('Lỗi Bootstrap: ' + bootstrapError.message);
+    }
+    
+  } catch (error) {
+    alert('Lỗi khi mở modal cài đặt: ' + error.message);
+  }
+}
+
+// Show Ansible Install Modal
+async function showAnsibleInstallModal(clusterId) {
+  currentClusterId = clusterId;
+  
+  // Lấy thông tin cluster
+  const clusterDetail = await fetchJSON(`/admin/clusters/${clusterId}/detail`);
+  
+  // Populate sudo password inputs
+  const sudoInputsContainer = document.getElementById('sudo-password-inputs');
+  sudoInputsContainer.innerHTML = '';
+  
+  clusterDetail.nodes.forEach(node => {
+    const colDiv = document.createElement('div');
+    colDiv.className = 'col-md-6 mb-3';
+    colDiv.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <h6 class="card-title">${node.ip} <span class="badge bg-${node.role === 'MASTER' ? 'primary' : 'secondary'}">${node.role}</span></h6>
+          <input type="password" class="form-control sudo-password-input" 
+                 data-host="${node.ip}" placeholder="Nhập mật khẩu sudo">
+        </div>
+      </div>
+    `;
+    sudoInputsContainer.appendChild(colDiv);
+  });
+  
+  // Reset modal state
+  document.getElementById('sudo-password-section').classList.remove('d-none');
+  document.getElementById('ansible-output-section').classList.add('d-none');
+  document.getElementById('ansible-complete-btn').classList.add('d-none');
+  
+  // Show modal
+  const modal = new bootstrap.Modal(document.getElementById('ansibleInstallModal'));
+  modal.show();
+}
+
+function startAnsibleInstallation() {
+  const sudoPasswords = {};
+  let hasPassword = false;
+  
+  document.querySelectorAll('.sudo-password-input').forEach(input => {
+    const host = input.dataset.host;
+    const password = input.value.trim();
+    if (password) {
+      sudoPasswords[host] = password;
+      hasPassword = true;
+    }
+  });
+  
+  if (!hasPassword) {
+    alert('Vui lòng nhập mật khẩu sudo.');
+    return;
+  }
+  
+  // Hide sudo password section, show output section
+  document.getElementById('sudo-password-section').classList.add('d-none');
+  document.getElementById('ansible-output-section').classList.remove('d-none');
+  
+  // Initialize server status cards
+  initializeServerStatusCards();
+  
+  // Connect WebSocket - command will be sent automatically when connected
+  connectAnsibleWebSocket();
+}
+
+function initializeServerStatusCards() {
+  const container = document.getElementById('server-status-cards');
+  container.innerHTML = '';
+  
+  // Nếu có target server, hiển thị card cho server đó
+  if (window.currentTargetServer) {
+    const server = window.currentTargetServer;
+    const isReinstall = window.isReinstallMode || false;
+    
+    const cardDiv = document.createElement('div');
+    cardDiv.className = 'col-md-6';
+    cardDiv.innerHTML = `
+      <div class="card">
+        <div class="card-body text-center">
+          <h6 class="card-title">${server.ip}</h6>
+          <span class="badge bg-${server.role === 'MASTER' ? 'primary' : 'secondary'} mb-2">${server.role}</span>
+          <div id="server-status-${server.ip}" class="server-status">
+            <span class="badge bg-secondary">Chờ xử lý</span>
+          </div>
+        </div>
+      </div>
+    `;
+    container.appendChild(cardDiv);
+    
+    addLogMessage('info', `Khởi tạo monitoring interface cho server ${server.ip}...`);
+  } else {
+    // Fallback cho trường hợp không có target server
+    addLogMessage('info', 'Khởi tạo monitoring interface...');
+  }
+}
+
+function connectAnsibleWebSocket() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = `${protocol}://${location.host}/ws/ansible`;
+  
+  
+  // Close existing connection if any
+  if (ansibleWebSocket && ansibleWebSocket.readyState === WebSocket.OPEN) {
+    ansibleWebSocket.close();
+  }
+  
+  ansibleWebSocket = new WebSocket(wsUrl);
+  
+  ansibleWebSocket.onopen = function(event) {
+    addLogMessage('success', '✅ Kết nối WebSocket thành công');
+    addLogMessage('info', '🔗 WebSocket connected');
+    
+    // Send installation start command after connection is established
+    sendInstallationStartCommand();
+  };
+  
+  ansibleWebSocket.onmessage = function(event) {
+    try {
+      const data = JSON.parse(event.data);
+      handleAnsibleMessage(data);
+    } catch (e) {
+      console.error('Lỗi parse WebSocket message:', e);
+      addLogMessage('error', '❌ Lỗi parse message: ' + e.message);
+    }
+  };
+  
+  ansibleWebSocket.onclose = function(event) {
+    addLogMessage('warning', `⚠️ WebSocket connection closed (Code: ${event.code})`);
+    
+    if (event.code !== 1000) { // Not normal closure
+      addLogMessage('error', '❌ WebSocket closed unexpectedly');
+    }
+  };
+  
+  ansibleWebSocket.onerror = function(error) {
+    addLogMessage('error', '❌ WebSocket error occurred');
+  };
+}
+
+function sendInstallationStartCommand() {
+  if (!ansibleWebSocket || ansibleWebSocket.readyState !== WebSocket.OPEN) {
+    addLogMessage('error', '❌ WebSocket không sẵn sàng để gửi lệnh');
+    return;
+  }
+  
+  const sudoPasswords = {};
+  let hasPassword = false;
+  
+  document.querySelectorAll('.sudo-password-input').forEach(input => {
+    const host = input.dataset.host;
+    const password = input.value.trim();
+    if (password) {
+      sudoPasswords[host] = password;
+      hasPassword = true;
+    }
+  });
+  
+  if (!hasPassword) {
+    addLogMessage('error', '❌ Vui lòng nhập mật khẩu sudo');
+    return;
+  }
+  
+  const message = {
+    action: 'start_ansible_install',
+    clusterId: currentClusterId,
+    sudoPasswords: sudoPasswords,
+    targetServer: window.currentTargetServer ? window.currentTargetServer.ip : null,
+    isReinstall: window.isReinstallMode || false
+  };
+  
+  ansibleWebSocket.send(JSON.stringify(message));
+  addLogMessage('info', '📤 Đã gửi lệnh cài đặt đến server');
+}
+
+function handleAnsibleMessage(data) {
+  switch (data.type) {
+    case 'connected':
+      addLogMessage('info', '🔗 ' + data.message);
+      break;
+      
+    case 'start':
+      addLogMessage('info', '🚀 ' + data.message);
+      updateProgress(0, 'Bắt đầu...');
+      break;
+      
+    case 'info':
+      addLogMessage('info', 'ℹ️ ' + data.message);
+      break;
+      
+    case 'server_start':
+      addLogMessage('info', `🔄 [${data.progress}] Bắt đầu cài đặt trên ${data.server}`);
+      updateServerStatus(data.server, 'running', data.message);
+      break;
+      
+    case 'server_success':
+      addLogMessage('success', `✅ ${data.message}`);
+      updateServerStatus(data.server, 'success', 'Cài đặt thành công');
+      break;
+      
+    case 'server_error':
+      addLogMessage('error', `❌ ${data.message}`);
+      updateServerStatus(data.server, 'error', 'Cài đặt thất bại');
+      break;
+      
+    case 'step':
+      addLogMessage('info', `📋 [${data.server}] Bước ${data.step}: ${data.message}`);
+      break;
+      
+    case 'terminal_prompt':
+      addTerminalPrompt(data.server, data.prompt, data.command);
+      break;
+      
+    case 'sudo_prompt':
+      addSudoPrompt(data.server, data.message);
+      break;
+      
+    case 'terminal_output':
+      addTerminalOutput(data.server, data.output);
+      break;
+      
+    case 'terminal_prompt_end':
+      addTerminalPromptEnd(data.server, data.prompt);
+      break;
+      
+    case 'complete':
+      addLogMessage('success', '🎉 ' + data.message);
+      updateProgress(100, 'Hoàn thành!');
+      document.getElementById('ansible-complete-btn').classList.remove('d-none');
+      break;
+      
+    case 'error':
+      addLogMessage('error', '❌ ' + data.message);
+      break;
+  }
+}
+
+function addLogMessage(type, message) {
+  const console = document.getElementById('ansible-output-console');
+  const timestamp = new Date().toLocaleTimeString();
+  
+  const lineDiv = document.createElement('div');
+  lineDiv.className = `ansible-output-line ${type}`;
+  lineDiv.innerHTML = `[${timestamp}] ${message}`;
+  
+  console.appendChild(lineDiv);
+  scrollToBottom();
+  
+  // Store log data
+  ansibleLogData.push({
+    timestamp: timestamp,
+    type: type,
+    message: message
+  });
+}
+
+function addTerminalPrompt(server, prompt, command) {
+  const console = document.getElementById('ansible-output-console');
+  const timestamp = new Date().toLocaleTimeString();
+  
+  const lineDiv = document.createElement('div');
+  lineDiv.className = 'ansible-output-line terminal-prompt';
+  lineDiv.innerHTML = `
+    <span class="timestamp">[${timestamp}]</span>
+    <span class="server-label">[${server}]</span>
+    <span class="prompt">${prompt}</span>
+    <span class="command">${command}</span>
+  `;
+  
+  console.appendChild(lineDiv);
+  scrollToBottom();
+  
+  // Store log data
+  ansibleLogData.push({
+    timestamp: timestamp,
+    type: 'terminal_prompt',
+    server: server,
+    prompt: prompt,
+    command: command
+  });
+}
+
+function addSudoPrompt(server, message) {
+  const console = document.getElementById('ansible-output-console');
+  const timestamp = new Date().toLocaleTimeString();
+  
+  const lineDiv = document.createElement('div');
+  lineDiv.className = 'ansible-output-line sudo-prompt';
+  lineDiv.innerHTML = `
+    <span class="timestamp">[${timestamp}]</span>
+    <span class="server-label">[${server}]</span>
+    <span class="sudo-message">${message}</span>
+    <span class="password-mask">••••••••</span>
+  `;
+  
+  console.appendChild(lineDiv);
+  scrollToBottom();
+  
+  // Store log data
+  ansibleLogData.push({
+    timestamp: timestamp,
+    type: 'sudo_prompt',
+    server: server,
+    message: message
+  });
+}
+
+function addTerminalOutput(server, output) {
+  const console = document.getElementById('ansible-output-console');
+  const timestamp = new Date().toLocaleTimeString();
+  
+  // Split output by lines để hiển thị từng dòng
+  const lines = output.split('\n');
+  
+  lines.forEach(line => {
+    if (line.trim()) { // Chỉ hiển thị dòng không rỗng
+      const lineDiv = document.createElement('div');
+      lineDiv.className = 'ansible-output-line terminal-output';
+      lineDiv.innerHTML = `
+        <span class="timestamp">[${timestamp}]</span>
+        <span class="server-label">[${server}]</span>
+        <span class="output-text">${escapeHtml(line)}</span>
+      `;
+      
+      console.appendChild(lineDiv);
+    }
+  });
+  
+  scrollToBottom();
+  
+  // Store log data
+  ansibleLogData.push({
+    timestamp: timestamp,
+    type: 'terminal_output',
+    server: server,
+    output: output
+  });
+}
+
+function addTerminalPromptEnd(server, prompt) {
+  const console = document.getElementById('ansible-output-console');
+  const timestamp = new Date().toLocaleTimeString();
+  
+  const lineDiv = document.createElement('div');
+  lineDiv.className = 'ansible-output-line terminal-prompt-end';
+  lineDiv.innerHTML = `
+    <span class="timestamp">[${timestamp}]</span>
+    <span class="server-label">[${server}]</span>
+    <span class="prompt">${prompt}</span>
+  `;
+  
+  console.appendChild(lineDiv);
+  scrollToBottom();
+  
+  // Store log data
+  ansibleLogData.push({
+    timestamp: timestamp,
+    type: 'terminal_prompt_end',
+    server: server,
+    prompt: prompt
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function scrollToBottom() {
+  if (document.getElementById('auto-scroll-switch').checked) {
+    const console = document.getElementById('ansible-output-console');
+    console.scrollTop = console.scrollHeight;
+  }
+}
+
+function updateProgress(percentage, text) {
+  const progressBar = document.getElementById('ansible-progress-bar');
+  const progressText = document.getElementById('progress-text');
+  
+  progressBar.style.width = percentage + '%';
+  progressBar.setAttribute('aria-valuenow', percentage);
+  progressText.textContent = text;
+  
+  if (percentage === 100) {
+    progressBar.classList.remove('progress-bar-animated');
+    progressBar.classList.add('bg-success');
+  }
+}
+
+function updateServerStatus(serverHost, status, message) {
+  // Tìm hoặc tạo server status card
+  let card = document.querySelector(`[data-server="${serverHost}"]`);
+  if (!card) {
+    const container = document.getElementById('server-status-cards');
+    card = document.createElement('div');
+    card.className = 'col-md-6 mb-2';
+    card.setAttribute('data-server', serverHost);
+    card.innerHTML = `
+      <div class="card server-status-card">
+        <div class="card-body p-2">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <strong>${serverHost}</strong>
+              <div class="small text-muted" id="status-${serverHost}">Chờ xử lý...</div>
+            </div>
+            <div id="icon-${serverHost}">
+              <i class="bi bi-clock text-muted"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  }
+  
+  // Update status
+  const statusDiv = document.getElementById(`status-${serverHost}`);
+  const iconDiv = document.getElementById(`icon-${serverHost}`);
+  
+  statusDiv.textContent = message;
+  
+  // Update card class and icon
+  const cardDiv = card.querySelector('.server-status-card');
+  cardDiv.className = `card server-status-card ${status}`;
+  
+  switch (status) {
+    case 'pending':
+      iconDiv.innerHTML = '<i class="bi bi-clock text-muted"></i>';
+      break;
+    case 'running':
+      iconDiv.innerHTML = '<i class="bi bi-arrow-repeat text-primary"></i>';
+      break;
+    case 'success':
+      iconDiv.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
+      break;
+    case 'error':
+      iconDiv.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+      break;
+  }
+}
+
+function clearAnsibleOutput() {
+  document.getElementById('ansible-output-console').innerHTML = '';
+  ansibleLogData = [];
+  updateProgress(0, 'Chuẩn bị...');
+}
+
+function downloadAnsibleLog() {
+  const logLines = ansibleLogData.map(entry => {
+    switch (entry.type) {
+      case 'terminal_prompt':
+        return `[${entry.timestamp}] [${entry.server}] ${entry.prompt}${entry.command}`;
+      case 'sudo_prompt':
+        return `[${entry.timestamp}] [${entry.server}] ${entry.message}••••••••`;
+      case 'terminal_output':
+        return entry.output.split('\n').map(line => 
+          `[${entry.timestamp}] [${entry.server}] ${line}`
+        ).join('\n');
+      case 'terminal_prompt_end':
+        return `[${entry.timestamp}] [${entry.server}] ${entry.prompt}`;
+      case 'info':
+      case 'success':
+      case 'error':
+      case 'warning':
+        return `[${entry.timestamp}] ${entry.type.toUpperCase()}: ${entry.message}`;
+      default:
+        return `[${entry.timestamp}] ${entry.message || ''}`;
+    }
+  }).join('\n');
+  
+  const blob = new Blob([logLines], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ansible-install-${currentClusterId}-${new Date().toISOString().slice(0, 19)}.log`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function ansibleInstallComplete() {
+  // Close modal and refresh cluster status
+  const modal = bootstrap.Modal.getInstance(document.getElementById('ansibleInstallModal'));
+  modal.hide();
+  
+  // Refresh cluster detail
+  if (currentClusterId) {
+    showClusterDetail(currentClusterId);
+  }
+  
+  // Close WebSocket
+  if (ansibleWebSocket) {
+    ansibleWebSocket.close();
+  }
+}
+
+// Event listeners for Ansible
+document.addEventListener('DOMContentLoaded', function() {
+  // Start installation button
+  document.getElementById('start-ansible-install-btn').addEventListener('click', startAnsibleInstallation);
+  
+  // Clear output button
+  document.getElementById('clear-output-btn').addEventListener('click', clearAnsibleOutput);
+  
+  // Download log button
+  document.getElementById('download-log-btn').addEventListener('click', downloadAnsibleLog);
+  
+  // Close modal cleanup
+  document.getElementById('ansibleInstallModal').addEventListener('hidden.bs.modal', function() {
+    if (ansibleWebSocket) {
+      ansibleWebSocket.close();
+    }
+    clearAnsibleOutput();
+  });
+});
+
 
 
