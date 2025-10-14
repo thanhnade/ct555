@@ -29,6 +29,135 @@ public class AnsibleInstallationService {
         this.serverService = serverService;
     }
 
+    // ================= Ansible Quick Init Actions (single MASTER)
+    // =================
+
+    /**
+     * Tạo cấu trúc /etc/ansible trên máy đích (mkdir, quyền cơ bản)
+     */
+    public String initRemoteAnsibleStructure(Server server, String sshPassword, String sudoPassword) {
+        String cmd = "bash -lc '"
+                + "set -e; "
+                + "sudo mkdir -p /etc/ansible/group_vars /etc/ansible/host_vars; "
+                + "sudo mkdir -p ~/.ansible; "
+                + "sudo chmod -R 755 /etc/ansible; "
+                + "echo OK'";
+        return executeRemoteWithAuth(server, cmd, sshPassword, sudoPassword, 20000);
+    }
+
+    /**
+     * Tạo ansible.cfg và hosts mặc định tại /etc/ansible
+     */
+    public String initRemoteDefaultConfig(Server server, String sshPassword, String sudoPassword) {
+        String cfg = "[defaults]\n"
+                + "inventory = /etc/ansible/hosts\n"
+                + "host_key_checking = False\n"
+                + "retry_files_enabled = False\n"
+                + "gathering = smart\n"
+                + "stdout_callback = yaml\n"
+                + "bin_ansible_callbacks = True\n";
+        String hosts = "[master]\n127.0.0.1 ansible_connection=local\n\n"
+                + "[workers]\n# 192.168.56.11 ansible_user=ubuntu\n\n"
+                + "[all:vars]\nansible_python_interpreter=/usr/bin/python3\n";
+
+        String cmd = "bash -lc 'set -e; "
+                + "sudo mkdir -p /etc/ansible; "
+                + "sudo tee /etc/ansible/ansible.cfg > /dev/null <<\nEOF\n" + escapeForHereDoc(cfg) + "\nEOF\n"
+                + "sudo tee /etc/ansible/hosts > /dev/null <<\nEOF\n" + escapeForHereDoc(hosts) + "\nEOF\n"
+                + "echo OK'";
+        return executeRemoteWithAuth(server, cmd, sshPassword, sudoPassword, 25000);
+    }
+
+    /**
+     * Tạo ansible.cfg và hosts theo danh sách server của cụm (MASTER/WORKER lấy từ
+     * CSDL)
+     */
+    public String initRemoteDefaultConfigForCluster(Server targetServer,
+            java.util.List<Server> clusterServers,
+            String sshPassword, String sudoPassword) {
+        String cfg = "[defaults]\n"
+                + "inventory = /etc/ansible/hosts\n"
+                + "host_key_checking = False\n"
+                + "retry_files_enabled = False\n"
+                + "gathering = smart\n"
+                + "stdout_callback = yaml\n"
+                + "bin_ansible_callbacks = True\n";
+
+        StringBuilder hosts = new StringBuilder();
+        hosts.append("[master]\n");
+        for (Server s : clusterServers) {
+            if (s.getRole() == Server.ServerRole.MASTER) {
+                hosts.append(s.getHost())
+                        .append(" ansible_user=").append(s.getUsername())
+                        .append(" ansible_ssh_port=").append(s.getPort() != null ? s.getPort() : 22)
+                        .append("\n");
+            }
+        }
+        hosts.append("\n[workers]\n");
+        for (Server s : clusterServers) {
+            if (s.getRole() == Server.ServerRole.WORKER) {
+                hosts.append(s.getHost())
+                        .append(" ansible_user=").append(s.getUsername())
+                        .append(" ansible_ssh_port=").append(s.getPort() != null ? s.getPort() : 22)
+                        .append("\n");
+            }
+        }
+        hosts.append("\n[all:vars]\n");
+        hosts.append("ansible_python_interpreter=/usr/bin/python3\n");
+        hosts.append("ansible_ssh_common_args='-o StrictHostKeyChecking=no'\n");
+
+        String cmd = "bash -lc 'set -e; "
+                + "sudo mkdir -p /etc/ansible; "
+                + "sudo tee /etc/ansible/ansible.cfg > /dev/null <<\\nEOF\\n" + escapeForHereDoc(cfg) + "\\nEOF\\n"
+                + "sudo tee /etc/ansible/hosts > /dev/null <<\\nEOF\\n" + escapeForHereDoc(hosts.toString())
+                + "\\nEOF\\n"
+                + "echo OK'";
+        return executeRemoteWithAuth(targetServer, cmd, sshPassword, sudoPassword, 30000);
+    }
+
+    /**
+     * Tạo SSH key không mật khẩu (~/.ssh/id_rsa) nếu chưa tồn tại
+     */
+    public String generateRemoteSshKeyNoPass(Server server, String sshPassword) {
+        String cmd = "bash -lc '"
+                + "mkdir -p ~/.ssh; chmod 700 ~/.ssh; "
+                + "[ -f ~/.ssh/id_rsa ] || ssh-keygen -t rsa -b 4096 -N '' -f ~/.ssh/id_rsa -q; "
+                + "echo OK'";
+        return executeRemoteWithAuth(server, cmd, sshPassword, null, 20000);
+    }
+
+    /**
+     * Chạy ansible all -m ping -i /etc/ansible/hosts
+     */
+    public String runRemoteAnsiblePingAll(Server server, String sshPassword) {
+        String cmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'";
+        return executeRemoteWithAuth(server, cmd, sshPassword, null, 30000);
+    }
+
+    // ================= Helpers =================
+
+    private String executeRemoteWithAuth(Server server, String command, String sshPassword, String sudoPassword,
+            int timeoutMs) {
+        try {
+            if (server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null) {
+                // Nếu có sudoPassword, bọc sudo -S trong command đã có ở phía handler; ở đây
+                // command đã chứa sudo khi cần
+                return serverService.execCommandWithKey(
+                        server.getHost(), server.getPort(), server.getUsername(),
+                        server.getSshKey().getEncryptedPrivateKey(), command, timeoutMs);
+            }
+            // fallback password
+            return serverService.execCommand(server.getHost(), server.getPort(), server.getUsername(),
+                    sshPassword, command, timeoutMs);
+        } catch (Exception e) {
+            throw new RuntimeException("Remote exec failed on " + server.getHost() + ": " + e.getMessage(), e);
+        }
+    }
+
+    private String escapeForHereDoc(String s) {
+        return s.replace("\\", "\\\\");
+    }
+
     /**
      * Kiểm tra Ansible đã cài đặt trên các MASTER servers trong cluster
      */

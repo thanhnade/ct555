@@ -231,6 +231,9 @@ async function showClusterDetail(clusterId){
   document.getElementById('k8s-assign')?.classList.add('d-none');
   document.getElementById('k8s-detail')?.classList.remove('d-none');
 
+  // Tự động kiểm tra trạng thái Ansible khi mở chi tiết cụm (không chặn UI)
+  try { setTimeout(() => { try { checkAnsibleStatus(clusterId); } catch(_){} }, 0); } catch(_) {}
+
   // Hiển thị loading state
   const msgElement = document.getElementById('cd-msg');
   if(msgElement) {
@@ -1630,9 +1633,12 @@ function updateAnsibleStatusTable(ansibleStatus) {
       </td>
       <td>${status.installed ? `<code>${status.version}</code>` : 'N/A'}</td>
       <td>
-        ${status.installed ? 
-          '<button class="btn btn-sm btn-outline-warning" onclick="reinstallAnsibleOnServer(\'' + host + '\')">Cài đặt lại</button>' :
-          '<button class="btn btn-sm btn-outline-primary" onclick="installAnsibleOnServer(\'' + host + '\')">Cài đặt</button>'
+        ${status.installed ? `
+          <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-warning" onclick="reinstallAnsibleOnServer('${host}')">Cài đặt lại</button>
+            <button class="btn btn-outline-danger" onclick="uninstallAnsibleOnServer('${host}')">Gỡ cài đặt</button>
+          </div>` :
+          `<button class="btn btn-sm btn-outline-primary" onclick="installAnsibleOnServer('${host}')">Cài đặt</button>`
         }
       </td>
     `;
@@ -1665,6 +1671,17 @@ async function reinstallAnsibleOnServer(host) {
   
   // Show modal for single server reinstallation
   await showAnsibleInstallModalForServer(currentClusterId, host, true);
+}
+
+// Uninstall Ansible on single server
+async function uninstallAnsibleOnServer(host) {
+  if (!currentClusterId) {
+    alert('Không tìm thấy thông tin cluster');
+    return;
+  }
+  // Đặt chế độ gỡ cài đặt và mở modal cho server này
+  window.isUninstallMode = true;
+  await showAnsibleInstallModalForServer(currentClusterId, host, false);
 }
 
 // Show Ansible Install Modal for single server
@@ -1701,9 +1718,25 @@ async function showAnsibleInstallModalForServer(clusterId, targetHost, isReinsta
     `;
     sudoInputsContainer.appendChild(colDiv);
     
-    // Update modal title
+    // Update modal title (hỗ trợ chế độ gỡ cài đặt)
     const modalTitle = document.querySelector('#ansibleInstallModal .modal-title');
-    modalTitle.innerHTML = `<i class="bi bi-download"></i> ${isReinstall ? 'Cài đặt lại' : 'Cài đặt'} Ansible - ${targetHost}`;
+    if (window.isUninstallMode) {
+      modalTitle.innerHTML = `<i class="bi bi-trash"></i> Gỡ cài đặt Ansible - ${targetHost}`;
+    } else {
+      modalTitle.innerHTML = `<i class="bi bi-download"></i> ${isReinstall ? 'Cài đặt lại' : 'Cài đặt'} Ansible - ${targetHost}`;
+    }
+
+    // Cập nhật nút bắt đầu theo chế độ (cài đặt/gỡ cài đặt)
+    const startBtn = document.getElementById('start-ansible-install-btn');
+    if (startBtn) {
+      if (window.isUninstallMode) {
+        startBtn.innerHTML = '<i class="bi bi-play-fill"></i> Bắt đầu gỡ cài đặt';
+      } else if (isReinstall) {
+        startBtn.innerHTML = '<i class="bi bi-play-fill"></i> Bắt đầu cài đặt lại';
+      } else {
+        startBtn.innerHTML = '<i class="bi bi-play-fill"></i> Bắt đầu cài đặt';
+      }
+    }
     
     // Reset modal state
     document.getElementById('sudo-password-section').classList.remove('d-none');
@@ -1811,28 +1844,16 @@ function startAnsibleInstallation() {
 
 function initializeServerStatusCards() {
   const container = document.getElementById('server-status-cards');
+  if(!container) return;
   container.innerHTML = '';
   
   // Nếu có target server, hiển thị card cho server đó
   if (window.currentTargetServer) {
     const server = window.currentTargetServer;
     const isReinstall = window.isReinstallMode || false;
-    
-    const cardDiv = document.createElement('div');
-    cardDiv.className = 'col-md-6';
-    cardDiv.innerHTML = `
-      <div class="card">
-        <div class="card-body text-center">
-          <h6 class="card-title">${server.ip}</h6>
-          <span class="badge bg-${server.role === 'MASTER' ? 'primary' : 'secondary'} mb-2">${server.role}</span>
-          <div id="server-status-${server.ip}" class="server-status">
-            <span class="badge bg-secondary">Chờ xử lý</span>
-          </div>
-        </div>
-      </div>
-    `;
-    container.appendChild(cardDiv);
-    
+    // Ẩn group nhiều server; chỉ hiển thị log realtime
+    container.classList.add('d-none');
+
     addLogMessage('info', `Khởi tạo monitoring interface cho server ${server.ip}...`);
   } else {
     // Fallback cho trường hợp không có target server
@@ -1911,7 +1932,8 @@ function sendInstallationStartCommand() {
     clusterId: currentClusterId,
     sudoPasswords: sudoPasswords,
     targetServer: window.currentTargetServer ? window.currentTargetServer.ip : null,
-    isReinstall: window.isReinstallMode || false
+    isReinstall: window.isReinstallMode || false,
+    isUninstall: window.isUninstallMode || false
   };
   
   ansibleWebSocket.send(JSON.stringify(message));
@@ -1940,7 +1962,13 @@ function handleAnsibleMessage(data) {
       
     case 'server_success':
       addLogMessage('success', `✅ ${data.message}`);
-      updateServerStatus(data.server, 'success', 'Cài đặt thành công');
+      (function(){
+        let successMsg = 'Thành công';
+        const m = (data && data.message) ? String(data.message).toLowerCase() : '';
+        if (m.includes('gỡ') || m.includes('uninstall')) successMsg = 'Gỡ cài đặt thành công';
+        else if (m.includes('cài đặt') || m.includes('install')) successMsg = 'Cài đặt thành công';
+        updateServerStatus(data.server, 'success', successMsg);
+      })();
       break;
       
     case 'server_error':
@@ -2239,6 +2267,8 @@ function ansibleInstallComplete() {
   if (ansibleWebSocket) {
     ansibleWebSocket.close();
   }
+  // Reset chế độ uninstall
+  window.isUninstallMode = false;
 }
 
 // Event listeners for Ansible
@@ -2251,6 +2281,212 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Download log button
   document.getElementById('download-log-btn').addEventListener('click', downloadAnsibleLog);
+  // Ansible Config Modal handlers (placeholders)
+  const saveCfgBtn = document.getElementById('save-ansible-config-btn');
+  if(saveCfgBtn && !saveCfgBtn.dataset.bound){
+    saveCfgBtn.dataset.bound = '1';
+    saveCfgBtn.addEventListener('click', async () => {
+      const cfg = document.getElementById('ansible-cfg-editor')?.value || '';
+      const hosts = document.getElementById('ansible-inventory-editor')?.value || '';
+      const vars = document.getElementById('ansible-vars-editor')?.value || '';
+      // TODO: call backend API to save
+      alert('Đã lưu cấu hình (demo).');
+    });
+  }
+
+  // ===== Khởi tạo Ansible - Quick Actions =====
+  const initStructureBtn = document.getElementById('init-structure-btn');
+  if (initStructureBtn && !initStructureBtn.dataset.bound) {
+    initStructureBtn.dataset.bound = '1';
+    initStructureBtn.addEventListener('click', () => runInitActionWS('init_structure', 'init-ansible-console'));
+  }
+
+  const initConfigBtn = document.getElementById('init-config-btn');
+  if (initConfigBtn && !initConfigBtn.dataset.bound) {
+    initConfigBtn.dataset.bound = '1';
+    initConfigBtn.addEventListener('click', () => runInitActionWS('init_config', 'init-ansible-console'));
+  }
+
+  const initSshKeyBtn = document.getElementById('init-sshkey-btn');
+  if (initSshKeyBtn && !initSshKeyBtn.dataset.bound) {
+    initSshKeyBtn.dataset.bound = '1';
+    initSshKeyBtn.addEventListener('click', () => runInitActionWS('init_sshkey', 'init-ansible-console'));
+  }
+
+  const initPingBtn = document.getElementById('init-ping-btn');
+  if (initPingBtn && !initPingBtn.dataset.bound) {
+    initPingBtn.dataset.bound = '1';
+    initPingBtn.addEventListener('click', () => runInitActionWS('init_ping', 'init-ansible-console'));
+  }
+
+  // Helpers for Init Ansible console
+  function appendInitLogTo(consoleId, line){
+    const con = document.getElementById(consoleId);
+    if(!con) return;
+    const ts = new Date().toLocaleTimeString();
+    const div = document.createElement('div');
+    div.textContent = `[${ts}] ${line}`;
+    con.appendChild(div);
+    con.scrollTop = con.scrollHeight;
+  }
+
+  function appendInitLogBlockTo(consoleId, text){
+    const con = document.getElementById(consoleId);
+    if(!con) return;
+    const pre = document.createElement('pre');
+    pre.className = 'm-0';
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.textContent = text;
+    con.appendChild(pre);
+    con.scrollTop = con.scrollHeight;
+  }
+
+  // Backward compatible helpers for the Structure tab console
+  function appendInitLog(line){ appendInitLogTo('init-ansible-console', line); }
+  function appendInitLogBlock(text){ appendInitLogBlockTo('init-ansible-console', text); }
+
+  const clearInitBtn = document.getElementById('init-output-clear-btn');
+  if(clearInitBtn && !clearInitBtn.dataset.bound){
+    clearInitBtn.dataset.bound = '1';
+    clearInitBtn.addEventListener('click', () => {
+      const con = document.getElementById('init-ansible-console');
+      if(con) con.innerHTML = '';
+    });
+  }
+
+  // Clear buttons for other tab consoles
+  const clearInitCfgBtn = document.getElementById('init-config-output-clear-btn');
+  if(clearInitCfgBtn && !clearInitCfgBtn.dataset.bound){
+    clearInitCfgBtn.dataset.bound = '1';
+    clearInitCfgBtn.addEventListener('click', () => {
+      const con = document.getElementById('init-ansible-console');
+      if(con) con.innerHTML = '';
+    });
+  }
+  const clearInitSshKeyBtn = document.getElementById('init-sshkey-output-clear-btn');
+  if(clearInitSshKeyBtn && !clearInitSshKeyBtn.dataset.bound){
+    clearInitSshKeyBtn.dataset.bound = '1';
+    clearInitSshKeyBtn.addEventListener('click', () => {
+      const con = document.getElementById('init-ansible-console');
+      if(con) con.innerHTML = '';
+    });
+  }
+  const clearInitPingBtn = document.getElementById('init-ping-output-clear-btn');
+  if(clearInitPingBtn && !clearInitPingBtn.dataset.bound){
+    clearInitPingBtn.dataset.bound = '1';
+    clearInitPingBtn.addEventListener('click', () => {
+      const con = document.getElementById('init-ansible-console');
+      if(con) con.innerHTML = '';
+    });
+  }
+
+  // WebSocket realtime for Init actions
+  let initActionsWS = null;
+  function runInitActionWS(action, consoleId){
+    if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
+    const hostSelect = document.getElementById('init-host-select');
+    const host = hostSelect ? (hostSelect.value || null) : null;
+    const needSudo = (action === 'init_structure' || action === 'init_config');
+    const sudoPassword = needSudo ? prompt('Nhập mật khẩu sudo:') : null;
+    if (needSudo && !sudoPassword) return;
+
+    try { if(initActionsWS) { initActionsWS.close(); } } catch(_) {}
+    const protocol = (location.protocol === 'https:') ? 'wss' : 'ws';
+    initActionsWS = new WebSocket(`${protocol}://${location.host}/ws/ansible`);
+
+    initActionsWS.onopen = () => {
+      appendInitLogTo(consoleId, '🔗 WebSocket connected');
+      const payload = { action, clusterId: currentClusterId, host };
+      if (needSudo) payload.sudoPassword = sudoPassword;
+      initActionsWS.send(JSON.stringify(payload));
+    };
+    initActionsWS.onmessage = (event) => {
+      const raw = typeof event.data === 'string' ? event.data : '';
+      // First attempt: parse as JSON directly
+      try {
+        const data = JSON.parse(raw);
+        if (data && typeof data === 'object') {
+          if (data.type === 'terminal_output') {
+            appendInitLogBlockTo(consoleId, data.output || '');
+            return;
+          }
+          if (data.type === 'terminal_prompt') {
+            const line = `[${data.server||''}] ${data.prompt||''}${data.command||''}`.trim();
+            appendInitLogTo(consoleId, line);
+            return;
+          }
+          if (data.message) {
+            appendInitLogTo(consoleId, data.message);
+            return;
+          }
+        }
+      } catch(_) {
+        // Second attempt: sanitize control chars (except \n, \r, \t) then parse
+        try {
+          const sanitized = raw.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+          const data2 = JSON.parse(sanitized);
+          if (data2 && typeof data2 === 'object') {
+            if (data2.type === 'terminal_output') {
+              appendInitLogBlockTo(consoleId, data2.output || '');
+            } else if (data2.type === 'terminal_prompt') {
+              const line = `[${data2.server||''}] ${data2.prompt||''}${data2.command||''}`.trim();
+              appendInitLogTo(consoleId, line);
+            } else if (data2.message) {
+              appendInitLogTo(consoleId, data2.message);
+            } else {
+              appendInitLogBlockTo(consoleId, sanitized);
+            }
+            return;
+          }
+        } catch(parseErr) {
+          // Final fallback: show raw payload as text block
+          appendInitLogBlockTo(consoleId, raw);
+          return;
+        }
+      }
+    };
+    initActionsWS.onerror = () => appendInitLogTo(consoleId, '❌ WebSocket error');
+    initActionsWS.onclose = (ev) => appendInitLogTo(consoleId, `🔌 WebSocket closed (${ev.code})`);
+  }
+
+  // Playbook Manager handlers (placeholders)
+  const createPbBtn = document.getElementById('create-playbook-btn');
+  if(createPbBtn && !createPbBtn.dataset.bound){
+    createPbBtn.dataset.bound = '1';
+    createPbBtn.addEventListener('click', () => {
+      document.getElementById('playbook-editor').value = '---\n- name: New playbook\n  hosts: all\n  tasks:\n    - debug: msg:"hello"\n';
+    });
+  }
+  const uploadPbInput = document.getElementById('upload-playbook-input');
+  if(uploadPbInput && !uploadPbInput.dataset.bound){
+    uploadPbInput.dataset.bound = '1';
+    uploadPbInput.addEventListener('change', async (e) => {
+      const f = e.target.files && e.target.files[0]; if(!f) return;
+      const text = await f.text();
+      document.getElementById('playbook-editor').value = text;
+    });
+  }
+  const savePbBtn = document.getElementById('save-playbook-btn');
+  if(savePbBtn && !savePbBtn.dataset.bound){
+    savePbBtn.dataset.bound = '1';
+    savePbBtn.addEventListener('click', async () => {
+      // TODO: send to backend
+      alert('Đã lưu playbook (demo).');
+    });
+  }
+
+  // K8s Deploy handlers (placeholders)
+  const runDeployBtn = document.getElementById('run-k8s-deploy-btn');
+  if(runDeployBtn && !runDeployBtn.dataset.bound){
+    runDeployBtn.dataset.bound = '1';
+    runDeployBtn.addEventListener('click', async () => {
+      const playbook = document.getElementById('k8s-deploy-playbook-select')?.value || '';
+      const extra = document.getElementById('k8s-deploy-extra-vars')?.value || '';
+      if(!playbook){ alert('Vui lòng chọn playbook'); return; }
+      // TODO: trigger backend to run ansible-playbook
+      alert('Đang thực thi (demo): ' + playbook + (extra? (' with ' + extra) : ''));
+    });
+  }
   
   // Close modal cleanup
   document.getElementById('ansibleInstallModal').addEventListener('hidden.bs.modal', function() {

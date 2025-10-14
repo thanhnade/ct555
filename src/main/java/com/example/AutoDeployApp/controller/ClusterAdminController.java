@@ -69,6 +69,259 @@ public class ClusterAdminController {
     }
 
     /**
+     * Khởi tạo cấu trúc /etc/ansible trên MASTER của cluster
+     * Body: { "host": optional, "sudoPassword": required }
+     */
+    @PostMapping("/{id}/ansible/init/structure")
+    public ResponseEntity<?> initAnsibleStructure(@PathVariable Long id, @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        try {
+            String host = body != null ? (String) body.getOrDefault("host", null) : null;
+            String sudoPassword = body != null ? (String) body.get("sudoPassword") : null;
+            if (sudoPassword == null || sudoPassword.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Vui lòng cung cấp mật khẩu sudo"));
+            }
+
+            var servers = serverService.findByClusterId(id);
+            if (servers == null || servers.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
+            }
+
+            com.example.AutoDeployApp.entity.Server target = null;
+            if (host != null && !host.isBlank()) {
+                for (var s : servers) {
+                    if (host.equals(s.getHost())) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
+            }
+
+            var session = request.getSession(false);
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            String sshPassword = pwCache.get(target.getId());
+
+            String output = ansibleInstallationService.initRemoteAnsibleStructure(target, sshPassword, sudoPassword);
+            return ResponseEntity.ok(Map.of(
+                    "ok", true,
+                    "host", target.getHost(),
+                    "message", "Đã khởi tạo cấu trúc Ansible trên máy chủ",
+                    "output", output));
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return ResponseEntity.status(500).body(Map.of("error", msg));
+        }
+    }
+
+    /**
+     * Ghi config mặc định (ansible.cfg, hosts) lên MASTER
+     * Body: { "host": optional, "sudoPassword": required }
+     */
+    @PostMapping("/{id}/ansible/init/config")
+    public ResponseEntity<?> initAnsibleConfig(@PathVariable Long id, @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        try {
+            String host = body != null ? (String) body.getOrDefault("host", null) : null;
+            String sudoPassword = body != null ? (String) body.get("sudoPassword") : null;
+            if (sudoPassword == null || sudoPassword.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Vui lòng cung cấp mật khẩu sudo"));
+            }
+
+            var servers = serverService.findByClusterId(id);
+            if (servers == null || servers.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
+            }
+
+            com.example.AutoDeployApp.entity.Server target = null;
+            if (host != null && !host.isBlank()) {
+                for (var s : servers) {
+                    if (host.equals(s.getHost())) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
+            }
+
+            var session = request.getSession(false);
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            String sshPassword = pwCache.get(target.getId());
+
+            // Xác định master chính xác theo cluster summary; các máy còn lại là worker
+            String masterHost = null;
+            var summaries = clusterService.listSummaries();
+            var sum = summaries.stream().filter(s -> s.id().equals(id)).findFirst().orElse(null);
+            if (sum != null && sum.masterNode() != null && !sum.masterNode().isBlank()) {
+                masterHost = sum.masterNode().trim();
+            }
+
+            java.util.List<com.example.AutoDeployApp.entity.Server> filtered = new java.util.ArrayList<>();
+            com.example.AutoDeployApp.entity.Server chosenMaster = null;
+            if (masterHost != null) {
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER
+                            && masterHost.equals(s.getHost())) {
+                        chosenMaster = s;
+                        break;
+                    }
+                }
+            }
+            if (chosenMaster == null) {
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                        chosenMaster = s;
+                        break;
+                    }
+                }
+            }
+            if (chosenMaster != null)
+                filtered.add(chosenMaster);
+            for (var s : servers) {
+                if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER)
+                    filtered.add(s);
+            }
+
+            String output = ansibleInstallationService.initRemoteDefaultConfigForCluster(target, filtered, sshPassword,
+                    sudoPassword);
+            return ResponseEntity.ok(Map.of(
+                    "ok", true,
+                    "host", target.getHost(),
+                    "message", "Đã ghi config mặc định Ansible (master/workers theo CSDL)",
+                    "output", output));
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return ResponseEntity.status(500).body(Map.of("error", msg));
+        }
+    }
+
+    /**
+     * Tạo SSH key không mật khẩu trên MASTER nếu chưa có
+     * Body: { "host": optional }
+     */
+    @PostMapping("/{id}/ansible/init/sshkey")
+    public ResponseEntity<?> initAnsibleSshKey(@PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body,
+            HttpServletRequest request) {
+        try {
+            String host = body != null ? (String) body.getOrDefault("host", null) : null;
+
+            var servers = serverService.findByClusterId(id);
+            if (servers == null || servers.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
+            }
+
+            com.example.AutoDeployApp.entity.Server target = null;
+            if (host != null && !host.isBlank()) {
+                for (var s : servers) {
+                    if (host.equals(s.getHost())) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
+            }
+
+            var session = request.getSession(false);
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            String sshPassword = pwCache.get(target.getId());
+
+            String output = ansibleInstallationService.generateRemoteSshKeyNoPass(target, sshPassword);
+            return ResponseEntity.ok(Map.of(
+                    "ok", true,
+                    "host", target.getHost(),
+                    "message", "Đã tạo SSH key (nếu chưa có)",
+                    "output", output));
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return ResponseEntity.status(500).body(Map.of("error", msg));
+        }
+    }
+
+    /**
+     * Chạy ansible all -m ping trên MASTER
+     * Body: { "host": optional }
+     */
+    @PostMapping("/{id}/ansible/init/ping")
+    public ResponseEntity<?> initAnsiblePing(@PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body,
+            HttpServletRequest request) {
+        try {
+            String host = body != null ? (String) body.getOrDefault("host", null) : null;
+
+            var servers = serverService.findByClusterId(id);
+            if (servers == null || servers.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
+            }
+
+            com.example.AutoDeployApp.entity.Server target = null;
+            if (host != null && !host.isBlank()) {
+                for (var s : servers) {
+                    if (host.equals(s.getHost())) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
+            }
+
+            var session = request.getSession(false);
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            String sshPassword = pwCache.get(target.getId());
+
+            String output = ansibleInstallationService.runRemoteAnsiblePingAll(target, sshPassword);
+            return ResponseEntity.ok(Map.of(
+                    "ok", true,
+                    "host", target.getHost(),
+                    "message", "Đã chạy ansible ping",
+                    "output", output));
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return ResponseEntity.status(500).body(Map.of("error", msg));
+        }
+    }
+
+    /**
      * Lấy thông số server (CPU, RAM, Disk) sử dụng lệnh kết hợp để giảm số lần SSH
      */
     private CompletableFuture<Map<String, Object>> getServerMetricsAsync(ServerData serverData,
@@ -425,8 +678,7 @@ public class ClusterAdminController {
             }
         }
 
-        // Trích xuất dữ liệu server trong main thread để tránh vấn đề JPA session trong
-        // các luồng song song
+        // Trích xuất dữ liệu server
         var serverData = clusterServers.stream()
                 .map(server -> new ServerData(
                         server.getId(),
