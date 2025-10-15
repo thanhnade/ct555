@@ -88,7 +88,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         } else if ("init_sshkey".equals(action)) {
             Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
-            streamInitSshKey(session, clusterId, host);
+            String sudoPassword = (String) request.get("sudoPassword");
+            streamInitSshKey(session, clusterId, host, sudoPassword);
         } else if ("init_ping".equals(action)) {
             Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
@@ -231,12 +232,22 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 sendMessage(session, String.format("{\"type\":\"start\",\"message\":\"Khởi tạo cấu trúc trên %s...\"}",
                         target.getHost()));
                 executeCommandWithTerminalOutput(session, target,
-                        "mkdir -p /etc/ansible/group_vars /etc/ansible/host_vars", sudoPassword, 15000);
+                        "mkdir -p /etc/ansible/{playbooks,roles,group_vars,host_vars}", sudoPassword, 15000);
                 executeCommandWithTerminalOutput(session, target, "mkdir -p ~/.ansible", sudoPassword, 8000);
                 executeCommandWithTerminalOutput(session, target, "chmod -R 755 /etc/ansible", sudoPassword, 8000);
-                sendMessage(session,
-                        String.format("{\"type\":\"complete\",\"message\":\"Hoàn tất khởi tạo cấu trúc trên %s\"}",
-                                target.getHost()));
+                // Verify directories exist
+                String verify = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc 'for d in /etc/ansible /etc/ansible/group_vars /etc/ansible/host_vars /etc/ansible/playbooks /etc/ansible/roles; do [ -d \"$d\" ] || { echo MISSING:$d; exit 1; }; done; echo OK'",
+                        sudoPassword, 8000);
+                if (verify != null && verify.contains("OK")) {
+                    sendMessage(session,
+                            String.format("{\"type\":\"complete\",\"message\":\"Hoàn tất khởi tạo cấu trúc trên %s\"}",
+                                    target.getHost()));
+                } else {
+                    sendMessage(session,
+                            String.format("{\"type\":\"error\",\"message\":\"Xác minh cấu trúc thất bại trên %s\"}",
+                                    target.getHost()));
+                }
             } catch (Exception e) {
                 sendMessage(session,
                         String.format("{\"type\":\"error\",\"message\":\"%s\"}", escapeJsonString(e.getMessage())));
@@ -253,19 +264,70 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
                     return;
                 }
-                // Ghi ansible.cfg mẫu tối thiểu, inventory sẽ do API config cluster ghi đầy đủ
+                // Ghi ansible.cfg theo yêu cầu (bao gồm remote_user và timeout)
                 String cfg = "[defaults]\n" +
-                        "inventory = /etc/ansible/hosts\n" +
+                        "inventory      = /etc/ansible/hosts\n" +
+                        "remote_user    = root\n" +
                         "host_key_checking = False\n" +
                         "retry_files_enabled = False\n" +
-                        "gathering = smart\n" +
-                        "stdout_callback = yaml\n" +
-                        "bin_ansible_callbacks = True\n";
-                String cmdCfg = "bash -lc 'tee /etc/ansible/ansible.cfg > /dev/null <<\\nEOF\\n"
-                        + cfg.replace("\\", "\\\\") + "\\nEOF'";
+                        "timeout = 30\n";
+                String cmdCfg = "tee /etc/ansible/ansible.cfg > /dev/null <<'EOF'\n"
+                        + cfg + "\nEOF";
                 executeCommandWithTerminalOutput(session, target, "mkdir -p /etc/ansible", sudoPassword, 8000);
-                executeCommandWithTerminalOutput(session, target, cmdCfg, sudoPassword, 15000);
-                sendMessage(session, String.format("{\"type\":\"complete\",\"message\":\"Đã ghi ansible.cfg trên %s\"}",
+                executeCommandWithTerminalOutput(session, target, cmdCfg, sudoPassword, 20000);
+                // Verify ansible.cfg exists and non-empty
+                String verifyCfg = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'",
+                        sudoPassword, 6000);
+                if (verifyCfg == null || !verifyCfg.contains("OK")) {
+                    sendMessage(session,
+                            String.format(
+                                    "{\"type\":\"error\",\"message\":\"Không xác minh được ansible.cfg trên %s\"}",
+                                    target.getHost()));
+                    return;
+                }
+
+                // Sinh nội dung hosts theo CSDL, theo nhóm [master], [worker], và [all:vars]
+                StringBuilder hosts = new StringBuilder();
+                hosts.append("[master]\n");
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                        hosts.append(s.getHost())
+                                .append(" ansible_user=")
+                                .append(s.getUsername() != null ? s.getUsername() : "root")
+                                .append(" ansible_ssh_private_key_file=~/.ssh/id_rsa");
+                        if (s.getPort() != null)
+                            hosts.append(" ansible_ssh_port=").append(s.getPort());
+                        hosts.append("\n");
+                    }
+                }
+                hosts.append("\n[worker]\n");
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER) {
+                        hosts.append(s.getHost())
+                                .append(" ansible_user=")
+                                .append(s.getUsername() != null ? s.getUsername() : "root")
+                                .append(" ansible_ssh_private_key_file=~/.ssh/id_rsa");
+                        if (s.getPort() != null)
+                            hosts.append(" ansible_ssh_port=").append(s.getPort());
+                        hosts.append("\n");
+                    }
+                }
+                hosts.append("\n[all:vars]\nansible_python_interpreter=/usr/bin/python3\n");
+
+                String cmdHosts = "tee /etc/ansible/hosts > /dev/null <<'EOF'\n" + hosts + "EOF";
+                executeCommandWithTerminalOutput(session, target, cmdHosts, sudoPassword, 20000);
+                String verifyHosts = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", sudoPassword, 6000);
+                if (verifyHosts == null || !verifyHosts.contains("OK")) {
+                    sendMessage(session,
+                            String.format("{\"type\":\"error\",\"message\":\"Không xác minh được hosts trên %s\"}",
+                                    target.getHost()));
+                    return;
+                }
+
+                sendMessage(session, String.format(
+                        "{\"type\":\"complete\",\"message\":\"Đã ghi ansible.cfg và hosts trên %s\"}",
                         target.getHost()));
             } catch (Exception e) {
                 sendMessage(session,
@@ -274,7 +336,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         });
     }
 
-    private void streamInitSshKey(WebSocketSession session, Long clusterId, String host) {
+    private void streamInitSshKey(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
                 var servers = serverService.findByClusterId(clusterId);
@@ -283,18 +345,158 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
                     return;
                 }
-                executeCommandWithTerminalOutput(session, target, "bash -lc 'mkdir -p ~/.ssh; chmod 700 ~/.ssh'", null,
+                // 1) Kiểm tra DB có SSH key gắn với server không
+                String dbPublic = serverService.resolveServerPublicKey(target.getId());
+
+                // 2) Đọc public key trên máy đích (nếu có)
+                String remotePublic = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc '[ -f ~/.ssh/id_rsa.pub ] && cat ~/.ssh/id_rsa.pub || true'", sudoPassword, 8000);
+
+                boolean dbMatchesRemote = false;
+                if (dbPublic != null && !dbPublic.isBlank() && remotePublic != null && !remotePublic.isBlank()) {
+                    // So khớp phần key dữ liệu (bỏ comment cuối)
+                    String dbKeyCore = dbPublic.split(" ", 3)[1];
+                    String remoteKeyCore = remotePublic.split(" ", 3)[1];
+                    dbMatchesRemote = dbKeyCore.equals(remoteKeyCore);
+                }
+
+                String publicKeyToDistribute = null;
+                if (dbPublic != null && !dbPublic.isBlank() && dbMatchesRemote) {
+                    // Khớp: hiển thị key và sử dụng luôn
+                    sendMessage(session, String.format(
+                            "{\"type\":\"info\",\"message\":\"SSH key trùng khớp với trên %s\"}",
+                            target.getHost()));
+                    sendMessage(session, String.format(
+                            "{\"type\":\"terminal_output\",\"server\":\"%s\",\"output\":\"%s\"}",
+                            target.getHost(), escapeJsonString(dbPublic)));
+                    publicKeyToDistribute = dbPublic;
+                    // tiếp tục phân phối xuống workers
+                }
+
+                // 3) Nếu DB có key nhưng máy đích khác/thiếu => cài lại public key theo DB
+                if (dbPublic != null && !dbPublic.isBlank()
+                        && (remotePublic == null || remotePublic.isBlank() || !dbMatchesRemote)) {
+                    String appendCmd = "bash -lc 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && grep -qF "
+                            + escapeShellForSingleQuotes(dbPublic)
+                            + " ~/.ssh/authorized_keys || echo "
+                            + escapeShellForSingleQuotes(dbPublic)
+                            + " >> ~/.ssh/authorized_keys'";
+                    executeCommandWithTerminalOutput(session, target, appendCmd, sudoPassword, 15000);
+                    sendMessage(session, String.format(
+                            "{\"type\":\"info\",\"message\":\"Đã đồng bộ public key từ CSDL lên %s\"}",
+                            target.getHost()));
+                    publicKeyToDistribute = dbPublic;
+                }
+
+                // 4) Không có key trong DB: tạo mới trên máy và hiển thị public key
+                executeCommandWithTerminalOutput(session, target, "bash -lc 'mkdir -p ~/.ssh; chmod 700 ~/.ssh'",
+                        sudoPassword,
                         8000);
                 executeCommandWithTerminalOutput(session, target,
-                        "bash -lc '[ -f ~/.ssh/id_rsa ] || ssh-keygen -t rsa -b 4096 -N \"\" -f ~/.ssh/id_rsa -q'",
-                        null, 20000);
-                sendMessage(session, String.format("{\"type\":\"complete\",\"message\":\"Đã tạo SSH key trên %s\"}",
+                        "bash -lc 'ssh-keygen -t rsa -b 2048 -N \"\" -f ~/.ssh/id_rsa -q'", sudoPassword, 20000);
+                String newPub = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc 'cat ~/.ssh/id_rsa.pub'", sudoPassword, 8000);
+                if (newPub != null && !newPub.isBlank()) {
+                    sendMessage(session, String.format(
+                            "{\"type\":\"terminal_output\",\"server\":\"%s\",\"output\":\"%s\"}",
+                            target.getHost(), escapeJsonString(newPub)));
+                    if (publicKeyToDistribute == null) {
+                        publicKeyToDistribute = newPub.trim();
+                    }
+                }
+
+                // 5) Phân phối xuống WORKERs nếu có publicKeyToDistribute
+                if (publicKeyToDistribute != null && !publicKeyToDistribute.isBlank()) {
+                    // Log số lượng WORKER
+                    int workerTotal = 0;
+                    for (var s : servers) {
+                        if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER)
+                            workerTotal++;
+                    }
+                    sendMessage(session,
+                            String.format("{\"type\":\"info\",\"message\":\"Số WORKER trong cụm: %d\"}", workerTotal));
+
+                    int okCount = 0, failCount = 0, skipped = 0;
+                    for (var srv : servers) {
+                        if (srv.getRole() != com.example.AutoDeployApp.entity.Server.ServerRole.WORKER)
+                            continue;
+                        if (srv.getId().equals(target.getId()))
+                            continue;
+
+                        String appendWorker = "bash -lc 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && grep -qF "
+                                + escapeShellForSingleQuotes(publicKeyToDistribute)
+                                + " ~/.ssh/authorized_keys || echo "
+                                + escapeShellForSingleQuotes(publicKeyToDistribute)
+                                + " >> ~/.ssh/authorized_keys'";
+                        try {
+                            sendMessage(session, String.format(
+                                    "{\"type\":\"info\",\"message\":\"Phân phối key đến %s...\"}", srv.getHost()));
+
+                            // Ưu tiên dùng SSH key lưu trong DB của WORKER
+                            if (srv.getSshKey() != null && srv.getSshKey().getEncryptedPrivateKey() != null
+                                    && !srv.getSshKey().getEncryptedPrivateKey().isBlank()) {
+                                String pem = srv.getSshKey().getEncryptedPrivateKey();
+                                // Thực thi lệnh với key trực tiếp (không dùng sudoPassword như SSH password)
+                                String out = serverService.execCommandWithKey(
+                                        srv.getHost(), srv.getPort() != null ? srv.getPort() : 22,
+                                        srv.getUsername(), pem, appendWorker, 15000);
+                                if (out == null) {
+                                    // vẫn tiếp tục verify
+                                }
+                            } else {
+                                skipped++;
+                                sendMessage(session, String.format(
+                                        "{\"type\":\"warning\",\"message\":\"Bỏ qua %s: WORKER chưa có SSH key trong CSDL; vui lòng gán key hoặc cung cấp mật khẩu WORKER\"}",
+                                        srv.getHost()));
+                                continue;
+                            }
+
+                            // Verify presence
+                            String verify = serverService.execCommandWithKey(
+                                    srv.getHost(), srv.getPort() != null ? srv.getPort() : 22,
+                                    srv.getUsername(),
+                                    srv.getSshKey() != null ? srv.getSshKey().getEncryptedPrivateKey() : "",
+                                    "bash -lc 'grep -qF " + escapeShellForSingleQuotes(publicKeyToDistribute)
+                                            + " ~/.ssh/authorized_keys && echo OK || echo FAIL'",
+                                    8000);
+                            if (verify != null && verify.contains("OK")) {
+                                okCount++;
+                                sendMessage(session, String.format(
+                                        "{\"type\":\"success\",\"message\":\"✓ Đã phân phối và xác minh trên %s\"}",
+                                        srv.getHost()));
+                            } else {
+                                failCount++;
+                                sendMessage(session, String.format(
+                                        "{\"type\":\"warning\",\"message\":\"⚠️ Phân phối xong nhưng không xác minh được trên %s\"}",
+                                        srv.getHost()));
+                            }
+                        } catch (Exception e) {
+                            failCount++;
+                            sendMessage(session, String.format(
+                                    "{\"type\":\"error\",\"message\":\"Không thể phân phối key đến %s: %s\"}",
+                                    srv.getHost(), escapeJsonString(e.getMessage())));
+                        }
+                    }
+                    sendMessage(session, String.format(
+                            "{\"type\":\"info\",\"message\":\"Tổng kết phân phối: %d OK, %d FAILED, %d SKIPPED\"}",
+                            okCount, failCount, skipped));
+                }
+
+                sendMessage(session, String.format(
+                        "{\"type\":\"complete\",\"message\":\"Hoàn tất tạo/đồng bộ và phân phối SSH key từ %s\"}",
                         target.getHost()));
             } catch (Exception e) {
                 sendMessage(session,
                         String.format("{\"type\":\"error\",\"message\":\"%s\"}", escapeJsonString(e.getMessage())));
             }
         });
+    }
+
+    // Escape 1 dòng shell trích dẫn trong single-quotes để an toàn
+    private String escapeShellForSingleQuotes(String s) {
+        if (s == null)
+            return "''";
+        return "'" + s.replace("'", "'\\''") + "'";
     }
 
     private void streamInitPing(WebSocketSession session, Long clusterId, String host) {
@@ -468,9 +670,10 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         || command.startsWith("bash -lc 'shopt") || command.startsWith("apt-get")
                         || command.startsWith("add-apt-repository") || command.startsWith("chmod ")
                         || command.startsWith("cat > ") || command.startsWith("mkdir ")
-                        || command.startsWith("tee "))) {
+                        || command.startsWith("tee ") || command.contains(" /etc/ansible"))) {
             String escapedPassword = sudoPassword.replace("'", "'\"'\"'");
-            finalCommand = String.format("echo '%s' | sudo -S %s", escapedPassword, command);
+            String quotedOriginal = "'" + command.replace("'", "'\"'\"'") + "'";
+            finalCommand = String.format("echo '%s' | sudo -S bash -lc %s", escapedPassword, quotedOriginal);
 
             // Hiển thị sudo password prompt
             sendMessage(session,
@@ -481,32 +684,27 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
         // Thực thi lệnh và lấy output
         String output = "";
-        boolean usePasswordAuth = false;
-
-        // Kiểm tra xem có nên dùng password authentication không
-        if (sudoPassword != null && !sudoPassword.trim().isEmpty()) {
-            usePasswordAuth = true;
-        }
+        // Không sử dụng sudoPassword như SSH password. Thử lấy password đăng nhập từ
+        // cache nếu có (không khả dụng tại đây),
+        // nếu không thì ưu tiên SSH key; nếu cả hai không có, báo lỗi rõ ràng.
 
         try {
-            if (usePasswordAuth) {
-                // Dùng password authentication trực tiếp
+            // Ưu tiên SSH key; fallback dùng chính sudoPassword làm mật khẩu SSH nếu không
+            // có key
+            if (server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null) {
+                output = serverService.execCommandWithKey(host, port, username,
+                        server.getSshKey().getEncryptedPrivateKey(), finalCommand, timeoutMs);
+            } else if (sudoPassword != null && !sudoPassword.isBlank()) {
                 output = serverService.execCommand(host, port, username, sudoPassword, finalCommand, timeoutMs);
             } else {
-                // Thử SSH key trước
-                if (server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null) {
-                    output = serverService.execCommandWithKey(host, port, username,
-                            server.getSshKey().getEncryptedPrivateKey(), finalCommand, timeoutMs);
-                } else {
-                    throw new RuntimeException("No SSH key available and no password provided for " + host);
-                }
+                throw new RuntimeException("Không có SSH key hoặc mật khẩu SSH để kết nối tới " + host);
             }
         } catch (org.hibernate.LazyInitializationException e) {
-            // Fallback to password authentication khi SSH key không accessible
-            if (sudoPassword != null && !sudoPassword.trim().isEmpty()) {
+            // Fallback password nếu key không truy cập được
+            if (sudoPassword != null && !sudoPassword.isBlank()) {
                 output = serverService.execCommand(host, port, username, sudoPassword, finalCommand, timeoutMs);
             } else {
-                throw new RuntimeException("No SSH key accessible and no password available for " + host);
+                throw new RuntimeException("Không thể truy cập SSH key và không có mật khẩu SSH cho " + host);
             }
         }
 

@@ -38,7 +38,7 @@ public class AnsibleInstallationService {
     public String initRemoteAnsibleStructure(Server server, String sshPassword, String sudoPassword) {
         String cmd = "bash -lc '"
                 + "set -e; "
-                + "sudo mkdir -p /etc/ansible/group_vars /etc/ansible/host_vars; "
+                + "sudo mkdir -p /etc/ansible/{playbooks,roles,group_vars,host_vars}; "
                 + "sudo mkdir -p ~/.ansible; "
                 + "sudo chmod -R 755 /etc/ansible; "
                 + "echo OK'";

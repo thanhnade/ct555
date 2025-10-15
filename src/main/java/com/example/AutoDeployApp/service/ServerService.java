@@ -62,6 +62,20 @@ public class ServerService {
                 .orElse(null);
     }
 
+    @Transactional(readOnly = true)
+    public String resolveServerPublicKey(Long serverId) {
+        return serverRepository.findByIdWithSshKey(serverId)
+                .map(s -> (s.getSshKey() != null ? s.getSshKey().getPublicKey() : null))
+                .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
+    public SshKey resolveServerSshKey(Long serverId) {
+        return serverRepository.findByIdWithSshKey(serverId)
+                .map(Server::getSshKey)
+                .orElse(null);
+    }
+
     @Transactional
     public Server create(String host, Integer port, String username, String rawPassword, Server.ServerRole role,
             Long addedBy, Long clusterId, Server.AuthType authType, Long sshKeyId) {

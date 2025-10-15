@@ -2386,7 +2386,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
     const hostSelect = document.getElementById('init-host-select');
     const host = hostSelect ? (hostSelect.value || null) : null;
-    const needSudo = (action === 'init_structure' || action === 'init_config');
+    const needSudo = (action === 'init_structure' || action === 'init_config' || action === 'init_sshkey');
     const sudoPassword = needSudo ? prompt('Nhập mật khẩu sudo:') : null;
     if (needSudo && !sudoPassword) return;
 
