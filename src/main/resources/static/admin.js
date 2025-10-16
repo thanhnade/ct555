@@ -2386,7 +2386,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
     const hostSelect = document.getElementById('init-host-select');
     const host = hostSelect ? (hostSelect.value || null) : null;
-    const needSudo = (action === 'init_structure' || action === 'init_config' || action === 'init_sshkey');
+    const needSudo = (action === 'init_structure' || action === 'init_config' || action === 'init_sshkey' || action === 'init_ping' );
     const sudoPassword = needSudo ? prompt('Nhập mật khẩu sudo:') : null;
     if (needSudo && !sudoPassword) return;
 
@@ -2398,6 +2398,9 @@ document.addEventListener('DOMContentLoaded', function() {
       appendInitLogTo(consoleId, '🔗 WebSocket connected');
       const payload = { action, clusterId: currentClusterId, host };
       if (needSudo) payload.sudoPassword = sudoPassword;
+      if (action === 'init_sshkey' && needSudo && sudoPassword) {
+        appendInitLogTo(consoleId, '🔒 Sẽ dùng mật khẩu này làm SSH mật khẩu lần đầu cho WORKER khi chưa có key.');
+      }
       initActionsWS.send(JSON.stringify(payload));
     };
     initActionsWS.onmessage = (event) => {
@@ -2495,6 +2498,45 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     clearAnsibleOutput();
   });
+
+  // Load current ansible config when opening the modal
+  const ansibleConfigModalEl = document.getElementById('ansibleConfigModal');
+  if(ansibleConfigModalEl && !ansibleConfigModalEl.dataset.bound){
+    ansibleConfigModalEl.dataset.bound = '1';
+    ansibleConfigModalEl.addEventListener('shown.bs.modal', () => {
+      try { if(initActionsWS) { initActionsWS.close(); } } catch(_) {}
+      const protocol = (location.protocol === 'https:') ? 'wss' : 'ws';
+      initActionsWS = new WebSocket(`${protocol}://${location.host}/ws/ansible`);
+      const sudoPassword = prompt('Nhập mật khẩu sudo (để đọc file cấu hình trên MASTER):') || '';
+      initActionsWS.onopen = () => {
+        const payload = { action: 'read_ansible_config', clusterId: currentClusterId };
+        if (sudoPassword) payload.sudoPassword = sudoPassword;
+        initActionsWS.send(JSON.stringify(payload));
+      };
+      initActionsWS.onmessage = (event) => {
+        const raw = typeof event.data === 'string' ? event.data : '';
+        try {
+          const data = JSON.parse(raw);
+          if(data && data.type === 'ansible_config'){
+            const cfgEl = document.getElementById('ansible-cfg-editor');
+            const hostsEl = document.getElementById('ansible-inventory-editor');
+            if(cfgEl) cfgEl.value = data.cfg || '';
+            if(hostsEl) hostsEl.value = data.hosts || '';
+            if(!cfgEl && !hostsEl){ appendInitLogBlockTo('init-ansible-console', (data.cfg||'') + '\n\n' + (data.hosts||'')); }
+            return;
+          }
+          if(data && data.type === 'terminal_output'){
+            appendInitLogBlockTo('init-ansible-console', data.output || '');
+            return;
+          }
+          if(data && data.type === 'error' && data.message){ appendInitLogTo('init-ansible-console', '❌ '+data.message); }
+        } catch(_){ /* ignore */ }
+      };
+      ansibleConfigModalEl.addEventListener('hidden.bs.modal', () => {
+        try { initActionsWS && initActionsWS.close(); } catch(_) {}
+      }, { once: true });
+    });
+  }
 });
 
 

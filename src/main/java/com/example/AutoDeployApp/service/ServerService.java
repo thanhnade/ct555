@@ -322,13 +322,35 @@ public class ServerService {
             session = jsch.getSession(username, host, port);
             session.setConfig("StrictHostKeyChecking", "no");
             session.setPassword(rawPassword);
+            session.setTimeout(timeoutMs);
             session.connect(timeoutMs);
             channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
             channel.setCommand(command);
             java.io.InputStream in = channel.getInputStream();
             channel.connect(timeoutMs);
-            byte[] buf = in.readAllBytes();
-            String out = new String(buf, java.nio.charset.StandardCharsets.UTF_8).trim();
+
+            long deadline = System.currentTimeMillis() + timeoutMs;
+            java.io.ByteArrayOutputStream outBuf = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            while (true) {
+                while (in.available() > 0) {
+                    int read = in.read(buffer, 0, buffer.length);
+                    if (read < 0)
+                        break;
+                    outBuf.write(buffer, 0, read);
+                }
+                if (channel.isClosed())
+                    break;
+                if (System.currentTimeMillis() > deadline) {
+                    // hard timeout
+                    break;
+                }
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException ignored) {
+                }
+            }
+            String out = outBuf.toString(java.nio.charset.StandardCharsets.UTF_8).trim();
             return out;
         } catch (Exception e) {
             return null;
@@ -357,24 +379,46 @@ public class ServerService {
             jsch.addIdentity("inmem-key", prv, null, null);
             session = jsch.getSession(username, host, port);
             session.setConfig("StrictHostKeyChecking", "no");
+            session.setTimeout(timeoutMs);
             session.connect(timeoutMs);
             channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
             channel.setCommand(command);
             java.io.InputStream in = channel.getInputStream();
             channel.connect(timeoutMs);
-            byte[] buf = in.readAllBytes();
-            String out = new String(buf, java.nio.charset.StandardCharsets.UTF_8).trim();
+
+            long deadline = System.currentTimeMillis() + timeoutMs;
+            java.io.ByteArrayOutputStream outBuf = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            while (true) {
+                while (in.available() > 0) {
+                    int read = in.read(buffer, 0, buffer.length);
+                    if (read < 0)
+                        break;
+                    outBuf.write(buffer, 0, read);
+                }
+                if (channel.isClosed())
+                    break;
+                if (System.currentTimeMillis() > deadline) {
+                    // hard timeout
+                    break;
+                }
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException ignored) {
+                }
+            }
+            String out = outBuf.toString(java.nio.charset.StandardCharsets.UTF_8).trim();
             return out;
         } catch (Exception e) {
             return null;
         } finally {
             try {
-                if (channel != null && channel.isConnected())
+                if (channel != null)
                     channel.disconnect();
             } catch (Exception ignored) {
             }
             try {
-                if (session != null && session.isConnected())
+                if (session != null)
                     session.disconnect();
             } catch (Exception ignored) {
             }
