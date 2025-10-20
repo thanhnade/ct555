@@ -78,7 +78,12 @@
 			<artifactId>jsch</artifactId>
 			<version>0.2.11</version>
 		</dependency>
-		
+
+		<!-- Jackson for JSON processing -->
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
