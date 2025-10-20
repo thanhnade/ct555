@@ -274,10 +274,14 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 // Ghi ansible.cfg theo yêu cầu (bao gồm remote_user và timeout)
                 String cfg = "[defaults]\n" +
                         "inventory      = /etc/ansible/hosts\n" +
+                        "roles_path     = /etc/ansible/roles\n" +
                         "remote_user    = " + (target.getUsername() != null ? target.getUsername() : "root") + "\n" +
                         "host_key_checking = False\n" +
                         "retry_files_enabled = False\n" +
-                        "timeout = 30\n";
+                        "timeout = 30\n" +
+                        "nocows = 1\n" +
+                        "forks = 5\n" +
+                        "interpreter_python = /usr/bin/python3\n";
                 String cmdCfg = "tee /etc/ansible/ansible.cfg > /dev/null <<'EOF'\n"
                         + cfg + "\nEOF";
                 executeCommandWithTerminalOutput(session, target, "mkdir -p /etc/ansible", sudoPassword, 8000);
@@ -301,8 +305,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
                         hosts.append(s.getHost())
                                 .append(" ansible_user=")
-                                .append(s.getUsername() != null ? s.getUsername() : "root")
-                                .append(" ansible_ssh_private_key_file=~/.ssh/id_rsa");
+                                .append(s.getUsername() != null ? s.getUsername() : "root");
                         if (s.getPort() != null)
                             hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
@@ -313,14 +316,17 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER) {
                         hosts.append(s.getHost())
                                 .append(" ansible_user=")
-                                .append(s.getUsername() != null ? s.getUsername() : "root")
-                                .append(" ansible_ssh_private_key_file=~/.ssh/id_rsa");
+                                .append(s.getUsername() != null ? s.getUsername() : "root");
                         if (s.getPort() != null)
                             hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
                     }
                 }
-                hosts.append("\n[all:vars]\nansible_python_interpreter=/usr/bin/python3\n");
+                hosts.append("\n[all:vars]\n")
+                        .append("ansible_python_interpreter=/usr/bin/python3\n")
+                        .append("ansible_ssh_private_key_file=/home/")
+                        .append(target.getUsername() != null ? target.getUsername() : "root")
+                        .append("/.ssh/id_rsa\n");
 
                 String cmdHosts = "tee /etc/ansible/hosts > /dev/null <<'EOF'\n" + hosts + "EOF";
                 executeCommandWithTerminalOutput(session, target, cmdHosts, sudoPassword, 20000);
@@ -390,18 +396,6 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                             "{\"type\":\"info\",\"message\":\"Đã đảm bảo public key của MASTER có trong authorized_keys trên %s\"}",
                             target.getHost()));
                 } catch (Exception ignored) {
-                }
-
-                // Cấu hình sudo NOPASSWD cho MASTER
-                try {
-                    sendMessage(session, String.format(
-                            "{\"type\":\"info\",\"message\":\"Cau hinh sudo NOPASSWD cho %s tren %s...\"}",
-                            target.getUsername(), target.getHost()));
-                    configureSudoNopasswdForUser(session, target, target.getUsername(), sudoPassword);
-                } catch (Exception e) {
-                    sendMessage(session, String.format(
-                            "{\"type\":\"warning\",\"message\":\"Khong the cau hinh sudo NOPASSWD cho %s: %s\"}",
-                            target.getUsername(), e.getMessage()));
                 }
 
                 String publicKeyToDistribute = masterPub.trim();
@@ -493,19 +487,6 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                         "{\\\"type\\\":\\\"success\\\",\\\"message\\\":\\\"✓ Đã phân phối và xác minh trên %s\\\"}",
                                         hostW));
 
-                                // Cấu hình sudo NOPASSWD cho WORKER sau khi phân phối SSH key thành công
-                                try {
-                                    com.example.AutoDeployApp.entity.Server workerServer = new com.example.AutoDeployApp.entity.Server();
-                                    workerServer.setHost(hostW);
-                                    workerServer.setPort(portW);
-                                    workerServer.setUsername(userW);
-
-                                    configureSudoNopasswdForUser(session, workerServer, userW, sudoPassword);
-                                } catch (Exception e) {
-                                    sendMessage(session, String.format(
-                                            "{\\\"type\\\":\\\"warning\\\",\\\"message\\\":\\\"Khong the cau hinh sudo NOPASSWD cho %s tren %s: %s\\\"}",
-                                            userW, hostW, e.getMessage()));
-                                }
                             } else {
                                 failCount++;
                                 sendMessage(session, String.format(
@@ -1050,13 +1031,27 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
         // Kiểm tra xem server có SSH key với sudo NOPASSWD không
         boolean hasSudoNopasswd = false;
-        try {
-            String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
-            String sudoCheckResult = serverService.execCommandWithKey(host, port, username,
-                    serverService.resolveServerPrivateKeyPem(server.getId()), checkSudoCmd, 5000);
-            hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
-        } catch (Exception e) {
-            // Nếu không kiểm tra được, giả định cần sudo password
+        String pem = serverService.resolveServerPrivateKeyPem(server.getId());
+
+        if (pem != null && !pem.isBlank()) {
+            try {
+                String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                String sudoCheckResult = serverService.execCommandWithKey(host, port, username, pem, checkSudoCmd,
+                        5000);
+                hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
+            } catch (Exception e) {
+                // Nếu không kiểm tra được với SSH key, thử với password
+                try {
+                    if (sudoPassword != null && !sudoPassword.isBlank()) {
+                        String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                        String sudoCheckResult = serverService.execCommand(host, port, username, sudoPassword,
+                                checkSudoCmd, 5000);
+                        hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
+                    }
+                } catch (Exception e2) {
+                    // Nếu không kiểm tra được, giả định cần sudo password
+                }
+            }
         }
 
         // Chỉ sử dụng sudo password nếu cần thiết và không có sudo NOPASSWD
@@ -1087,17 +1082,15 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         // nếu không thì ưu tiên SSH key; nếu cả hai không có, báo lỗi rõ ràng.
 
         try {
-            // Ưu tiên SSH key; fallback dùng chính sudoPassword làm mật khẩu SSH nếu không
-            // có key
-            if (server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null) {
-                output = serverService.execCommandWithKey(host, port, username,
-                        server.getSshKey().getEncryptedPrivateKey(), finalCommand, timeoutMs);
+            // Ưu tiên SSH key từ database; fallback dùng sudoPassword làm mật khẩu SSH
+            if (pem != null && !pem.isBlank()) {
+                output = serverService.execCommandWithKey(host, port, username, pem, finalCommand, timeoutMs);
             } else if (sudoPassword != null && !sudoPassword.isBlank()) {
                 output = serverService.execCommand(host, port, username, sudoPassword, finalCommand, timeoutMs);
             } else {
                 throw new RuntimeException("Không có SSH key hoặc mật khẩu SSH để kết nối tới " + host);
             }
-        } catch (org.hibernate.LazyInitializationException e) {
+        } catch (Exception e) {
             // Fallback password nếu key không truy cập được
             if (sudoPassword != null && !sudoPassword.isBlank()) {
                 output = serverService.execCommand(host, port, username, sudoPassword, finalCommand, timeoutMs);
@@ -1233,36 +1226,4 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         return map;
     }
 
-    /**
-     * Cấu hình sudo NOPASSWD cho user trên server
-     */
-    private void configureSudoNopasswdForUser(WebSocketSession session, com.example.AutoDeployApp.entity.Server server,
-            String username, String sudoPassword) {
-        try {
-            // Kiểm tra xem user đã có quyền sudo NOPASSWD chưa
-            String checkCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'EXISTS' || echo 'NOT_EXISTS'";
-            String checkResult = executeCommandWithTerminalOutput(session, server, checkCmd, sudoPassword, 5000);
-
-            if (checkResult != null && !checkResult.contains("EXISTS")) {
-                // Nếu chưa có quyền NOPASSWD, thêm vào sudoers
-                String sudoersEntry = username + " ALL=(ALL) NOPASSWD: ALL";
-                String addSudoersCmd = "echo '" + sudoersEntry + "' | sudo tee -a /etc/sudoers.d/" + username
-                        + " && sudo chmod 440 /etc/sudoers.d/" + username;
-
-                executeCommandWithTerminalOutput(session, server, addSudoersCmd, sudoPassword, 10000);
-
-                sendMessage(session, String.format(
-                        "{\"type\":\"success\",\"message\":\"Da cau hinh sudo NOPASSWD cho %s tren %s\"}",
-                        username, server.getHost()));
-            } else {
-                sendMessage(session, String.format(
-                        "{\"type\":\"info\",\"message\":\"User %s da co quyen sudo NOPASSWD tren %s\"}",
-                        username, server.getHost()));
-            }
-        } catch (Exception e) {
-            sendMessage(session, String.format(
-                    "{\"type\":\"warning\",\"message\":\"Khong the cau hinh sudo NOPASSWD cho %s tren %s: %s\"}",
-                    username, server.getHost(), e.getMessage()));
-        }
-    }
 }
