@@ -1009,29 +1009,80 @@
 
       <!-- Ansible Config Modal -->
       <div class="modal fade" id="ansibleConfigModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
           <div class="modal-content">
             <div class="modal-header">
               <h5 class="modal-title"><i class="bi bi-gear"></i> Cấu hình Ansible</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-              <div class="mb-3">
-                <label class="form-label">ansible.cfg</label>
-                <textarea id="ansible-cfg-editor" class="form-control" rows="10" placeholder="[defaults]\ninventory=/etc/ansible/hosts\n..."></textarea>
+              <!-- Control Buttons -->
+              <div class="mb-3 d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-warning" id="validate-config-btn">
+                  <i class="bi bi-check-circle"></i> Kiểm tra cú pháp
+                </button>
               </div>
-              <div class="mb-3">
-                <label class="form-label">Inventory (hosts)</label>
-                <textarea id="ansible-inventory-editor" class="form-control" rows="8" placeholder="[master]\n127.0.0.1 ansible_connection=local\n..."></textarea>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Variables (group_vars/all.yml)</label>
-                <textarea id="ansible-vars-editor" class="form-control" rows="6" placeholder="key: value\n..."></textarea>
+
+              <!-- Tab Navigation -->
+              <ul class="nav nav-tabs mb-3" id="configTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" id="tab-ansible-cfg" data-bs-toggle="tab" data-bs-target="#tab-pane-ansible-cfg" type="button" role="tab" aria-controls="tab-pane-ansible-cfg" aria-selected="true">
+                    <i class="bi bi-file-text"></i> ansible.cfg
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="tab-inventory" data-bs-toggle="tab" data-bs-target="#tab-pane-inventory" type="button" role="tab" aria-controls="tab-pane-inventory" aria-selected="false">
+                    <i class="bi bi-server"></i> Inventory (hosts)
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="tab-variables" data-bs-toggle="tab" data-bs-target="#tab-pane-variables" type="button" role="tab" aria-controls="tab-pane-variables" aria-selected="false">
+                    <i class="bi bi-gear"></i> Variables (group_vars/all.yml)
+                  </button>
+                </li>
+              </ul>
+
+              <!-- Tab Contents -->
+              <div class="tab-content" id="configTabContent">
+                <!-- ansible.cfg Tab -->
+                <div class="tab-pane fade show active" id="tab-pane-ansible-cfg" role="tabpanel" aria-labelledby="tab-ansible-cfg">
+                  <div class="mb-3">
+                    <h6 class="mb-3">ansible.cfg</h6>
+                    <textarea id="ansible-cfg-editor" class="form-control" rows="15" placeholder="[defaults]\ninventory=/etc/ansible/hosts\n..."></textarea>
+                  </div>
+                </div>
+
+                <!-- Inventory Tab -->
+                <div class="tab-pane fade" id="tab-pane-inventory" role="tabpanel" aria-labelledby="tab-inventory">
+                  <div class="mb-3">
+                    <h6 class="mb-3">Inventory (hosts)</h6>
+                    <textarea id="ansible-inventory-editor" class="form-control" rows="15" placeholder="[master]\n127.0.0.1 ansible_connection=local\n..."></textarea>
+                  </div>
+                </div>
+
+                <!-- Variables Tab -->
+                <div class="tab-pane fade" id="tab-pane-variables" role="tabpanel" aria-labelledby="tab-variables">
+                  <div class="mb-3">
+                    <h6 class="mb-3">Variables (group_vars/all.yml)</h6>
+                    <textarea id="ansible-vars-editor" class="form-control" rows="15" placeholder="key: value\n..."></textarea>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-              <button type="button" class="btn btn-primary" id="save-ansible-config-btn"><i class="bi bi-save"></i> Lưu cấu hình</button>
+              <button type="button" class="btn btn-info" id="reload-config-btn">
+                <i class="bi bi-arrow-clockwise"></i> Tải lại
+              </button>
+              <button type="button" class="btn btn-success" id="verify-ansible-btn">
+                <i class="bi bi-check-circle"></i> Xác minh
+              </button>
+              <button type="button" class="btn btn-warning" id="rollback-config-btn">
+                <i class="bi bi-arrow-counterclockwise"></i> Rollback
+              </button>
+              <button type="button" class="btn btn-primary" id="save-ansible-config-btn">
+                <i class="bi bi-save"></i> Lưu cấu hình
+              </button>
             </div>
           </div>
         </div>

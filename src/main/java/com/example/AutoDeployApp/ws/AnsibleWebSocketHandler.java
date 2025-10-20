@@ -100,6 +100,14 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
             streamReadAnsibleConfig(session, clusterId, host, sudoPassword);
+        } else if ("save_ansible_config".equals(action)) {
+            Long clusterId = toLongSafe(request.get("clusterId"));
+            String host = (String) request.get("host");
+            String sudoPassword = (String) request.get("sudoPassword");
+            String cfg = (String) request.get("cfg");
+            String hosts = (String) request.get("hosts");
+            String vars = (String) request.get("vars");
+            streamSaveAnsibleConfig(session, clusterId, host, sudoPassword, cfg, hosts, vars);
         }
     }
 
@@ -126,82 +134,75 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 var allClusterServers = serverService.findByClusterId(clusterId);
                 java.util.List<com.example.AutoDeployApp.entity.Server> clusterServers;
 
-                if (targetServer != null) {
-                    // Cài đặt cho một server cụ thể
-                    clusterServers = allClusterServers.stream()
-                            .filter(s -> s.getHost().equals(targetServer))
-                            .collect(java.util.stream.Collectors.toList());
+                // Chỉ cài đặt trên MASTER server
+                clusterServers = allClusterServers.stream()
+                        .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                        .collect(java.util.stream.Collectors.toList());
 
-                    if (clusterServers.isEmpty()) {
-                        System.out.println("ERROR: No server found with host: " + targetServer);
-                        sendMessage(session, String.format(
-                                "{\"type\":\"error\",\"message\":\"Không tìm thấy server: %s\"}", targetServer));
-                        return;
-                    }
-
-                    String action;
-                    if (Boolean.TRUE.equals(isUninstall)) {
-                        action = "gỡ cài đặt";
-                    } else {
-                        action = isReinstall != null && isReinstall ? "cài đặt lại" : "cài đặt";
-                    }
+                if (clusterServers.isEmpty()) {
                     sendMessage(session,
-                            String.format("{\"type\":\"info\",\"message\":\"Bắt đầu %s Ansible trên server: %s\"}",
-                                    action, targetServer));
-                } else {
-                    // Cài đặt cho tất cả servers
-                    clusterServers = allClusterServers;
-                    sendMessage(session,
-                            String.format("{\"type\":\"info\",\"message\":\"Tìm thấy %d servers trong cluster\"}",
-                                    clusterServers.size()));
+                            "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER server trong cluster\"}");
+                    return;
                 }
 
-                // Cài đặt trên từng server
-                for (int i = 0; i < clusterServers.size(); i++) {
-                    com.example.AutoDeployApp.entity.Server server = clusterServers.get(i);
-                    String progress = String.format("(%d/%d)", i + 1, clusterServers.size());
+                // Lấy mật khẩu sudo của MASTER
+                com.example.AutoDeployApp.entity.Server masterServer = clusterServers.get(0);
+                String masterSudoPassword = sudoPasswords.get(masterServer.getHost());
 
-                    String serverAction = Boolean.TRUE.equals(isUninstall) ? "gỡ cài đặt" : "cài đặt";
+                if (masterSudoPassword == null || masterSudoPassword.trim().isEmpty()) {
                     sendMessage(session, String.format(
-                            "{\"type\":\"server_start\",\"server\":\"%s\",\"progress\":\"%s\",\"message\":\"Bắt đầu %s Ansible trên %s\"}",
-                            server.getHost(), progress, serverAction, server.getHost()));
+                            "{\"type\":\"error\",\"message\":\"Cần mật khẩu sudo cho MASTER server: %s\"}",
+                            masterServer.getHost()));
+                    return;
+                }
 
-                    try {
-                        String sudoPassword = sudoPasswords.get(server.getHost());
+                String action = Boolean.TRUE.equals(isUninstall) ? "gỡ cài đặt" : "cài đặt";
+                sendMessage(session, String.format(
+                        "{\"type\":\"info\",\"message\":\"Bắt đầu %s Ansible trên MASTER: %s\"}",
+                        action, masterServer.getHost()));
 
-                        String result;
-                        if (Boolean.TRUE.equals(isUninstall)) {
-                            result = uninstallAnsibleOnServerWithOutput(session, server, sudoPassword);
-                        } else {
-                            result = installAnsibleOnServerWithOutput(session, server, sudoPassword);
-                        }
+                // Cài đặt trên MASTER server
+                com.example.AutoDeployApp.entity.Server server = clusterServers.get(0);
+                String progress = "(1/1)";
 
-                        // Tạo success message an toàn với Jackson
-                        try {
-                            java.util.Map<String, Object> successMessage = new java.util.HashMap<>();
-                            successMessage.put("type", "server_success");
-                            successMessage.put("server", server.getHost());
-                            successMessage.put("message", "✅ " + server.getHost() + ": " + result);
+                String serverAction = Boolean.TRUE.equals(isUninstall) ? "gỡ cài đặt" : "cài đặt";
+                sendMessage(session, String.format(
+                        "{\"type\":\"server_start\",\"server\":\"%s\",\"progress\":\"%s\",\"message\":\"Bắt đầu %s Ansible trên MASTER %s\"}",
+                        server.getHost(), progress, serverAction, server.getHost()));
 
-                            String jsonMessage = new com.fasterxml.jackson.databind.ObjectMapper()
-                                    .writeValueAsString(successMessage);
-                            sendMessage(session, jsonMessage);
-                        } catch (Exception jsonError) {
-                            System.err.println("ERROR: Failed to create success JSON: " + jsonError.getMessage());
-                            // Fallback với escaped message
-                            sendMessage(session,
-                                    String.format(
-                                            "{\"type\":\"server_success\",\"server\":\"%s\",\"message\":\"✅ %s: %s\"}",
-                                            server.getHost(), server.getHost(), escapeJsonString(result)));
-                        }
-                    } catch (Exception e) {
-                        System.out
-                                .println("ERROR: Installation failed for " + server.getHost() + ": " + e.getMessage());
-                        e.printStackTrace();
-                        sendMessage(session,
-                                String.format("{\"type\":\"server_error\",\"server\":\"%s\",\"message\":\"❌ %s: %s\"}",
-                                        server.getHost(), server.getHost(), e.getMessage()));
+                try {
+                    String result;
+                    if (Boolean.TRUE.equals(isUninstall)) {
+                        result = uninstallAnsibleOnServerWithOutput(session, server, masterSudoPassword);
+                    } else {
+                        result = installAnsibleOnServerWithOutput(session, server, masterSudoPassword);
                     }
+
+                    // Tạo success message an toàn với Jackson
+                    try {
+                        java.util.Map<String, Object> successMessage = new java.util.HashMap<>();
+                        successMessage.put("type", "server_success");
+                        successMessage.put("server", server.getHost());
+                        successMessage.put("message", "✅ " + server.getHost() + ": " + result);
+
+                        String jsonMessage = new com.fasterxml.jackson.databind.ObjectMapper()
+                                .writeValueAsString(successMessage);
+                        sendMessage(session, jsonMessage);
+                    } catch (Exception jsonError) {
+                        System.err.println("ERROR: Failed to create success JSON: " + jsonError.getMessage());
+                        // Fallback với escaped message
+                        sendMessage(session,
+                                String.format(
+                                        "{\"type\":\"server_success\",\"server\":\"%s\",\"message\":\"✅ %s: %s\"}",
+                                        server.getHost(), server.getHost(), escapeJsonString(result)));
+                    }
+                } catch (Exception e) {
+                    System.out
+                            .println("ERROR: Installation failed for " + server.getHost() + ": " + e.getMessage());
+                    e.printStackTrace();
+                    sendMessage(session,
+                            String.format("{\"type\":\"server_error\",\"server\":\"%s\",\"message\":\"❌ %s: %s\"}",
+                                    server.getHost(), server.getHost(), e.getMessage()));
                 }
 
                 if (Boolean.TRUE.equals(isUninstall)) {
@@ -391,6 +392,18 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 } catch (Exception ignored) {
                 }
 
+                // Cấu hình sudo NOPASSWD cho MASTER
+                try {
+                    sendMessage(session, String.format(
+                            "{\"type\":\"info\",\"message\":\"Cau hinh sudo NOPASSWD cho %s tren %s...\"}",
+                            target.getUsername(), target.getHost()));
+                    configureSudoNopasswdForUser(session, target, target.getUsername(), sudoPassword);
+                } catch (Exception e) {
+                    sendMessage(session, String.format(
+                            "{\"type\":\"warning\",\"message\":\"Khong the cau hinh sudo NOPASSWD cho %s: %s\"}",
+                            target.getUsername(), e.getMessage()));
+                }
+
                 String publicKeyToDistribute = masterPub.trim();
 
                 // 5) Phân phối xuống WORKERs nếu có publicKeyToDistribute
@@ -479,6 +492,20 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                 sendMessage(session, String.format(
                                         "{\\\"type\\\":\\\"success\\\",\\\"message\\\":\\\"✓ Đã phân phối và xác minh trên %s\\\"}",
                                         hostW));
+
+                                // Cấu hình sudo NOPASSWD cho WORKER sau khi phân phối SSH key thành công
+                                try {
+                                    com.example.AutoDeployApp.entity.Server workerServer = new com.example.AutoDeployApp.entity.Server();
+                                    workerServer.setHost(hostW);
+                                    workerServer.setPort(portW);
+                                    workerServer.setUsername(userW);
+
+                                    configureSudoNopasswdForUser(session, workerServer, userW, sudoPassword);
+                                } catch (Exception e) {
+                                    sendMessage(session, String.format(
+                                            "{\\\"type\\\":\\\"warning\\\",\\\"message\\\":\\\"Khong the cau hinh sudo NOPASSWD cho %s tren %s: %s\\\"}",
+                                            userW, hostW, e.getMessage()));
+                                }
                             } else {
                                 failCount++;
                                 sendMessage(session, String.format(
@@ -546,7 +573,6 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
                     return;
                 }
-                String remoteUser = (target.getUsername() != null ? target.getUsername() : "root");
                 String pingCmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'";
                 // Use sudoPassword as SSH password fallback (no sudo wrapping for this command)
                 executeCommandWithTerminalOutput(session, target, pingCmd,
@@ -569,29 +595,299 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
                     return;
                 }
-                String cfg = executeCommandWithTerminalOutput(session, target,
-                        "bash -lc 'cat /etc/ansible/ansible.cfg || true'", sudoPassword, 8000);
-                String hosts = executeCommandWithTerminalOutput(session, target,
-                        "bash -lc 'cat /etc/ansible/hosts || true'", sudoPassword, 8000);
 
-                // Compose a structured message
-                try {
-                    java.util.Map<String, Object> payload = new java.util.HashMap<>();
-                    payload.put("type", "ansible_config");
-                    payload.put("server", target.getHost());
-                    payload.put("cfg", cfg != null ? cfg : "");
-                    payload.put("hosts", hosts != null ? hosts : "");
-                    String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(payload);
-                    sendMessage(session, json);
-                } catch (Exception e) {
-                    // Fallback as two terminal outputs
-                    sendMessage(session, String.format(
-                            "{\"type\":\"terminal_output\",\"server\":\"%s\",\"output\":\"%s\"}",
-                            target.getHost(), escapeJsonString(cfg != null ? cfg : "")));
-                    sendMessage(session, String.format(
-                            "{\"type\":\"terminal_output\",\"server\":\"%s\",\"output\":\"%s\"}",
-                            target.getHost(), escapeJsonString(hosts != null ? hosts : "")));
+                sendMessage(session, String.format(
+                        "{\"type\":\"start\",\"message\":\"Đọc cấu hình Ansible từ %s...\"}", target.getHost()));
+
+                // Prefer SSH key from DB to avoid missing-credential issues
+                String pem = serverService.resolveServerPrivateKeyPem(target.getId());
+                String cfg = "";
+                String hosts = "";
+                String vars = "";
+
+                if (pem != null && !pem.isBlank()) {
+                    // Sử dụng SSH key từ database
+                    try {
+                        cfg = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, "bash -lc 'cat /etc/ansible/ansible.cfg || true'", 8000);
+                    } catch (Exception e) {
+                        sendMessage(session,
+                                String.format("{\"type\":\"warning\",\"message\":\"Không thể đọc ansible.cfg: %s\"}",
+                                        escapeJsonString(e.getMessage())));
+                    }
+
+                    try {
+                        hosts = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, "bash -lc 'cat /etc/ansible/hosts || true'", 8000);
+                    } catch (Exception e) {
+                        sendMessage(session,
+                                String.format("{\"type\":\"warning\",\"message\":\"Không thể đọc hosts: %s\"}",
+                                        escapeJsonString(e.getMessage())));
+                    }
+
+                    try {
+                        vars = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, "bash -lc 'cat /etc/ansible/group_vars/all.yml || true'",
+                                8000);
+                    } catch (Exception e) {
+                        sendMessage(session,
+                                String.format(
+                                        "{\"type\":\"warning\",\"message\":\"Không thể đọc group_vars/all.yml: %s\"}",
+                                        escapeJsonString(e.getMessage())));
+                    }
+                } else {
+                    // Fallback: sử dụng sudoPassword làm SSH password
+                    try {
+                        cfg = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword, "bash -lc 'cat /etc/ansible/ansible.cfg || true'",
+                                8000);
+                    } catch (Exception e) {
+                        sendMessage(session,
+                                String.format("{\"type\":\"warning\",\"message\":\"Không thể đọc ansible.cfg: %s\"}",
+                                        escapeJsonString(e.getMessage())));
+                    }
+
+                    try {
+                        hosts = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword, "bash -lc 'cat /etc/ansible/hosts || true'", 8000);
+                    } catch (Exception e) {
+                        sendMessage(session,
+                                String.format("{\"type\":\"warning\",\"message\":\"Không thể đọc hosts: %s\"}",
+                                        escapeJsonString(e.getMessage())));
+                    }
+
+                    try {
+                        vars = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'cat /etc/ansible/group_vars/all.yml || true'", 8000);
+                    } catch (Exception e) {
+                        sendMessage(session,
+                                String.format(
+                                        "{\"type\":\"warning\",\"message\":\"Không thể đọc group_vars/all.yml: %s\"}",
+                                        escapeJsonString(e.getMessage())));
+                    }
                 }
+
+                // Trả về kết quả dưới dạng structured message
+                java.util.Map<String, Object> payload = new java.util.HashMap<>();
+                payload.put("type", "ansible_config");
+                payload.put("server", target.getHost());
+                payload.put("cfg", cfg != null ? cfg : "");
+                payload.put("hosts", hosts != null ? hosts : "");
+                payload.put("vars", vars != null ? vars : "");
+
+                String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(payload);
+                sendMessage(session, json);
+
+                sendMessage(session, String.format(
+                        "{\"type\":\"success\",\"message\":\"Đã đọc cấu hình Ansible từ %s\"}", target.getHost()));
+
+            } catch (Exception e) {
+                sendMessage(session,
+                        String.format("{\"type\":\"error\",\"message\":\"%s\"}", escapeJsonString(e.getMessage())));
+            }
+        });
+    }
+
+    private void streamSaveAnsibleConfig(WebSocketSession session, Long clusterId, String host,
+            String sudoPassword, String cfgContent, String hostsContent, String varsContent) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                var servers = serverService.findByClusterId(clusterId);
+                com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
+                if (target == null) {
+                    sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
+                    return;
+                }
+
+                sendMessage(session, String.format(
+                        "{\"type\":\"start\",\"message\":\"Ghi cấu hình Ansible trên %s...\"}", target.getHost()));
+
+                // Prefer SSH key from DB
+                String pem = serverService.resolveServerPrivateKeyPem(target.getId());
+                boolean success = true;
+
+                try {
+                    // Ensure dirs
+                    if (pem != null && !pem.isBlank()) {
+                        serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, "mkdir -p /etc/ansible /var/log/ansible", 10000);
+                    } else {
+                        serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword, "mkdir -p /etc/ansible /var/log/ansible", 10000);
+                    }
+
+                    // Backups
+                    if (pem != null && !pem.isBlank()) {
+                        serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem,
+                                "bash -lc '[ -f /etc/ansible/ansible.cfg ] && cp -a /etc/ansible/ansible.cfg /etc/ansible/ansible.cfg.bak || true'",
+                                10000);
+                        serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem,
+                                "bash -lc '[ -f /etc/ansible/hosts ] && cp -a /etc/ansible/hosts /etc/ansible/hosts.bak || true'",
+                                10000);
+                    } else {
+                        serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc '[ -f /etc/ansible/ansible.cfg ] && cp -a /etc/ansible/ansible.cfg /etc/ansible/ansible.cfg.bak || true'",
+                                10000);
+                        serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc '[ -f /etc/ansible/hosts ] && cp -a /etc/ansible/hosts /etc/ansible/hosts.bak || true'",
+                                10000);
+                    }
+
+                    // Write cfg
+                    String cfgSafe = cfgContent == null ? "" : cfgContent;
+                    String cmdCfg = "tee /etc/ansible/ansible.cfg > /dev/null <<'EOF'\n" + cfgSafe + "\nEOF";
+                    if (pem != null && !pem.isBlank()) {
+                        serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, cmdCfg, 30000);
+                    } else {
+                        serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword, cmdCfg, 30000);
+                    }
+
+                    // Write hosts
+                    String hostsSafe = hostsContent == null ? "" : hostsContent;
+                    String cmdHosts = "tee /etc/ansible/hosts > /dev/null <<'EOF'\n" + hostsSafe + "\nEOF";
+                    if (pem != null && !pem.isBlank()) {
+                        serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, cmdHosts, 30000);
+                    } else {
+                        serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword, cmdHosts, 30000);
+                    }
+
+                    // Write variables (group_vars/all.yml)
+                    if (varsContent != null && !varsContent.trim().isEmpty()) {
+                        String varsSafe = varsContent;
+                        String cmdVars = "tee /etc/ansible/group_vars/all.yml > /dev/null <<'EOF'\n" + varsSafe
+                                + "\nEOF";
+                        if (pem != null && !pem.isBlank()) {
+                            serverService.execCommandWithKey(target.getHost(),
+                                    target.getPort() != null ? target.getPort() : 22,
+                                    target.getUsername(), pem, cmdVars, 30000);
+                        } else {
+                            serverService.execCommand(target.getHost(),
+                                    target.getPort() != null ? target.getPort() : 22,
+                                    target.getUsername(), sudoPassword, cmdVars, 30000);
+                        }
+                    }
+
+                    // Set permissions
+                    if (pem != null && !pem.isBlank()) {
+                        serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, "chmod 644 /etc/ansible/ansible.cfg /etc/ansible/hosts",
+                                8000);
+                        if (varsContent != null && !varsContent.trim().isEmpty()) {
+                            serverService.execCommandWithKey(target.getHost(),
+                                    target.getPort() != null ? target.getPort() : 22,
+                                    target.getUsername(), pem, "chmod 644 /etc/ansible/group_vars/all.yml", 8000);
+                        }
+                        serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, "chmod -R 755 /etc/ansible", 8000);
+                    } else {
+                        serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "chmod 644 /etc/ansible/ansible.cfg /etc/ansible/hosts", 8000);
+                        if (varsContent != null && !varsContent.trim().isEmpty()) {
+                            serverService.execCommand(target.getHost(),
+                                    target.getPort() != null ? target.getPort() : 22,
+                                    target.getUsername(), sudoPassword, "chmod 644 /etc/ansible/group_vars/all.yml",
+                                    8000);
+                        }
+                        serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword, "chmod -R 755 /etc/ansible", 8000);
+                    }
+
+                    // Verify files exist
+                    String verifyCfg = "";
+                    String verifyHosts = "";
+                    if (pem != null && !pem.isBlank()) {
+                        verifyCfg = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem,
+                                "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 8000);
+                        verifyHosts = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem,
+                                "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 8000);
+                    } else {
+                        verifyCfg = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 8000);
+                        verifyHosts = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 8000);
+                    }
+
+                    if (verifyCfg == null || !verifyCfg.contains("OK") || verifyHosts == null
+                            || !verifyHosts.contains("OK")) {
+                        sendMessage(session, String.format(
+                                "{\"type\":\"error\",\"message\":\"Không xác minh được tệp cấu hình trên %s\"}",
+                                target.getHost()));
+                        success = false;
+                    }
+
+                    // Validate inventory syntax
+                    String invCheck = "";
+                    if (pem != null && !pem.isBlank()) {
+                        invCheck = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem,
+                                "bash -lc 'ansible-inventory -i /etc/ansible/hosts --list >/dev/null 2>&1 && echo OK || echo FAIL'",
+                                12000);
+                    } else {
+                        invCheck = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'ansible-inventory -i /etc/ansible/hosts --list >/dev/null 2>&1 && echo OK || echo FAIL'",
+                                12000);
+                    }
+
+                    if (invCheck == null || !invCheck.contains("OK")) {
+                        sendMessage(session, String.format(
+                                "{\"type\":\"warning\",\"message\":\"Cú pháp inventory có thể không hợp lệ trên %s\"}",
+                                target.getHost()));
+                    }
+
+                    if (success) {
+                        sendMessage(session, String.format(
+                                "{\"type\":\"success\",\"message\":\"Đã lưu cấu hình Ansible trên %s\"}",
+                                target.getHost()));
+                    }
+
+                } catch (Exception e) {
+                    sendMessage(session, String.format(
+                            "{\"type\":\"error\",\"message\":\"Lỗi khi lưu cấu hình: %s\"}",
+                            escapeJsonString(e.getMessage())));
+                    success = false;
+                }
+
             } catch (Exception e) {
                 sendMessage(session,
                         String.format("{\"type\":\"error\",\"message\":\"%s\"}", escapeJsonString(e.getMessage())));
@@ -746,13 +1042,26 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         // Tạo lệnh với sudo nếu cần
         String finalCommand = command;
         boolean isAnsibleInvocation = command.startsWith("bash -lc 'ansible ");
+        boolean needsSudo = (command.startsWith("apt") || command.startsWith("pip") || command.startsWith("rm ")
+                || command.startsWith("bash -lc 'shopt") || command.startsWith("apt-get")
+                || command.startsWith("add-apt-repository") || command.startsWith("chmod ")
+                || command.startsWith("cat > ") || command.startsWith("mkdir ")
+                || command.startsWith("tee ") || command.contains(" /etc/ansible"));
+
+        // Kiểm tra xem server có SSH key với sudo NOPASSWD không
+        boolean hasSudoNopasswd = false;
+        try {
+            String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+            String sudoCheckResult = serverService.execCommandWithKey(host, port, username,
+                    serverService.resolveServerPrivateKeyPem(server.getId()), checkSudoCmd, 5000);
+            hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
+        } catch (Exception e) {
+            // Nếu không kiểm tra được, giả định cần sudo password
+        }
+
+        // Chỉ sử dụng sudo password nếu cần thiết và không có sudo NOPASSWD
         if (sudoPassword != null && !sudoPassword.trim().isEmpty()
-                && !isAnsibleInvocation
-                && (command.startsWith("apt") || command.startsWith("pip") || command.startsWith("rm ")
-                        || command.startsWith("bash -lc 'shopt") || command.startsWith("apt-get")
-                        || command.startsWith("add-apt-repository") || command.startsWith("chmod ")
-                        || command.startsWith("cat > ") || command.startsWith("mkdir ")
-                        || command.startsWith("tee ") || command.contains(" /etc/ansible"))) {
+                && !isAnsibleInvocation && needsSudo && !hasSudoNopasswd) {
             String escapedPassword = sudoPassword.replace("'", "'\"'\"'");
             String quotedOriginal = "'" + command.replace("'", "'\"'\"'") + "'";
             finalCommand = String.format("echo '%s' | sudo -S bash -lc %s", escapedPassword, quotedOriginal);
@@ -761,6 +1070,13 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             sendMessage(session,
                     String.format(
                             "{\"type\":\"sudo_prompt\",\"server\":\"%s\",\"message\":\"[sudo] password for %s: \"}",
+                            host, username));
+        } else if (needsSudo && hasSudoNopasswd) {
+            // Có sudo NOPASSWD, chỉ cần thêm sudo vào command
+            finalCommand = "sudo " + command;
+            sendMessage(session,
+                    String.format(
+                            "{\"type\":\"info\",\"server\":\"%s\",\"message\":\"Sử dụng sudo NOPASSWD cho %s\"}",
                             host, username));
         }
 
@@ -915,5 +1231,38 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             map.put(k, val);
         }
         return map;
+    }
+
+    /**
+     * Cấu hình sudo NOPASSWD cho user trên server
+     */
+    private void configureSudoNopasswdForUser(WebSocketSession session, com.example.AutoDeployApp.entity.Server server,
+            String username, String sudoPassword) {
+        try {
+            // Kiểm tra xem user đã có quyền sudo NOPASSWD chưa
+            String checkCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'EXISTS' || echo 'NOT_EXISTS'";
+            String checkResult = executeCommandWithTerminalOutput(session, server, checkCmd, sudoPassword, 5000);
+
+            if (checkResult != null && !checkResult.contains("EXISTS")) {
+                // Nếu chưa có quyền NOPASSWD, thêm vào sudoers
+                String sudoersEntry = username + " ALL=(ALL) NOPASSWD: ALL";
+                String addSudoersCmd = "echo '" + sudoersEntry + "' | sudo tee -a /etc/sudoers.d/" + username
+                        + " && sudo chmod 440 /etc/sudoers.d/" + username;
+
+                executeCommandWithTerminalOutput(session, server, addSudoersCmd, sudoPassword, 10000);
+
+                sendMessage(session, String.format(
+                        "{\"type\":\"success\",\"message\":\"Da cau hinh sudo NOPASSWD cho %s tren %s\"}",
+                        username, server.getHost()));
+            } else {
+                sendMessage(session, String.format(
+                        "{\"type\":\"info\",\"message\":\"User %s da co quyen sudo NOPASSWD tren %s\"}",
+                        username, server.getHost()));
+            }
+        } catch (Exception e) {
+            sendMessage(session, String.format(
+                    "{\"type\":\"warning\",\"message\":\"Khong the cau hinh sudo NOPASSWD cho %s tren %s: %s\"}",
+                    username, server.getHost(), e.getMessage()));
+        }
     }
 }

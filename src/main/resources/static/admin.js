@@ -1700,19 +1700,41 @@ async function showAnsibleInstallModalForServer(clusterId, targetHost, isReinsta
       return;
     }
     
-  
-    // Populate sudo password input chỉ cho server này
+    // Kiểm tra sudo NOPASSWD cho server này
     const sudoInputsContainer = document.getElementById('sudo-password-inputs');
     sudoInputsContainer.innerHTML = '';
+    
+    let needsPassword = true;
+    let statusMessage = '';
+    
+    try {
+      const sudoCheckResponse = await fetch(`/api/ansible-config/check-sudo/${clusterId}?host=${targetHost}`);
+      const sudoCheckData = await sudoCheckResponse.json();
+      
+      if (sudoCheckData.success && sudoCheckData.hasNopasswd) {
+        needsPassword = false;
+        statusMessage = '<span class="badge bg-success">Sudo NOPASSWD</span>';
+      } else {
+        statusMessage = '<span class="badge bg-warning">Cần mật khẩu sudo</span>';
+      }
+    } catch (error) {
+      statusMessage = '<span class="badge bg-secondary">Không kiểm tra được</span>';
+    }
     
     const colDiv = document.createElement('div');
     colDiv.className = 'col-12 mb-3';
     colDiv.innerHTML = `
       <div class="card">
         <div class="card-body">
-          <h6 class="card-title">${targetServer.ip} <span class="badge bg-${targetServer.role === 'MASTER' ? 'primary' : 'secondary'}">${targetServer.role}</span></h6>
-          <input type="password" class="form-control sudo-password-input" 
-                 data-host="${targetServer.ip}" placeholder="Nhập mật khẩu sudo">
+          <h6 class="card-title">${targetServer.ip} <span class="badge bg-${targetServer.role === 'MASTER' ? 'primary' : 'secondary'}">${targetServer.role}</span> ${statusMessage}</h6>
+          ${needsPassword ? `
+            <input type="password" class="form-control sudo-password-input" 
+                   data-host="${targetServer.ip}" placeholder="Nhập mật khẩu sudo">
+          ` : `
+            <div class="form-control-plaintext text-success">
+              <i class="bi bi-check-circle"></i> Không cần mật khẩu sudo
+            </div>
+          `}
         </div>
       </div>
     `;
@@ -1784,24 +1806,58 @@ async function showAnsibleInstallModal(clusterId) {
   // Lấy thông tin cluster
   const clusterDetail = await fetchJSON(`/admin/clusters/${clusterId}/detail`);
   
-  // Populate sudo password inputs
+  // Chỉ hiển thị MASTER server
+  const masterNodes = clusterDetail.nodes.filter(node => node.role === 'MASTER');
+  
+  if (masterNodes.length === 0) {
+    alert('Không tìm thấy MASTER server trong cluster');
+    return;
+  }
+  
+  // Kiểm tra sudo NOPASSWD cho MASTER server
   const sudoInputsContainer = document.getElementById('sudo-password-inputs');
   sudoInputsContainer.innerHTML = '';
   
-  clusterDetail.nodes.forEach(node => {
+  for (const node of masterNodes) {
     const colDiv = document.createElement('div');
-    colDiv.className = 'col-md-6 mb-3';
+    colDiv.className = 'col-12 mb-3';
+    
+    // Kiểm tra sudo NOPASSWD cho MASTER server
+    let needsPassword = true;
+    let statusMessage = '';
+    
+    try {
+      const sudoCheckResponse = await fetch(`/api/ansible-config/check-sudo/${clusterId}?host=${node.ip}`);
+      const sudoCheckData = await sudoCheckResponse.json();
+      
+      if (sudoCheckData.success && sudoCheckData.hasNopasswd) {
+        needsPassword = false;
+        statusMessage = '<span class="badge bg-success">Sudo NOPASSWD</span>';
+      } else {
+        statusMessage = '<span class="badge bg-warning">Cần mật khẩu sudo</span>';
+      }
+    } catch (error) {
+      statusMessage = '<span class="badge bg-secondary">Không kiểm tra được</span>';
+    }
+    
     colDiv.innerHTML = `
       <div class="card">
         <div class="card-body">
-          <h6 class="card-title">${node.ip} <span class="badge bg-${node.role === 'MASTER' ? 'primary' : 'secondary'}">${node.role}</span></h6>
-          <input type="password" class="form-control sudo-password-input" 
-                 data-host="${node.ip}" placeholder="Nhập mật khẩu sudo">
+          <h6 class="card-title">${node.ip} <span class="badge bg-primary">MASTER</span> ${statusMessage}</h6>
+          <p class="text-muted small">Ansible sẽ được cài đặt chỉ trên MASTER server</p>
+          ${needsPassword ? `
+            <input type="password" class="form-control sudo-password-input" 
+                   data-host="${node.ip}" placeholder="Nhập mật khẩu sudo cho MASTER">
+          ` : `
+            <div class="form-control-plaintext text-success">
+              <i class="bi bi-check-circle"></i> Không cần mật khẩu sudo
+            </div>
+          `}
         </div>
       </div>
     `;
     sudoInputsContainer.appendChild(colDiv);
-  });
+  }
   
   // Reset modal state
   document.getElementById('sudo-password-section').classList.remove('d-none');
@@ -1816,7 +1872,9 @@ async function showAnsibleInstallModal(clusterId) {
 function startAnsibleInstallation() {
   const sudoPasswords = {};
   let hasPassword = false;
+  let hasNopasswdServers = false;
   
+  // Thu thập mật khẩu từ các input có sẵn
   document.querySelectorAll('.sudo-password-input').forEach(input => {
     const host = input.dataset.host;
     const password = input.value.trim();
@@ -1826,8 +1884,14 @@ function startAnsibleInstallation() {
     }
   });
   
-  if (!hasPassword) {
-    alert('Vui lòng nhập mật khẩu sudo.');
+  // Kiểm tra xem có server nào có sudo NOPASSWD không
+  document.querySelectorAll('.form-control-plaintext.text-success').forEach(element => {
+    hasNopasswdServers = true;
+  });
+  
+  // Nếu không có mật khẩu và không có server nào có sudo NOPASSWD
+  if (!hasPassword && !hasNopasswdServers) {
+    alert('Vui lòng nhập mật khẩu sudo cho ít nhất một server.');
     return;
   }
   
@@ -2289,8 +2353,115 @@ document.addEventListener('DOMContentLoaded', function() {
       const cfg = document.getElementById('ansible-cfg-editor')?.value || '';
       const hosts = document.getElementById('ansible-inventory-editor')?.value || '';
       const vars = document.getElementById('ansible-vars-editor')?.value || '';
-      // TODO: call backend API to save
-      alert('Đã lưu cấu hình (demo).');
+      
+      // Lấy thông tin server MASTER để hiển thị trong hộp thoại xác nhận
+      let masterHost = 'MASTER';
+      try {
+        const response = await fetch(`/api/ansible-config/read/${currentClusterId}`);
+        const data = await response.json();
+        if (data.success && data.server) {
+          masterHost = data.server;
+        }
+      } catch (error) {
+        console.warn('Không thể lấy thông tin server:', error);
+      }
+      
+      // Hiển thị hộp thoại xác nhận
+      const confirmMessage = `Xác nhận ghi đè cấu hình Ansible trên server MASTER (${masterHost})?`;
+      if (!confirm(confirmMessage)) {
+        return;
+      }
+      
+      // Kiểm tra SSH key và sudo NOPASSWD trước khi yêu cầu password
+      let sudoPassword = '';
+      try {
+        const checkResponse = await fetch(`/api/ansible-config/read/${currentClusterId}`);
+        const checkData = await checkResponse.json();
+        
+        if (!checkData.success || (!checkData.cfg && !checkData.hosts)) {
+          // Không có SSH key, kiểm tra sudo NOPASSWD
+          const sudoCheckResponse = await fetch(`/api/ansible-config/check-sudo/${currentClusterId}`);
+          const sudoCheckData = await sudoCheckResponse.json();
+          
+          if (!sudoCheckData.success || !sudoCheckData.hasNopasswd) {
+            // Không có sudo NOPASSWD, yêu cầu nhập password
+            sudoPassword = prompt('Server không có SSH key hoặc sudo NOPASSWD. Nhập mật khẩu sudo để ghi cấu hình:') || '';
+            if (!sudoPassword) {
+              showAlert('warning', 'Vui lòng nhập mật khẩu sudo');
+              return;
+            }
+          } else {
+            showAlert('info', 'Sử dụng SSH key với sudo NOPASSWD - không cần mật khẩu');
+          }
+        } else {
+          showAlert('info', 'Sử dụng SSH key - không cần mật khẩu sudo');
+        }
+      } catch (error) {
+        // Fallback: yêu cầu password nếu không kiểm tra được
+        sudoPassword = prompt('Nhập mật khẩu sudo để ghi cấu hình lên MASTER:') || '';
+        if (!sudoPassword) {
+          showAlert('warning', 'Vui lòng nhập mật khẩu sudo');
+          return;
+        }
+      }
+
+      // Show loading state
+      saveCfgBtn.disabled = true;
+      saveCfgBtn.textContent = 'Đang lưu...';
+
+      const formData = new FormData();
+      formData.append('sudoPassword', sudoPassword);
+      formData.append('cfg', cfg);
+      formData.append('hosts', hosts);
+      formData.append('vars', vars);
+
+
+      fetch(`/api/ansible-config/save/${currentClusterId}`, {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          showAlert('success', data.message || 'Đã lưu cấu hình thành công');
+          
+          // Hiển thị thông tin validation nếu có
+          if (data.validation) {
+            console.log('Ansible Validation Results:');
+            console.log('Config Check:', data.validation.configCheck);
+            console.log('Inventory Check:', data.validation.inventoryCheck);
+            console.log('Ping Check:', data.validation.pingCheck);
+            
+            // Hiển thị modal với thông tin validation chi tiết
+            showValidationModal(data.validation);
+          }
+          
+          // Tự động load lại dữ liệu sau khi lưu thành công
+        setTimeout(() => {
+          readAnsibleConfig();
+        }, 2000);
+        } else {
+          // Hiển thị lỗi chi tiết nếu có
+          if (data.details) {
+            console.log('Validation Error Details:');
+            console.log('Config Check:', data.details.configCheck);
+            console.log('Inventory Check:', data.details.inventoryCheck);
+            console.log('Ping Check:', data.details.pingCheck);
+            
+            showValidationModal(data.details, true);
+          }
+          showAlert('error', data.message || 'Không thể lưu cấu hình');
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        showAlert('error', 'Lỗi khi lưu cấu hình: ' + error.message);
+      })
+      .finally(() => {
+        // Reset button state
+        saveCfgBtn.disabled = false;
+        saveCfgBtn.textContent = 'Lưu cấu hình';
+      });
     });
   }
 
@@ -2382,13 +2553,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // WebSocket realtime for Init actions
   let initActionsWS = null;
-  function runInitActionWS(action, consoleId){
+  async function runInitActionWS(action, consoleId){
     if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
     const hostSelect = document.getElementById('init-host-select');
     const host = hostSelect ? (hostSelect.value || null) : null;
-    const needSudo = (action === 'init_structure' || action === 'init_config' || action === 'init_sshkey' || action === 'init_ping' );
-    const sudoPassword = needSudo ? prompt('Nhập mật khẩu sudo:') : null;
-    if (needSudo && !sudoPassword) return;
+    const needSudo = (action === 'init_structure' || action === 'init_config' || action === 'init_sshkey');
+    
+    let sudoPassword = null;
+    if (needSudo) {
+      // Kiểm tra sudo NOPASSWD trước khi yêu cầu mật khẩu
+      try {
+        const sudoCheckResponse = await fetch(`/api/ansible-config/check-sudo/${currentClusterId}${host ? `?host=${host}` : ''}`);
+        const sudoCheckData = await sudoCheckResponse.json();
+        
+        if (!sudoCheckData.success || !sudoCheckData.hasNopasswd) {
+          // Không có sudo NOPASSWD, yêu cầu nhập mật khẩu
+          sudoPassword = prompt('Server không có sudo NOPASSWD. Nhập mật khẩu sudo:') || '';
+          if (!sudoPassword) return;
+        } else {
+          // Có sudo NOPASSWD, không cần mật khẩu
+          appendInitLogTo(consoleId, '✅ Sử dụng sudo NOPASSWD - không cần mật khẩu');
+        }
+      } catch (error) {
+        // Fallback: yêu cầu mật khẩu nếu không kiểm tra được
+        sudoPassword = prompt('Nhập mật khẩu sudo:') || '';
+        if (!sudoPassword) return;
+      }
+    }
 
     try { if(initActionsWS) { initActionsWS.close(); } } catch(_) {}
     const protocol = (location.protocol === 'https:') ? 'wss' : 'ws';
@@ -2503,40 +2694,298 @@ document.addEventListener('DOMContentLoaded', function() {
   const ansibleConfigModalEl = document.getElementById('ansibleConfigModal');
   if(ansibleConfigModalEl && !ansibleConfigModalEl.dataset.bound){
     ansibleConfigModalEl.dataset.bound = '1';
+    
+    // No mode toggles needed - only direct edit mode
+    
+    // No line-by-line handlers needed
+    
+    // Control buttons handlers
+    const validateConfigBtn = document.getElementById('validate-config-btn');
+    const reloadConfigBtn = document.getElementById('reload-config-btn');
+    
+    // Validate config button
+    validateConfigBtn.addEventListener('click', () => {
+      const cfg = document.getElementById('ansible-cfg-editor')?.value || '';
+      const hosts = document.getElementById('ansible-inventory-editor')?.value || '';
+      const vars = document.getElementById('ansible-vars-editor')?.value || '';
+      
+      // Basic validation
+      let errors = [];
+      if (!cfg.trim()) errors.push('ansible.cfg không được để trống');
+      if (!hosts.trim()) errors.push('Inventory không được để trống');
+      
+      if (errors.length > 0) {
+        alert('Lỗi cú pháp:\n' + errors.join('\n'));
+      } else {
+        alert('Cú pháp cấu hình hợp lệ!');
+      }
+    });
+    
+    // Reload config button
+    reloadConfigBtn.addEventListener('click', () => {
+      // Show loading state
+      reloadConfigBtn.disabled = true;
+      reloadConfigBtn.innerHTML = '<i class="bi bi-arrow-clockwise spin"></i> Đang tải lại...';
+      
+      readAnsibleConfig();
+    });
+    
     ansibleConfigModalEl.addEventListener('shown.bs.modal', () => {
-      try { if(initActionsWS) { initActionsWS.close(); } } catch(_) {}
-      const protocol = (location.protocol === 'https:') ? 'wss' : 'ws';
-      initActionsWS = new WebSocket(`${protocol}://${location.host}/ws/ansible`);
-      const sudoPassword = prompt('Nhập mật khẩu sudo (để đọc file cấu hình trên MASTER):') || '';
-      initActionsWS.onopen = () => {
-        const payload = { action: 'read_ansible_config', clusterId: currentClusterId };
-        if (sudoPassword) payload.sudoPassword = sudoPassword;
-        initActionsWS.send(JSON.stringify(payload));
-      };
-      initActionsWS.onmessage = (event) => {
-        const raw = typeof event.data === 'string' ? event.data : '';
-        try {
-          const data = JSON.parse(raw);
-          if(data && data.type === 'ansible_config'){
-            const cfgEl = document.getElementById('ansible-cfg-editor');
-            const hostsEl = document.getElementById('ansible-inventory-editor');
-            if(cfgEl) cfgEl.value = data.cfg || '';
-            if(hostsEl) hostsEl.value = data.hosts || '';
-            if(!cfgEl && !hostsEl){ appendInitLogBlockTo('init-ansible-console', (data.cfg||'') + '\n\n' + (data.hosts||'')); }
-            return;
-          }
-          if(data && data.type === 'terminal_output'){
-            appendInitLogBlockTo('init-ansible-console', data.output || '');
-            return;
-          }
-          if(data && data.type === 'error' && data.message){ appendInitLogTo('init-ansible-console', '❌ '+data.message); }
-        } catch(_){ /* ignore */ }
-      };
-      ansibleConfigModalEl.addEventListener('hidden.bs.modal', () => {
-        try { initActionsWS && initActionsWS.close(); } catch(_) {}
-      }, { once: true });
+      readAnsibleConfig();
+    });
+    
+    ansibleConfigModalEl.addEventListener('hidden.bs.modal', () => {
+      // No WebSocket cleanup needed for REST API
+    }, { once: true });
+  }
+  
+  // Global function to remove line
+  window.removeLine = function(lineId) {
+    const lineElement = document.getElementById(lineId);
+    if (lineElement) {
+      lineElement.closest('.d-flex').remove();
+    }
+  };
+  
+  // No line-by-line functions needed
+  
+  // Function to show validation modal
+  function showValidationModal(validation, isError = false) {
+    const modalHtml = `
+      <div class="modal fade" id="validationModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">
+                <i class="bi bi-${isError ? 'exclamation-triangle' : 'check-circle'}"></i>
+                ${isError ? 'Lỗi xác minh cấu hình Ansible' : 'Kết quả xác minh cấu hình Ansible'}
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="row">
+                <div class="col-md-4">
+                  <div class="card">
+                    <div class="card-header">
+                      <h6><i class="bi bi-gear"></i> ansible-config</h6>
+                    </div>
+                    <div class="card-body">
+                      <pre class="small" style="max-height: 200px; overflow-y: auto;">${validation.configCheck || 'Không có kết quả'}</pre>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card">
+                    <div class="card-header">
+                      <h6><i class="bi bi-server"></i> ansible-inventory</h6>
+                    </div>
+                    <div class="card-body">
+                      <pre class="small" style="max-height: 200px; overflow-y: auto;">${validation.inventoryCheck || 'Không có kết quả'}</pre>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card">
+                    <div class="card-header">
+                      <h6><i class="bi bi-wifi"></i> ansible ping</h6>
+                    </div>
+                    <div class="card-body">
+                      <pre class="small" style="max-height: 200px; overflow-y: auto;">${validation.pingCheck || 'Không có kết quả'}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+              ${isError ? '<button type="button" class="btn btn-warning" onclick="document.getElementById(\'ansibleConfigModal\').style.display=\'block\'">Chỉnh sửa lại</button>' : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('validationModal');
+    if (existingModal) {
+      existingModal.remove();
+    }
+    
+    // Add new modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('validationModal'));
+    modal.show();
+  }
+
+  // Function to show alert messages
+  function showAlert(type, message) {
+    // Create alert element
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type === 'error' ? 'danger' : type === 'warning' ? 'warning' : type === 'success' ? 'success' : 'info'} alert-dismissible fade show`;
+    alertDiv.style.position = 'fixed';
+    alertDiv.style.top = '20px';
+    alertDiv.style.right = '20px';
+    alertDiv.style.zIndex = '9999';
+    alertDiv.style.minWidth = '300px';
+    
+    alertDiv.innerHTML = `
+      ${message}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+      if (alertDiv.parentNode) {
+        alertDiv.remove();
+      }
+    }, 5000);
+  }
+  
+  // Function to verify ansible connectivity
+  function verifyAnsible() {
+    const verifyBtn = document.getElementById('verify-ansible-btn');
+    if (!verifyBtn) return;
+    
+    verifyBtn.disabled = true;
+    verifyBtn.innerHTML = '<i class="bi bi-arrow-clockwise spin"></i> Đang xác minh...';
+    
+    fetch(`/api/ansible-config/verify/${currentClusterId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        showAlert('success', 'Ansible hoạt động bình thường');
+        // Hiển thị kết quả ping trong console hoặc modal
+        console.log('Ansible Ping Result:', data.pingResult);
+      } else {
+        showAlert('error', data.message || 'Ansible không hoạt động');
+      }
+    })
+    .catch(error => {
+      console.error('Error verifying ansible:', error);
+      showAlert('error', 'Lỗi khi xác minh ansible: ' + error.message);
+    })
+    .finally(() => {
+      verifyBtn.disabled = false;
+      verifyBtn.innerHTML = '<i class="bi bi-check-circle"></i> Xác minh';
     });
   }
+
+  // Function to rollback configuration
+  function rollbackConfig() {
+    const rollbackBtn = document.getElementById('rollback-config-btn');
+    if (!rollbackBtn) return;
+    
+    // Xác nhận rollback
+    if (!confirm('Xác nhận phục hồi cấu hình từ file backup (.bak)?')) {
+      return;
+    }
+    
+    const sudoPassword = prompt('Nhập mật khẩu sudo để rollback cấu hình:') || '';
+    if (!sudoPassword) {
+      showAlert('warning', 'Vui lòng nhập mật khẩu sudo');
+      return;
+    }
+    
+    rollbackBtn.disabled = true;
+    rollbackBtn.innerHTML = '<i class="bi bi-arrow-clockwise spin"></i> Đang rollback...';
+    
+    const formData = new FormData();
+    formData.append('sudoPassword', sudoPassword);
+    
+    fetch(`/api/ansible-config/rollback/${currentClusterId}`, {
+      method: 'POST',
+      body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        showAlert('success', data.message || 'Đã rollback cấu hình thành công');
+        // Tự động load lại dữ liệu sau khi rollback thành công
+        setTimeout(() => {
+          readAnsibleConfig();
+        }, 2000);
+      } else {
+        showAlert('error', data.message || 'Không thể rollback cấu hình');
+      }
+    })
+    .catch(error => {
+      console.error('Error rolling back config:', error);
+      showAlert('error', 'Lỗi khi rollback: ' + error.message);
+    })
+    .finally(() => {
+      rollbackBtn.disabled = false;
+      rollbackBtn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Rollback';
+    });
+  }
+
+  // Function to read ansible config via REST API
+  function readAnsibleConfig() {
+      fetch(`/api/ansible-config/read/${currentClusterId}?t=${Date.now()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
+        }
+      })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        const decode = (s) => {
+          if (typeof s !== 'string') return '';
+          return s.replace(/\\r/g, '\r').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+        };
+        
+        // Update textareas
+        const cfgEl = document.getElementById('ansible-cfg-editor');
+        const hostsEl = document.getElementById('ansible-inventory-editor');
+        const varsEl = document.getElementById('ansible-vars-editor');
+        
+        if(cfgEl) cfgEl.value = decode(data.cfg || '');
+        if(hostsEl) hostsEl.value = decode(data.hosts || '');
+        if(varsEl) varsEl.value = decode(data.vars || '');
+      } else {
+        // Silently handle error - don't show alert for read operation
+        console.warn('Could not read config:', data.message);
+        showAlert('warning', 'Không thể tải lại cấu hình');
+      }
+    })
+    .catch(error => {
+      console.error('Error reading config:', error);
+      showAlert('error', 'Lỗi khi tải lại cấu hình');
+    })
+    .finally(() => {
+      // Reset reload button state
+      const reloadConfigBtn = document.getElementById('reload-config-btn');
+      if (reloadConfigBtn) {
+        reloadConfigBtn.disabled = false;
+        reloadConfigBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Tải lại';
+      }
+    });
+  }
+  
+  // Event listeners for new buttons
+  const verifyBtn = document.getElementById('verify-ansible-btn');
+  if (verifyBtn && !verifyBtn.dataset.bound) {
+    verifyBtn.dataset.bound = '1';
+    verifyBtn.addEventListener('click', verifyAnsible);
+  }
+
+  const rollbackBtn = document.getElementById('rollback-config-btn');
+  if (rollbackBtn && !rollbackBtn.dataset.bound) {
+    rollbackBtn.dataset.bound = '1';
+    rollbackBtn.addEventListener('click', rollbackConfig);
+  }
+
+  // No line-by-line functions needed
 });
 
 

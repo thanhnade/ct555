@@ -572,11 +572,15 @@ public class ServerService {
                 }
             }
             ch.disconnect();
+
+            // 3) Cấu hình sudo NOPASSWD cho user
+            configureSudoNopasswd(session, username, rawPassword);
+
         } finally {
             session.disconnect();
         }
 
-        // 3) Persist key metadata
+        // 4) Persist key metadata
         SshKey entity = new SshKey();
         entity.setKeyType(SshKey.KeyType.RSA);
         entity.setKeyLength(2048);
@@ -585,6 +589,102 @@ public class ServerService {
         entity.setAesSalt(null);
         entity.setStatus(SshKey.KeyStatus.ACTIVE);
         return entity;
+    }
+
+    private void configureSudoNopasswd(Session session, String username, String sudoPassword) {
+        try {
+            System.out.println("================================================");
+            System.out.println("[SUDO NOPASSWD] Cau hinh cho user: " + username);
+
+            // 1. Ghi de file sudoers
+            System.out.println("[ACTION] Ghi de file sudoers...");
+            String sudoersEntry = username + " ALL=(ALL) NOPASSWD:ALL";
+            System.out.println("[ENTRY] Noi dung: " + sudoersEntry);
+
+            String writeCmd = String.join(" && ",
+                    "echo '" + sudoPassword + "' | sudo -S sh -c 'echo \"" + sudoersEntry + "\" > /etc/sudoers.d/"
+                            + username + "'",
+                    "echo '" + sudoPassword + "' | sudo -S chmod 440 /etc/sudoers.d/" + username,
+                    "echo '" + sudoPassword + "' | sudo -S chown root:root /etc/sudoers.d/" + username);
+
+            System.out.println("[WAIT] Dang ghi file sudoers...");
+            execSimple(session, writeCmd, 5000);
+            System.out.println("[WRITE] Da ghi file sudoers");
+
+            // 2. Dam bao #includedir ton tai
+            System.out.println("[CHECK] Dam bao #includedir /etc/sudoers.d ton tai...");
+            String ensureIncludeDir = String.join(" && ",
+                    "grep -q '^#includedir /etc/sudoers.d' /etc/sudoers || " +
+                            "echo '" + sudoPassword
+                            + "' | sudo -S sed -i 's/^@includedir/#includedir/' /etc/sudoers || " +
+                            "echo '" + sudoPassword
+                            + "' | sudo -S sh -c 'echo \"#includedir /etc/sudoers.d\" >> /etc/sudoers'");
+            execSimple(session, ensureIncludeDir, 3000);
+            System.out.println("[INCLUDEDIR] Da dam bao #includedir ton tai");
+
+            // 3. Kiem tra cu phap
+            System.out.println("[CHECK] Kiem tra cu phap file sudoers...");
+            String syntaxCmd = "echo '" + sudoPassword + "' | sudo -S visudo -cf /etc/sudoers.d/" + username
+                    + " >/dev/null 2>&1 && echo SYNTAX_OK || echo SYNTAX_ERROR";
+            String syntaxResult = execSimple(session, syntaxCmd, 3000).trim();
+            System.out.println("[SYNTAX] Ket qua: " + syntaxResult);
+
+            // 4. Reload cau hinh sudo
+            System.out.println("[RELOAD] Reload cau hinh sudo...");
+            String reloadCmd = "echo '" + sudoPassword
+                    + "' | sudo -S visudo -cf /etc/sudoers >/dev/null 2>&1 && echo RELOAD_OK || echo RELOAD_FAIL";
+            String reloadResult = execSimple(session, reloadCmd, 3000).trim();
+            System.out.println("[RELOAD] Ket qua: " + reloadResult);
+
+            // 5. Kiem tra thuc te
+            System.out.println("[VERIFY] Kiem tra quyen sudo NOPASSWD...");
+            String verifyCmd = "sudo -n true && echo 'NOPASSWD_ACTIVE' || echo 'FAIL'";
+            String verifyResult = execSimple(session, verifyCmd, 3000).trim();
+            System.out.println("[VERIFY] Ket qua: " + verifyResult);
+
+            // Debug: Kiem tra file sudoers co ton tai khong
+            String debugCmd = "ls -la /etc/sudoers.d/" + username + " && cat /etc/sudoers.d/" + username;
+            String debugResult = execSimple(session, debugCmd, 3000);
+            System.out.println("[DEBUG] File sudoers: " + debugResult);
+
+            // Debug: Kiem tra quyen sudo hien tai
+            String sudoCheckCmd = "sudo -l 2>/dev/null | grep -i nopasswd || echo 'NO_NOPASSWD_FOUND'";
+            String sudoCheckResult = execSimple(session, sudoCheckCmd, 3000);
+            System.out.println("[DEBUG] Quyen sudo hien tai: " + sudoCheckResult);
+
+            // 6. Kiem tra lai cuoi cung
+            System.out.println("[FINAL] Kiem tra lai cuoi cung...");
+            String finalCheckCmd = "sudo -l 2>/dev/null | grep -i nopasswd && echo FINAL_OK || echo FINAL_FAIL";
+            String finalResult = execSimple(session, finalCheckCmd, 3000).trim();
+            System.out.println("[FINAL] Ket qua: " + finalResult);
+
+            if (verifyResult.contains("NOPASSWD_ACTIVE") && finalResult.contains("FINAL_OK")) {
+                System.out.println("[SUCCESS] Cau hinh sudo NOPASSWD thanh cong cho " + username);
+            } else {
+                System.err.println("[ERROR] Cau hinh sudo NOPASSWD that bai cho " + username);
+                System.err.println("[HINT] Co the can dang nhap lai hoac kiem tra cau hinh sudoers");
+            }
+
+            System.out.println("================================================");
+        } catch (Exception e) {
+            System.err.println("[SUDO NOPASSWD] Loi khi cau hinh sudo NOPASSWD cho " + username);
+            System.err.println("Chi tiet loi: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Hàm phụ trợ: thực thi lệnh đơn giản và trả output (để tránh lặp code JSch)
+     */
+    private String execSimple(Session session, String cmd, int timeoutMs) throws Exception {
+        com.jcraft.jsch.ChannelExec ch = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
+        ch.setCommand(cmd);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        ch.setOutputStream(out);
+        ch.connect(timeoutMs);
+        while (!ch.isClosed())
+            Thread.sleep(50);
+        ch.disconnect();
+        return out.toString(StandardCharsets.UTF_8);
     }
 
     /**
@@ -606,9 +706,32 @@ public class ServerService {
 
             channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
 
-            // Tạo lệnh với sudo và echo password
-            String sudoCommand = createSudoCommand(command, sudoPassword);
-            channel.setCommand(sudoCommand);
+            // Kiểm tra sudo NOPASSWD trước khi sử dụng password
+            String finalCommand = command;
+            try {
+                String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                com.jcraft.jsch.ChannelExec checkChannel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
+                checkChannel.setCommand(checkSudoCmd);
+                checkChannel.connect(3000);
+
+                java.io.InputStream checkIn = checkChannel.getInputStream();
+                byte[] checkBuf = checkIn.readAllBytes();
+                String checkResult = new String(checkBuf, java.nio.charset.StandardCharsets.UTF_8).trim();
+                checkChannel.disconnect();
+
+                if (checkResult.contains("HAS_NOPASSWD")) {
+                    // Có sudo NOPASSWD, chỉ cần thêm sudo
+                    finalCommand = "sudo " + command;
+                } else {
+                    // Không có sudo NOPASSWD, sử dụng password
+                    finalCommand = createSudoCommand(command, sudoPassword);
+                }
+            } catch (Exception e) {
+                // Nếu không kiểm tra được, sử dụng password
+                finalCommand = createSudoCommand(command, sudoPassword);
+            }
+
+            channel.setCommand(finalCommand);
 
             java.io.InputStream in = channel.getInputStream();
             channel.connect(timeoutMs);
@@ -650,9 +773,32 @@ public class ServerService {
 
             channel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
 
-            // Tạo lệnh với sudo và echo password
-            String sudoCommand = createSudoCommand(command, sudoPassword);
-            channel.setCommand(sudoCommand);
+            // Kiểm tra sudo NOPASSWD trước khi sử dụng password
+            String finalCommand = command;
+            try {
+                String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                com.jcraft.jsch.ChannelExec checkChannel = (com.jcraft.jsch.ChannelExec) session.openChannel("exec");
+                checkChannel.setCommand(checkSudoCmd);
+                checkChannel.connect(3000);
+
+                java.io.InputStream checkIn = checkChannel.getInputStream();
+                byte[] checkBuf = checkIn.readAllBytes();
+                String checkResult = new String(checkBuf, java.nio.charset.StandardCharsets.UTF_8).trim();
+                checkChannel.disconnect();
+
+                if (checkResult.contains("HAS_NOPASSWD")) {
+                    // Có sudo NOPASSWD, chỉ cần thêm sudo
+                    finalCommand = "sudo " + command;
+                } else {
+                    // Không có sudo NOPASSWD, sử dụng password
+                    finalCommand = createSudoCommand(command, sudoPassword);
+                }
+            } catch (Exception e) {
+                // Nếu không kiểm tra được, sử dụng password
+                finalCommand = createSudoCommand(command, sudoPassword);
+            }
+
+            channel.setCommand(finalCommand);
 
             java.io.InputStream in = channel.getInputStream();
             channel.connect(timeoutMs);
