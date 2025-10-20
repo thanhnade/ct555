@@ -4,10 +4,6 @@ import com.example.AutoDeployApp.entity.Server;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -20,287 +16,260 @@ public class AnsibleInstallationService {
     private final ServerService serverService;
     private final ExecutorService executorService = Executors.newFixedThreadPool(5);
 
-    // Paths for Ansible files
-    private static final String ANSIBLE_DIR = "ansible-workspace";
-    private static final String INVENTORY_FILE = "inventory.ini";
-    private static final String ANSIBLE_CFG = "ansible.cfg";
-
     public AnsibleInstallationService(ServerService serverService) {
         this.serverService = serverService;
     }
 
-    // ================= Ansible Quick Init Actions (single MASTER)
-    // =================
-
-    /**
-     * Tạo cấu trúc /etc/ansible trên máy đích (mkdir, quyền cơ bản)
-     */
-    public String initRemoteAnsibleStructure(Server server, String sshPassword, String sudoPassword) {
-        String cmd = "bash -lc '"
-                + "set -e; "
-                + "sudo mkdir -p /etc/ansible/{playbooks,roles,group_vars,host_vars}; "
-                + "sudo mkdir -p ~/.ansible; "
-                + "sudo chmod -R 755 /etc/ansible; "
-                + "echo OK'";
-        return executeRemoteWithAuth(server, cmd, sshPassword, sudoPassword, 20000);
-    }
-
-    /**
-     * Tạo ansible.cfg và hosts mặc định tại /etc/ansible
-     */
-    public String initRemoteDefaultConfig(Server server, String sshPassword, String sudoPassword) {
-        String cfg = "[defaults]\n"
-                + "inventory = /etc/ansible/hosts\n"
-                + "host_key_checking = False\n"
-                + "retry_files_enabled = False\n"
-                + "gathering = smart\n"
-                + "stdout_callback = yaml\n"
-                + "bin_ansible_callbacks = True\n";
-        String hosts = "[master]\n127.0.0.1 ansible_connection=local\n\n"
-                + "[workers]\n# 192.168.56.11 ansible_user=ubuntu\n\n"
-                + "[all:vars]\nansible_python_interpreter=/usr/bin/python3\n";
-
-        String cmd = "bash -lc 'set -e; "
-                + "sudo mkdir -p /etc/ansible; "
-                + "sudo tee /etc/ansible/ansible.cfg > /dev/null <<\nEOF\n" + escapeForHereDoc(cfg) + "\nEOF\n"
-                + "sudo tee /etc/ansible/hosts > /dev/null <<\nEOF\n" + escapeForHereDoc(hosts) + "\nEOF\n"
-                + "echo OK'";
-        return executeRemoteWithAuth(server, cmd, sshPassword, sudoPassword, 25000);
-    }
-
-    /**
-     * Tạo ansible.cfg và hosts theo danh sách server của cụm (MASTER/WORKER lấy từ
-     * CSDL)
-     */
-    public String initRemoteDefaultConfigForCluster(Server targetServer,
-            java.util.List<Server> clusterServers,
-            String sshPassword, String sudoPassword) {
-        String cfg = "[defaults]\n"
-                + "inventory = /etc/ansible/hosts\n"
-                + "host_key_checking = False\n"
-                + "retry_files_enabled = False\n"
-                + "gathering = smart\n"
-                + "stdout_callback = yaml\n"
-                + "bin_ansible_callbacks = True\n";
-
-        StringBuilder hosts = new StringBuilder();
-        hosts.append("[master]\n");
-        for (Server s : clusterServers) {
-            if (s.getRole() == Server.ServerRole.MASTER) {
-                hosts.append(s.getHost())
-                        .append(" ansible_user=").append(s.getUsername())
-                        .append(" ansible_ssh_port=").append(s.getPort() != null ? s.getPort() : 22)
-                        .append("\n");
-            }
-        }
-        hosts.append("\n[workers]\n");
-        for (Server s : clusterServers) {
-            if (s.getRole() == Server.ServerRole.WORKER) {
-                hosts.append(s.getHost())
-                        .append(" ansible_user=").append(s.getUsername())
-                        .append(" ansible_ssh_port=").append(s.getPort() != null ? s.getPort() : 22)
-                        .append("\n");
-            }
-        }
-        hosts.append("\n[all:vars]\n");
-        hosts.append("ansible_python_interpreter=/usr/bin/python3\n");
-        hosts.append("ansible_ssh_common_args='-o StrictHostKeyChecking=no'\n");
-
-        String cmd = "bash -lc 'set -e; "
-                + "sudo mkdir -p /etc/ansible; "
-                + "sudo tee /etc/ansible/ansible.cfg > /dev/null <<\\nEOF\\n" + escapeForHereDoc(cfg) + "\\nEOF\\n"
-                + "sudo tee /etc/ansible/hosts > /dev/null <<\\nEOF\\n" + escapeForHereDoc(hosts.toString())
-                + "\\nEOF\\n"
-                + "echo OK'";
-        return executeRemoteWithAuth(targetServer, cmd, sshPassword, sudoPassword, 30000);
-    }
-
-    /**
-     * Tạo SSH key không mật khẩu (~/.ssh/id_rsa) nếu chưa tồn tại
-     */
-    public String generateRemoteSshKeyNoPass(Server server, String sshPassword) {
-        String cmd = "bash -lc '"
-                + "mkdir -p ~/.ssh; chmod 700 ~/.ssh; "
-                + "[ -f ~/.ssh/id_rsa ] || ssh-keygen -t rsa -b 4096 -N '' -f ~/.ssh/id_rsa -q; "
-                + "echo OK'";
-        return executeRemoteWithAuth(server, cmd, sshPassword, null, 20000);
-    }
-
-    /**
-     * Chạy ansible all -m ping -i /etc/ansible/hosts
-     */
-    public String runRemoteAnsiblePingAll(Server server, String sshPassword) {
-        String cmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'";
-        return executeRemoteWithAuth(server, cmd, sshPassword, null, 30000);
-    }
-
-    // ================= Helpers =================
-
     private String executeRemoteWithAuth(Server server, String command, String sshPassword, String sudoPassword,
             int timeoutMs) {
         try {
-            if (server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null) {
-                // Nếu có sudoPassword, bọc sudo -S trong command đã có ở phía handler; ở đây
-                // command đã chứa sudo khi cần
-                return serverService.execCommandWithKey(
-                        server.getHost(), server.getPort(), server.getUsername(),
-                        server.getSshKey().getEncryptedPrivateKey(), command, timeoutMs);
+            String host = server.getHost();
+            int port = server.getPort() != null ? server.getPort() : 22;
+            String username = server.getUsername();
+
+            // Xác định xem command có cần sudo không
+            boolean needsSudo = (command.startsWith("apt") || command.startsWith("pip") || command.startsWith("rm ")
+                    || command.startsWith("bash -lc 'shopt") || command.startsWith("apt-get")
+                    || command.startsWith("add-apt-repository") || command.startsWith("chmod ")
+                    || command.startsWith("cat > ") || command.startsWith("mkdir ")
+                    || command.startsWith("tee ") || command.contains(" /etc/ansible"));
+
+            // Ưu tiên SSH key từ database
+            String pem = serverService.resolveServerPrivateKeyPem(server.getId());
+            boolean hasSudoNopasswd = false;
+
+            // Kiểm tra sudo NOPASSWD nếu có SSH key
+            if (pem != null && !pem.isBlank()) {
+                if (needsSudo) {
+                    try {
+                        String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                        String sudoCheckResult = serverService.execCommandWithKey(host, port, username, pem,
+                                checkSudoCmd, 5000);
+                        hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
+                    } catch (Exception e) {
+                        // Nếu không kiểm tra được với SSH key, thử với password
+                        try {
+                            if (sudoPassword != null && !sudoPassword.isBlank()) {
+                                String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                                String sudoCheckResult = serverService.execCommand(host, port, username, sudoPassword,
+                                        checkSudoCmd, 5000);
+                                hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
+                            }
+                        } catch (Exception e2) {
+                            // Nếu không kiểm tra được, giả định cần sudo password
+                        }
+                    }
+                }
             }
-            // fallback password
-            return serverService.execCommand(server.getHost(), server.getPort(), server.getUsername(),
-                    sshPassword, command, timeoutMs);
+
+            // Tạo lệnh với sudo nếu cần
+            String finalCommand = command;
+            if (needsSudo && !hasSudoNopasswd && sudoPassword != null && !sudoPassword.trim().isEmpty()) {
+                String escapedPassword = sudoPassword.replace("'", "'\"'\"'");
+                String quotedOriginal = "'" + command.replace("'", "'\"'\"'") + "'";
+                finalCommand = String.format("echo '%s' | sudo -S bash -lc %s", escapedPassword, quotedOriginal);
+            } else if (needsSudo && hasSudoNopasswd) {
+                finalCommand = "sudo " + command;
+            }
+
+            // Thực thi lệnh - ưu tiên SSH key
+            if (pem != null && !pem.isBlank()) {
+                return serverService.execCommandWithKey(host, port, username, pem, finalCommand, timeoutMs);
+            } else if (sshPassword != null && !sshPassword.isBlank()) {
+                return serverService.execCommand(host, port, username, sshPassword, finalCommand, timeoutMs);
+            } else {
+                throw new RuntimeException("Không có SSH key hoặc mật khẩu SSH để kết nối tới " + host);
+            }
         } catch (Exception e) {
             throw new RuntimeException("Remote exec failed on " + server.getHost() + ": " + e.getMessage(), e);
         }
     }
 
-    private String escapeForHereDoc(String s) {
-        return s.replace("\\", "\\\\");
+    private Map<String, Object> checkServerAuthStatus(Server server, String sudoPassword) {
+        Map<String, Object> status = new java.util.HashMap<>();
+
+        // Kiểm tra SSH key
+        String pem = serverService.resolveServerPrivateKeyPem(server.getId());
+        boolean hasSshKey = (pem != null && !pem.isBlank());
+        status.put("hasSshKey", hasSshKey);
+
+        boolean hasSudoNopasswd = false;
+        boolean needsPassword = true;
+        String authMethod = "password";
+
+        if (hasSshKey) {
+            // Có SSH key, kiểm tra sudo NOPASSWD
+            try {
+                String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                String sudoCheckResult = serverService.execCommandWithKey(
+                        server.getHost(),
+                        server.getPort() != null ? server.getPort() : 22,
+                        server.getUsername(),
+                        pem,
+                        checkSudoCmd,
+                        5000);
+                hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
+
+                if (hasSudoNopasswd) {
+                    needsPassword = false;
+                    authMethod = "SSH key + sudo NOPASSWD";
+                } else if (sudoPassword != null && !sudoPassword.trim().isEmpty()) {
+                    needsPassword = true;
+                    authMethod = "SSH key + sudo password";
+                } else {
+                    needsPassword = true;
+                    authMethod = "SSH key (cần sudo password hoặc fallback password)";
+                }
+            } catch (Exception e) {
+                // Không kiểm tra được NOPASSWD với SSH key
+                if (sudoPassword != null && !sudoPassword.trim().isEmpty()) {
+                    needsPassword = true;
+                    authMethod = "SSH key + sudo password";
+                } else {
+                    needsPassword = true;
+                    authMethod = "SSH key (cần sudo password hoặc fallback password)";
+                }
+            }
+        } else {
+            // Không có SSH key, chỉ có thể dùng password
+            needsPassword = true;
+            authMethod = "Password";
+        }
+
+        status.put("hasSudoNopasswd", hasSudoNopasswd);
+        status.put("needsPassword", needsPassword);
+        status.put("authMethod", authMethod);
+
+        return status;
     }
 
     /**
-     * Kiểm tra Ansible đã cài đặt trên các MASTER servers trong cluster
+     * Kiểm tra Ansible đã cài đặt trên 1 máy MASTER duy nhất trong cluster
      */
     public Map<String, Object> checkAnsibleInstallation(Long clusterId, Map<Long, String> passwordCache) {
         List<Server> allClusterServers = serverService.findByClusterId(clusterId);
 
-        // Chỉ kiểm tra servers có role MASTER
-        List<Server> clusterServers = allClusterServers.stream()
+        // Chỉ lấy 1 MASTER server đầu tiên
+        Server masterServer = allClusterServers.stream()
                 .filter(server -> server.getRole() == Server.ServerRole.MASTER)
-                .collect(java.util.stream.Collectors.toList());
+                .findFirst()
+                .orElse(null);
+
+        if (masterServer == null) {
+            Map<String, Object> result = new java.util.HashMap<>();
+            result.put("clusterId", clusterId);
+            result.put("allInstalled", false);
+            result.put("someInstalled", false);
+            result.put("totalServers", 0);
+            result.put("installedCount", 0);
+            result.put("notInstalledCount", 0);
+            result.put("installationPercentage", 0);
+            result.put("ansibleStatus", new java.util.HashMap<>());
+            result.put("roleSummary", new java.util.HashMap<>());
+            result.put("recommendation", "❌ Không tìm thấy MASTER server trong cluster");
+            return result;
+        }
 
         Map<String, Object> detailedResults = new java.util.HashMap<>();
+        String serverInfo = String.format("%s (%s)", masterServer.getHost(), masterServer.getRole().name());
 
-        boolean allInstalled = true;
-        boolean someInstalled = false;
-        int totalServers = clusterServers.size();
-        int installedCount = 0;
+        try {
+            String checkCmd = "ansible --version";
+            String result = "";
 
-        // Kiểm tra từng MASTER server trong cluster
-        for (Server server : clusterServers) {
-            String serverInfo = String.format("%s (%s)", server.getHost(), server.getRole().name());
+            // Thử SSH key trước
+            if (masterServer.getSshKey() != null && masterServer.getSshKey().getEncryptedPrivateKey() != null) {
+                try {
+                    result = serverService.execCommandWithKey(
+                            masterServer.getHost(), masterServer.getPort(), masterServer.getUsername(),
+                            masterServer.getSshKey().getEncryptedPrivateKey(), checkCmd, 10000);
+                } catch (Exception e) {
+                    result = null;
+                }
+            }
 
-            try {
-                String checkCmd = "ansible --version";
-                String result = "";
-
-                // Thử SSH key trước
-                if (server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null) {
+            // Fallback về password nếu SSH key thất bại hoặc không có
+            if (result == null || result.trim().isEmpty()) {
+                String password = passwordCache.get(masterServer.getId());
+                if (password != null && !password.trim().isEmpty()) {
                     try {
-                        result = serverService.execCommandWithKey(
-                                server.getHost(), server.getPort(), server.getUsername(),
-                                server.getSshKey().getEncryptedPrivateKey(), checkCmd, 10000);
-                        System.out.println("DEBUG: SSH key result for " + server.getHost() + ": "
-                                + (result != null ? "SUCCESS" : "NULL"));
+                        result = serverService.execCommand(
+                                masterServer.getHost(), masterServer.getPort(), masterServer.getUsername(),
+                                password, checkCmd, 10000);
                     } catch (Exception e) {
-                        System.out.println("DEBUG: SSH key failed for " + server.getHost() + ": " + e.getMessage());
                         result = null;
                     }
                 }
-
-                // Fallback về password nếu SSH key thất bại hoặc không có
-                if (result == null || result.trim().isEmpty()) {
-                    String password = passwordCache.get(server.getId());
-                    if (password != null && !password.trim().isEmpty()) {
-                        try {
-                            result = serverService.execCommand(
-                                    server.getHost(), server.getPort(), server.getUsername(),
-                                    password, checkCmd, 10000);
-                            System.out.println("DEBUG: Password result for " + server.getHost() + ": "
-                                    + (result != null ? "SUCCESS" : "NULL"));
-                        } catch (Exception e) {
-                            System.out
-                                    .println("DEBUG: Password failed for " + server.getHost() + ": " + e.getMessage());
-                            result = null;
-                        }
-                    } else {
-                        System.out.println("DEBUG: No password available for " + server.getHost());
-                    }
-                }
-
-                // Kiểm tra kết quả
-                if (result != null && !result.trim().isEmpty() && result.toLowerCase().contains("ansible")) {
-                    installedCount++;
-                    someInstalled = true;
-
-                    Map<String, Object> serverStatus = new java.util.HashMap<>();
-                    serverStatus.put("installed", true);
-                    serverStatus.put("version", extractAnsibleVersion(result));
-                    serverStatus.put("fullOutput", result);
-                    serverStatus.put("role", server.getRole().name());
-                    serverStatus.put("serverInfo", serverInfo);
-                    detailedResults.put(server.getHost(), serverStatus);
-                } else {
-                    Map<String, Object> serverStatus = new java.util.HashMap<>();
-                    serverStatus.put("installed", false);
-                    serverStatus.put("error", "Ansible not found or not accessible");
-                    serverStatus.put("role", server.getRole().name());
-                    serverStatus.put("serverInfo", serverInfo);
-                    detailedResults.put(server.getHost(), serverStatus);
-                    allInstalled = false;
-                }
-
-            } catch (Exception e) {
-                String errorMessage = e.getMessage();
-                if (errorMessage == null) {
-                    errorMessage = e.getClass().getSimpleName() + " occurred";
-                }
-                System.out.println("DEBUG: Exception for " + server.getHost() + ": " + errorMessage);
-                e.printStackTrace();
-
-                Map<String, Object> serverStatus = new java.util.HashMap<>();
-                serverStatus.put("installed", false);
-                serverStatus.put("error", errorMessage);
-                serverStatus.put("role", server.getRole().name());
-                serverStatus.put("serverInfo", serverInfo);
-                detailedResults.put(server.getHost(), serverStatus);
-                allInstalled = false;
             }
-        }
 
-        // Phân loại servers theo role
-        Map<String, Object> roleSummary = new java.util.HashMap<>();
-        Map<String, Integer> roleInstalledCount = new java.util.HashMap<>();
-        Map<String, Integer> roleTotalCount = new java.util.HashMap<>();
+            // Kiểm tra kết quả
+            boolean isInstalled = (result != null && !result.trim().isEmpty()
+                    && result.toLowerCase().contains("ansible"));
 
-        for (Server server : clusterServers) {
-            String role = server.getRole().name();
-            roleTotalCount.put(role, roleTotalCount.getOrDefault(role, 0) + 1);
+            Map<String, Object> serverStatus = new java.util.HashMap<>();
+            serverStatus.put("installed", isInstalled);
+            serverStatus.put("role", masterServer.getRole().name());
+            serverStatus.put("serverInfo", serverInfo);
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> serverStatus = (Map<String, Object>) detailedResults.get(server.getHost());
-            if ((Boolean) serverStatus.get("installed")) {
-                roleInstalledCount.put(role, roleInstalledCount.getOrDefault(role, 0) + 1);
+            if (isInstalled) {
+                serverStatus.put("version", extractAnsibleVersion(result));
+                serverStatus.put("fullOutput", result);
+            } else {
+                serverStatus.put("error", "Ansible not found or not accessible");
             }
+
+            detailedResults.put(masterServer.getHost(), serverStatus);
+
+            // Tạo role summary cho MASTER
+            Map<String, Object> roleSummary = new java.util.HashMap<>();
+            Map<String, Object> masterInfo = new java.util.HashMap<>();
+            masterInfo.put("total", 1);
+            masterInfo.put("installed", isInstalled ? 1 : 0);
+            masterInfo.put("notInstalled", isInstalled ? 0 : 1);
+            masterInfo.put("percentage", isInstalled ? 100 : 0);
+            roleSummary.put("MASTER", masterInfo);
+
+            Map<String, Object> finalResult = new java.util.HashMap<>();
+            finalResult.put("clusterId", clusterId);
+            finalResult.put("allInstalled", isInstalled);
+            finalResult.put("someInstalled", isInstalled);
+            finalResult.put("totalServers", 1);
+            finalResult.put("installedCount", isInstalled ? 1 : 0);
+            finalResult.put("notInstalledCount", isInstalled ? 0 : 1);
+            finalResult.put("installationPercentage", isInstalled ? 100 : 0);
+            finalResult.put("ansibleStatus", detailedResults);
+            finalResult.put("roleSummary", roleSummary);
+            finalResult.put("recommendation",
+                    getInstallationRecommendation(isInstalled, isInstalled, isInstalled ? 1 : 0, 1));
+
+            return finalResult;
+
+        } catch (Exception e) {
+            String errorMessage = e.getMessage();
+            if (errorMessage == null) {
+                errorMessage = e.getClass().getSimpleName() + " occurred";
+            }
+
+            Map<String, Object> serverStatus = new java.util.HashMap<>();
+            serverStatus.put("installed", false);
+            serverStatus.put("error", errorMessage);
+            serverStatus.put("role", masterServer.getRole().name());
+            serverStatus.put("serverInfo", serverInfo);
+            detailedResults.put(masterServer.getHost(), serverStatus);
+
+            Map<String, Object> result = new java.util.HashMap<>();
+            result.put("clusterId", clusterId);
+            result.put("allInstalled", false);
+            result.put("someInstalled", false);
+            result.put("totalServers", 1);
+            result.put("installedCount", 0);
+            result.put("notInstalledCount", 1);
+            result.put("installationPercentage", 0);
+            result.put("ansibleStatus", detailedResults);
+            result.put("roleSummary", new java.util.HashMap<>());
+            result.put("recommendation", "❌ Lỗi kiểm tra Ansible trên MASTER: " + errorMessage);
+            return result;
         }
-
-        // Tạo summary cho từng role
-        for (String role : roleTotalCount.keySet()) {
-            int total = roleTotalCount.get(role);
-            int installed = roleInstalledCount.getOrDefault(role, 0);
-
-            Map<String, Object> roleInfo = new java.util.HashMap<>();
-            roleInfo.put("total", total);
-            roleInfo.put("installed", installed);
-            roleInfo.put("notInstalled", total - installed);
-            roleInfo.put("percentage", total > 0 ? Math.round((installed * 100.0) / total) : 0);
-            roleSummary.put(role, roleInfo);
-        }
-
-        Map<String, Object> result = new java.util.HashMap<>();
-        result.put("clusterId", clusterId);
-        result.put("allInstalled", allInstalled);
-        result.put("someInstalled", someInstalled);
-        result.put("totalServers", totalServers);
-        result.put("installedCount", installedCount);
-        result.put("notInstalledCount", totalServers - installedCount);
-        result.put("installationPercentage",
-                totalServers > 0 ? Math.round((installedCount * 100.0) / totalServers) : 0);
-        result.put("ansibleStatus", detailedResults);
-        result.put("roleSummary", roleSummary);
-        result.put("recommendation",
-                getInstallationRecommendation(allInstalled, someInstalled, installedCount, totalServers));
-        return result;
     }
 
     /**
@@ -348,7 +317,7 @@ public class AnsibleInstallationService {
     }
 
     /**
-     * Cài đặt Ansible trên cluster với hỗ trợ sudo password
+     * Cài đặt Ansible trên 1 MASTER server duy nhất trong cluster
      */
     @Transactional
     public CompletableFuture<Map<String, Object>> installAnsibleOnCluster(Long clusterId,
@@ -357,39 +326,38 @@ public class AnsibleInstallationService {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 // 1. Lấy danh sách servers trong cluster
-                List<Server> clusterServers = serverService.findByClusterId(clusterId);
+                List<Server> allClusterServers = serverService.findByClusterId(clusterId);
 
-                if (clusterServers.isEmpty()) {
+                if (allClusterServers.isEmpty()) {
                     throw new RuntimeException("Cluster không có servers nào");
                 }
 
-                // 2. Tạo workspace cho Ansible
-                createAnsibleWorkspace();
+                // 2. Chỉ lấy 1 MASTER server đầu tiên
+                Server masterServer = allClusterServers.stream()
+                        .filter(server -> server.getRole() == Server.ServerRole.MASTER)
+                        .findFirst()
+                        .orElse(null);
 
-                // 3. Tạo inventory file với sudo password
-                createInventoryFileWithSudo(clusterServers, passwordCache, sudoPasswordCache);
+                if (masterServer == null) {
+                    throw new RuntimeException("Không tìm thấy MASTER server trong cluster");
+                }
 
-                // 4. Tạo ansible.cfg
-                createAnsibleConfig();
-
-                // 5. Cài đặt Ansible trên từng node
+                // 3. Cài đặt Ansible trên MASTER server
                 Map<String, Object> results = new java.util.HashMap<>();
 
-                for (Server server : clusterServers) {
-                    try {
-                        String result = installAnsibleOnNodeWithSudo(server,
-                                passwordCache.get(server.getId()),
-                                sudoPasswordCache.get(server.getId()));
-                        Map<String, Object> serverResult = new java.util.HashMap<>();
-                        serverResult.put("status", "SUCCESS");
-                        serverResult.put("message", result);
-                        results.put(server.getHost(), serverResult);
-                    } catch (Exception e) {
-                        Map<String, Object> serverResult = new java.util.HashMap<>();
-                        serverResult.put("status", "FAILED");
-                        serverResult.put("error", e.getMessage());
-                        results.put(server.getHost(), serverResult);
-                    }
+                try {
+                    String result = installAnsibleOnNodeWithSudo(masterServer,
+                            passwordCache.get(masterServer.getId()),
+                            sudoPasswordCache.get(masterServer.getId()));
+                    Map<String, Object> serverResult = new java.util.HashMap<>();
+                    serverResult.put("status", "SUCCESS");
+                    serverResult.put("message", result);
+                    results.put(masterServer.getHost(), serverResult);
+                } catch (Exception e) {
+                    Map<String, Object> serverResult = new java.util.HashMap<>();
+                    serverResult.put("status", "FAILED");
+                    serverResult.put("error", e.getMessage());
+                    results.put(masterServer.getHost(), serverResult);
                 }
 
                 Map<String, Object> finalResult = new java.util.HashMap<>();
@@ -406,160 +374,94 @@ public class AnsibleInstallationService {
 
     /**
      * Cài đặt Ansible trên một node với hỗ trợ sudo
+     * Ưu tiên SSH key + sudo NOPASSWD, fallback về SSH key + sudo password, cuối
+     * cùng mới dùng password
      */
     private String installAnsibleOnNodeWithSudo(Server server, String sshPassword, String sudoPassword) {
         try {
-            // Ưu tiên sử dụng SSH key nếu có
-            if (server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null) {
-                return installAnsibleWithKeyAndSudo(server, sudoPassword);
+            // Kiểm tra trạng thái authentication của server
+            Map<String, Object> authStatus = checkServerAuthStatus(server, sudoPassword);
+
+            boolean hasSshKey = (Boolean) authStatus.get("hasSshKey");
+            boolean hasSudoNopasswd = (Boolean) authStatus.get("hasSudoNopasswd");
+            String authMethod = (String) authStatus.get("authMethod");
+
+            System.out.println("[" + server.getHost() + "] Auth status: " + authMethod);
+
+            // Xác định thông số xác thực theo thứ tự ưu tiên
+            String finalSshPassword = null;
+            String finalSudoPassword = null;
+
+            if (hasSshKey) {
+                // Ưu tiên 1: SSH key + sudo NOPASSWD (không cần password)
+                if (hasSudoNopasswd) {
+                    finalSshPassword = null;
+                    finalSudoPassword = null;
+                    authMethod = "SSH key + sudo NOPASSWD";
+                }
+                // Ưu tiên 2: SSH key + sudo password (nếu có sudo password)
+                else if (sudoPassword != null && !sudoPassword.trim().isEmpty()) {
+                    finalSshPassword = null;
+                    finalSudoPassword = sudoPassword;
+                    authMethod = "SSH key + sudo password";
+                }
+                // Nếu SSH key không có sudo NOPASSWD và không có sudo password, thử fallback về
+                // password
+                else {
+                    System.out.println("[" + server.getHost()
+                            + "] SSH key không có sudo NOPASSWD và không có sudo password, thử fallback về password");
+                    if (sshPassword != null && !sshPassword.trim().isEmpty()) {
+                        finalSshPassword = sshPassword;
+                        finalSudoPassword = sudoPassword;
+                        authMethod = "Password fallback";
+                    } else {
+                        throw new RuntimeException(
+                                "Server có SSH key nhưng không có sudo NOPASSWD, không có sudo password và không có mật khẩu SSH");
+                    }
+                }
             } else {
-                return installAnsibleWithPassword(server, sshPassword, sudoPassword);
+                // Không có SSH key, sử dụng password
+                if (sshPassword == null || sshPassword.trim().isEmpty()) {
+                    throw new RuntimeException(
+                            "Không có SSH key và không có mật khẩu SSH để kết nối tới " + server.getHost());
+                }
+                finalSshPassword = sshPassword;
+                finalSudoPassword = sudoPassword;
+                authMethod = "Password";
             }
+
+            System.out.println("[" + server.getHost() + "] Final auth method: " + authMethod);
+
+            // Thực hiện cài đặt với thông số đã xác định
+            return performAnsibleInstallation(server, finalSshPassword, finalSudoPassword, authMethod);
+
         } catch (Exception e) {
             throw new RuntimeException("Lỗi cài đặt Ansible trên " + server.getHost() + ": " + e.getMessage(), e);
         }
     }
 
     /**
-     * Cài đặt Ansible sử dụng SSH key và sudo password
+     * Thực hiện cài đặt Ansible với thông số xác thực đã xác định
      */
-    private String installAnsibleWithKeyAndSudo(Server server, String sudoPassword) {
-        String privateKeyPem = server.getSshKey().getEncryptedPrivateKey();
-
+    private String performAnsibleInstallation(Server server, String sshPassword, String sudoPassword,
+            String authMethod) {
         // 1. Cập nhật package manager
-        String updateCmd = "apt update && apt upgrade -y";
-        serverService.execCommandWithKeyAndSudo(
-                server.getHost(), server.getPort(), server.getUsername(), privateKeyPem, updateCmd, sudoPassword,
-                30000);
+        String updateCmd = "apt update -y";
+        executeRemoteWithAuth(server, updateCmd, sshPassword, sudoPassword, 30000);
 
         // 2. Cài đặt Python và pip
         String pythonCmd = "apt install -y python3 python3-pip python3-venv";
-        serverService.execCommandWithKeyAndSudo(
-                server.getHost(), server.getPort(), server.getUsername(), privateKeyPem, pythonCmd, sudoPassword,
-                30000);
+        executeRemoteWithAuth(server, pythonCmd, sshPassword, sudoPassword, 30000);
 
         // 3. Cài đặt Ansible
         String ansibleCmd = "pip3 install ansible";
-        serverService.execCommandWithKeyAndSudo(
-                server.getHost(), server.getPort(), server.getUsername(), privateKeyPem, ansibleCmd, sudoPassword,
-                60000);
+        executeRemoteWithAuth(server, ansibleCmd, sshPassword, sudoPassword, 60000);
 
         // 4. Kiểm tra Ansible đã cài đặt thành công
         String checkCmd = "ansible --version";
-        String checkResult = serverService.execCommandWithKey(
-                server.getHost(), server.getPort(), server.getUsername(), privateKeyPem, checkCmd, 10000);
+        String checkResult = executeRemoteWithAuth(server, checkCmd, sshPassword, null, 10000);
 
-        return "Ansible installed successfully with SSH key: " + checkResult;
+        return "Ansible installed successfully with " + authMethod + ": " + checkResult;
     }
 
-    /**
-     * Cài đặt Ansible sử dụng password và sudo password
-     */
-    private String installAnsibleWithPassword(Server server, String sshPassword, String sudoPassword) {
-        // 1. Cập nhật package manager
-        String updateCmd = "apt update && apt upgrade -y";
-        serverService.execCommandWithSudo(
-                server.getHost(), server.getPort(), server.getUsername(), sshPassword, updateCmd, sudoPassword, 30000);
-
-        // 2. Cài đặt Python và pip
-        String pythonCmd = "apt install -y python3 python3-pip python3-venv";
-        serverService.execCommandWithSudo(
-                server.getHost(), server.getPort(), server.getUsername(), sshPassword, pythonCmd, sudoPassword, 30000);
-
-        // 3. Cài đặt Ansible
-        String ansibleCmd = "pip3 install ansible";
-        serverService.execCommandWithSudo(
-                server.getHost(), server.getPort(), server.getUsername(), sshPassword, ansibleCmd, sudoPassword, 60000);
-
-        // 4. Kiểm tra Ansible đã cài đặt thành công
-        String checkCmd = "ansible --version";
-        String checkResult = serverService.execCommand(
-                server.getHost(), server.getPort(), server.getUsername(), sshPassword, checkCmd, 10000);
-
-        return "Ansible installed successfully with password: " + checkResult;
-    }
-
-    /**
-     * Tạo workspace cho Ansible
-     */
-    private void createAnsibleWorkspace() throws IOException {
-        Path ansiblePath = Paths.get(ANSIBLE_DIR);
-        if (!Files.exists(ansiblePath)) {
-            Files.createDirectories(ansiblePath);
-        }
-
-        // Tạo thư mục playbooks
-        Path playbooksPath = ansiblePath.resolve("playbooks");
-        if (!Files.exists(playbooksPath)) {
-            Files.createDirectories(playbooksPath);
-        }
-    }
-
-    /**
-     * Tạo inventory file với sudo password
-     */
-    private void createInventoryFileWithSudo(List<Server> servers, Map<Long, String> passwordCache,
-            Map<Long, String> sudoPasswordCache) throws IOException {
-        StringBuilder inventory = new StringBuilder();
-
-        // Master nodes
-        inventory.append("[master]\n");
-        servers.stream()
-                .filter(s -> s.getRole() == Server.ServerRole.MASTER)
-                .forEach(s -> {
-                    String password = passwordCache.get(s.getId());
-                    String sudoPassword = sudoPasswordCache.get(s.getId());
-                    inventory.append(s.getHost())
-                            .append(" ansible_user=").append(s.getUsername())
-                            .append(" ansible_ssh_pass=").append(password != null ? password : "")
-                            .append(" ansible_ssh_port=").append(s.getPort() != null ? s.getPort() : 22)
-                            .append(" ansible_become_pass=").append(sudoPassword != null ? sudoPassword : "")
-                            .append("\n");
-                });
-
-        // Worker nodes
-        inventory.append("\n[workers]\n");
-        servers.stream()
-                .filter(s -> s.getRole() == Server.ServerRole.WORKER)
-                .forEach(s -> {
-                    String password = passwordCache.get(s.getId());
-                    String sudoPassword = sudoPasswordCache.get(s.getId());
-                    inventory.append(s.getHost())
-                            .append(" ansible_user=").append(s.getUsername())
-                            .append(" ansible_ssh_pass=").append(password != null ? password : "")
-                            .append(" ansible_ssh_port=").append(s.getPort() != null ? s.getPort() : 22)
-                            .append(" ansible_become_pass=").append(sudoPassword != null ? sudoPassword : "")
-                            .append("\n");
-                });
-
-        // All nodes
-        inventory.append("\n[all:vars]\n");
-        inventory.append("ansible_python_interpreter=/usr/bin/python3\n");
-        inventory.append("ansible_ssh_common_args='-o StrictHostKeyChecking=no'\n");
-        inventory.append("ansible_become=yes\n");
-        inventory.append("ansible_become_method=sudo\n");
-
-        // Ghi file
-        Path inventoryPath = Paths.get(ANSIBLE_DIR, INVENTORY_FILE);
-        Files.write(inventoryPath, inventory.toString().getBytes());
-    }
-
-    /**
-     * Tạo ansible.cfg
-     */
-    private void createAnsibleConfig() throws IOException {
-        String config = """
-                [defaults]
-                inventory = inventory.ini
-                host_key_checking = False
-                retry_files_enabled = False
-                gathering = smart
-                fact_caching = memory
-                stdout_callback = yaml
-                bin_ansible_callbacks = True
-                """;
-
-        Path configPath = Paths.get(ANSIBLE_DIR, ANSIBLE_CFG);
-        Files.write(configPath, config.getBytes());
-    }
 }

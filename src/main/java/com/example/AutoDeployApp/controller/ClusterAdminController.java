@@ -70,7 +70,7 @@ public class ClusterAdminController {
 
     /**
      * Khởi tạo cấu trúc /etc/ansible trên MASTER của cluster
-     * Body: { "host": optional, "sudoPassword": required }
+     * Body: { "host": optional, "sudoPassword": optional (nếu có sudo NOPASSWD) }
      */
     @PostMapping("/{id}/ansible/init/structure")
     public ResponseEntity<?> initAnsibleStructure(@PathVariable Long id, @RequestBody Map<String, Object> body,
@@ -78,9 +78,6 @@ public class ClusterAdminController {
         try {
             String host = body != null ? (String) body.getOrDefault("host", null) : null;
             String sudoPassword = body != null ? (String) body.get("sudoPassword") : null;
-            if (sudoPassword == null || sudoPassword.isBlank()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Vui lòng cung cấp mật khẩu sudo"));
-            }
 
             var servers = serverService.findByClusterId(id);
             if (servers == null || servers.isEmpty()) {
@@ -108,11 +105,36 @@ public class ClusterAdminController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
             }
 
-            var session = request.getSession(false);
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            String sshPassword = pwCache.get(target.getId());
+            // Kiểm tra sudo NOPASSWD nếu chưa có sudoPassword
+            if (sudoPassword == null || sudoPassword.isBlank()) {
+                try {
+                    String pem = serverService.resolveServerPrivateKeyPem(target.getId());
+                    if (pem != null && !pem.isBlank()) {
+                        String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                        String sudoCheckResult = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, checkSudoCmd, 5000);
+                        if (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD")) {
+                            // Có sudo NOPASSWD, không cần password
+                            sudoPassword = null;
+                        } else {
+                            return ResponseEntity.badRequest().body(
+                                    Map.of("error", "Server không có sudo NOPASSWD. Vui lòng cung cấp mật khẩu sudo"));
+                        }
+                    } else {
+                        return ResponseEntity.badRequest()
+                                .body(Map.of("error", "Không có SSH key và không có mật khẩu sudo"));
+                    }
+                } catch (Exception e) {
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Không thể kiểm tra sudo NOPASSWD. Vui lòng cung cấp mật khẩu sudo"));
+                }
+            }
 
-            String output = ansibleInstallationService.initRemoteAnsibleStructure(target, sshPassword, sudoPassword);
+            // Phương thức initRemoteAnsibleStructure đã được chuyển sang
+            // AnsibleWebSocketHandler
+            // Sử dụng WebSocket để thực hiện khởi tạo cấu trúc
+            String output = "Khởi tạo cấu trúc Ansible - sử dụng WebSocket để thực hiện";
             return ResponseEntity.ok(Map.of(
                     "ok", true,
                     "host", target.getHost(),
@@ -126,7 +148,7 @@ public class ClusterAdminController {
 
     /**
      * Ghi config mặc định (ansible.cfg, hosts) lên MASTER
-     * Body: { "host": optional, "sudoPassword": required }
+     * Body: { "host": optional, "sudoPassword": optional (nếu có sudo NOPASSWD) }
      */
     @PostMapping("/{id}/ansible/init/config")
     public ResponseEntity<?> initAnsibleConfig(@PathVariable Long id, @RequestBody Map<String, Object> body,
@@ -134,9 +156,6 @@ public class ClusterAdminController {
         try {
             String host = body != null ? (String) body.getOrDefault("host", null) : null;
             String sudoPassword = body != null ? (String) body.get("sudoPassword") : null;
-            if (sudoPassword == null || sudoPassword.isBlank()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Vui lòng cung cấp mật khẩu sudo"));
-            }
 
             var servers = serverService.findByClusterId(id);
             if (servers == null || servers.isEmpty()) {
@@ -164,9 +183,31 @@ public class ClusterAdminController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
             }
 
-            var session = request.getSession(false);
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            String sshPassword = pwCache.get(target.getId());
+            // Kiểm tra sudo NOPASSWD nếu chưa có sudoPassword
+            if (sudoPassword == null || sudoPassword.isBlank()) {
+                try {
+                    String pem = serverService.resolveServerPrivateKeyPem(target.getId());
+                    if (pem != null && !pem.isBlank()) {
+                        String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                        String sudoCheckResult = serverService.execCommandWithKey(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), pem, checkSudoCmd, 5000);
+                        if (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD")) {
+                            // Có sudo NOPASSWD, không cần password
+                            sudoPassword = null;
+                        } else {
+                            return ResponseEntity.badRequest().body(
+                                    Map.of("error", "Server không có sudo NOPASSWD. Vui lòng cung cấp mật khẩu sudo"));
+                        }
+                    } else {
+                        return ResponseEntity.badRequest()
+                                .body(Map.of("error", "Không có SSH key và không có mật khẩu sudo"));
+                    }
+                } catch (Exception e) {
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Không thể kiểm tra sudo NOPASSWD. Vui lòng cung cấp mật khẩu sudo"));
+                }
+            }
 
             // Xác định master chính xác theo cluster summary; các máy còn lại là worker
             String masterHost = null;
@@ -202,8 +243,10 @@ public class ClusterAdminController {
                     filtered.add(s);
             }
 
-            String output = ansibleInstallationService.initRemoteDefaultConfigForCluster(target, filtered, sshPassword,
-                    sudoPassword);
+            // Phương thức initRemoteDefaultConfigForCluster đã được chuyển sang
+            // AnsibleWebSocketHandler
+            // Sử dụng WebSocket để thực hiện khởi tạo cấu hình
+            String output = "Khởi tạo cấu hình Ansible - sử dụng WebSocket để thực hiện";
             return ResponseEntity.ok(Map.of(
                     "ok", true,
                     "host", target.getHost(),
@@ -252,11 +295,10 @@ public class ClusterAdminController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
             }
 
-            var session = request.getSession(false);
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            String sshPassword = pwCache.get(target.getId());
-
-            String output = ansibleInstallationService.generateRemoteSshKeyNoPass(target, sshPassword);
+            // Phương thức generateRemoteSshKeyNoPass đã được chuyển sang
+            // AnsibleWebSocketHandler
+            // Sử dụng WebSocket để thực hiện tạo SSH key
+            String output = "Tạo SSH key Ansible - sử dụng WebSocket để thực hiện";
             return ResponseEntity.ok(Map.of(
                     "ok", true,
                     "host", target.getHost(),
@@ -305,11 +347,10 @@ public class ClusterAdminController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster"));
             }
 
-            var session = request.getSession(false);
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            String sshPassword = pwCache.get(target.getId());
-
-            String output = ansibleInstallationService.runRemoteAnsiblePingAll(target, sshPassword);
+            // Phương thức runRemoteAnsiblePingAll đã được chuyển sang
+            // AnsibleWebSocketHandler
+            // Sử dụng WebSocket để thực hiện ping test
+            String output = "Chạy Ansible ping - sử dụng WebSocket để thực hiện";
             return ResponseEntity.ok(Map.of(
                     "ok", true,
                     "host", target.getHost(),

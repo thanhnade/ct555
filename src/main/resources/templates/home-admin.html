@@ -8,146 +8,8 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
     crossorigin="anonymous">
   <link href="/login.css" rel="stylesheet">
+  <link href="/home-admin.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
-  <style>
-    .table-fixed thead th {
-      position: sticky;
-      top: 0;
-      background: #fff;
-    }
-
-    /* Ansible Status Cards */
-    .ansible-status-card {
-      transition: all 0.3s ease;
-    }
-
-    .ansible-status-card.pending {
-      border-left: 4px solid #6c757d;
-      background-color: #f8f9fa;
-    }
-
-    .ansible-status-card.installed {
-      border-left: 4px solid #198754;
-      background-color: #d1e7dd;
-    }
-
-    .ansible-status-card.not-installed {
-      border-left: 4px solid #dc3545;
-      background-color: #f8d7da;
-    }
-
-    /* Ansible Output Console */
-    .ansible-output-line {
-      margin-bottom: 1px;
-      padding: 1px 0;
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-      line-height: 1.4;
-    }
-
-    .ansible-output-line .timestamp {
-      color: #6c757d;
-      margin-right: 8px;
-    }
-
-    .ansible-output-line .server-label {
-      color: #0dcaf0;
-      font-weight: bold;
-      margin-right: 8px;
-    }
-
-    /* Terminal prompt styling */
-    .ansible-output-line.terminal-prompt {
-      color: #e9ecef;
-    }
-
-    .ansible-output-line.terminal-prompt .prompt {
-      color: #198754;
-      font-weight: bold;
-    }
-
-    .ansible-output-line.terminal-prompt .command {
-      color: #ffc107;
-      font-weight: bold;
-    }
-
-    /* Sudo prompt styling */
-    .ansible-output-line.sudo-prompt {
-      color: #e9ecef;
-    }
-
-    .ansible-output-line.sudo-prompt .sudo-message {
-      color: #fd7e14;
-      font-style: italic;
-    }
-
-    .ansible-output-line.sudo-prompt .password-mask {
-      color: #dc3545;
-      font-weight: bold;
-    }
-
-    /* Terminal output styling */
-    .ansible-output-line.terminal-output {
-      color: #e9ecef;
-    }
-
-    .ansible-output-line.terminal-output .output-text {
-      color: #f8f9fa;
-      white-space: pre-wrap;
-    }
-
-    /* Terminal prompt end styling */
-    .ansible-output-line.terminal-prompt-end {
-      color: #e9ecef;
-    }
-
-    .ansible-output-line.terminal-prompt-end .prompt {
-      color: #198754;
-      font-weight: bold;
-    }
-
-    /* Info messages */
-    .ansible-output-line.info {
-      color: #0dcaf0;
-    }
-
-    .ansible-output-line.success {
-      color: #198754;
-    }
-
-    .ansible-output-line.error {
-      color: #dc3545;
-    }
-
-    .ansible-output-line.warning {
-      color: #ffc107;
-    }
-
-    /* Console styling */
-    #ansible-output-console {
-      background-color: #1a1a1a !important;
-      color: #e9ecef;
-      border: 1px solid #495057;
-      border-radius: 0.375rem;
-    }
-
-    #ansible-output-console::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    #ansible-output-console::-webkit-scrollbar-track {
-      background: #2d3748;
-    }
-
-    #ansible-output-console::-webkit-scrollbar-thumb {
-      background: #4a5568;
-      border-radius: 4px;
-    }
-
-    #ansible-output-console::-webkit-scrollbar-thumb:hover {
-      background: #718096;
-    }
-  </style>
 </head>
 
 <body class="p-4">
@@ -1015,12 +877,29 @@
               <h5 class="modal-title"><i class="bi bi-gear"></i> Cấu hình Ansible</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
+            <div class="modal-header bg-light border-bottom">
+              <div class="d-flex justify-content-between align-items-center w-100">
+                <div>
+                  <strong>Cluster:</strong> <span id="current-cluster-name" class="text-primary">Đang tải...</span>
+                </div>
+                <div class="text-muted small">
+                  <i class="bi bi-info-circle"></i> Cấu hình sẽ được áp dụng cho server MASTER
+                </div>
+              </div>
+            </div>
             <div class="modal-body">
-              <!-- Control Buttons -->
-              <div class="mb-3 d-flex gap-2">
-                <button type="button" class="btn btn-sm btn-outline-warning" id="validate-config-btn">
-                  <i class="bi bi-check-circle"></i> Kiểm tra cú pháp
-                </button>
+              <!-- Status Information Panel -->
+              <div class="mb-3">
+                <div class="alert alert-info d-flex align-items-center" id="config-status-panel" role="alert">
+                  <i class="bi bi-info-circle me-2"></i>
+                  <div class="flex-grow-1">
+                    <strong>Trạng thái cấu hình:</strong>
+                    <span id="config-status-text">Chưa kiểm tra</span>
+                  </div>
+                  <div class="ms-2">
+                    <small class="text-muted" id="config-last-check">-</small>
+                  </div>
+                </div>
               </div>
 
               <!-- Tab Navigation -->
@@ -1048,7 +927,7 @@
                 <div class="tab-pane fade show active" id="tab-pane-ansible-cfg" role="tabpanel" aria-labelledby="tab-ansible-cfg">
                   <div class="mb-3">
                     <h6 class="mb-3">ansible.cfg</h6>
-                    <textarea id="ansible-cfg-editor" class="form-control" rows="15" placeholder="[defaults]\ninventory=/etc/ansible/hosts\n..."></textarea>
+                    <textarea id="ansible-cfg-editor" class="form-control ansible-config-textarea" rows="15" placeholder="[defaults]\ninventory=/etc/ansible/hosts\n..."></textarea>
                   </div>
                 </div>
 
@@ -1056,7 +935,7 @@
                 <div class="tab-pane fade" id="tab-pane-inventory" role="tabpanel" aria-labelledby="tab-inventory">
                   <div class="mb-3">
                     <h6 class="mb-3">Inventory (hosts)</h6>
-                    <textarea id="ansible-inventory-editor" class="form-control" rows="15" placeholder="[master]\n127.0.0.1 ansible_connection=local\n..."></textarea>
+                    <textarea id="ansible-inventory-editor" class="form-control ansible-config-textarea" rows="15" placeholder="[master]\n127.0.0.1 ansible_connection=local\n..."></textarea>
                   </div>
                 </div>
 
@@ -1064,7 +943,7 @@
                 <div class="tab-pane fade" id="tab-pane-variables" role="tabpanel" aria-labelledby="tab-variables">
                   <div class="mb-3">
                     <h6 class="mb-3">Variables (group_vars/all.yml)</h6>
-                    <textarea id="ansible-vars-editor" class="form-control" rows="15" placeholder="key: value\n..."></textarea>
+                    <textarea id="ansible-vars-editor" class="form-control ansible-config-textarea" rows="15" placeholder="key: value\n..."></textarea>
                   </div>
                 </div>
               </div>

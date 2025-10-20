@@ -41,7 +41,7 @@ public class AnsibleConfigController {
                 try {
                     cfg = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), pem, "bash -lc 'cat /etc/ansible/ansible.cfg || true'", 8000);
+                            target.getUsername(), pem, "bash -lc 'cat /etc/ansible/ansible.cfg || true'", 15000);
                 } catch (Exception e) {
                     // Loi doc cfg
                 }
@@ -49,7 +49,7 @@ public class AnsibleConfigController {
                 try {
                     hosts = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), pem, "bash -lc 'cat /etc/ansible/hosts || true'", 8000);
+                            target.getUsername(), pem, "bash -lc 'cat /etc/ansible/hosts || true'", 15000);
                 } catch (Exception e) {
                     // Loi doc hosts
                 }
@@ -57,18 +57,22 @@ public class AnsibleConfigController {
                 try {
                     vars = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), pem, "bash -lc 'cat /etc/ansible/group_vars/all.yml || true'", 8000);
+                            target.getUsername(), pem, "bash -lc 'cat /etc/ansible/group_vars/all.yml || true'", 15000);
                 } catch (Exception e) {
                     // Loi doc vars
                 }
             } else {
                 // Khong co SSH key - tra ve config rong
-                return ResponseEntity.ok(Map.of(
-                        "success", true,
-                        "server", target.getHost(),
-                        "cfg", "",
-                        "hosts", "",
-                        "vars", ""));
+                return ResponseEntity.ok()
+                        .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        .header("Pragma", "no-cache")
+                        .header("Expires", "0")
+                        .body(Map.of(
+                                "success", true,
+                                "server", target.getHost(),
+                                "cfg", "",
+                                "hosts", "",
+                                "vars", ""));
             }
 
             Map<String, Object> response = new HashMap<>();
@@ -78,7 +82,11 @@ public class AnsibleConfigController {
             response.put("hosts", hosts != null ? hosts : "");
             response.put("vars", vars != null ? vars : "");
 
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok()
+                    .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    .header("Pragma", "no-cache")
+                    .header("Expires", "0")
+                    .body(response);
 
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -121,7 +129,7 @@ public class AnsibleConfigController {
                         String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
                         String sudoCheckResult = serverService.execCommandWithKey(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
-                                target.getUsername(), pem, checkSudoCmd, 5000);
+                                target.getUsername(), pem, checkSudoCmd, 10000);
                         useSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
                     } catch (Exception e) {
                         // Neu khong kiem tra duoc, su dung sudo password
@@ -131,64 +139,66 @@ public class AnsibleConfigController {
                 // Tao thu muc can thiet
                 if (pem != null && !pem.isBlank()) {
                     execCommandWithSudoOptimization(target, "mkdir -p /etc/ansible /var/log/ansible", useSudoNopasswd,
-                            10000);
+                            15000);
                 } else {
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword, "mkdir -p /etc/ansible /var/log/ansible", 10000);
+                            target.getUsername(), sudoPassword, "mkdir -p /etc/ansible /var/log/ansible", 15000);
                 }
 
-                // Tao backup
+                // Tao backup va cleanup backup cu
                 if (pem != null && !pem.isBlank()) {
+                    // Create fixed backup (.bak)
                     execCommandWithSudoOptimization(target,
                             "bash -lc '[ -f /etc/ansible/ansible.cfg ] && cp -a /etc/ansible/ansible.cfg /etc/ansible/ansible.cfg.bak || true'",
-                            useSudoNopasswd, 10000);
+                            useSudoNopasswd, 15000);
                     execCommandWithSudoOptimization(target,
                             "bash -lc '[ -f /etc/ansible/hosts ] && cp -a /etc/ansible/hosts /etc/ansible/hosts.bak || true'",
-                            useSudoNopasswd, 10000);
+                            useSudoNopasswd, 15000);
                 } else {
+                    // Create fixed backup (.bak)
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword,
                             "bash -lc '[ -f /etc/ansible/ansible.cfg ] && cp -a /etc/ansible/ansible.cfg /etc/ansible/ansible.cfg.bak || true'",
-                            10000);
+                            15000);
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword,
                             "bash -lc '[ -f /etc/ansible/hosts ] && cp -a /etc/ansible/hosts /etc/ansible/hosts.bak || true'",
-                            10000);
+                            15000);
                 }
 
                 // Ghi file cfg bang base64 encoding
                 String cfgSafe = cfg == null ? "" : cfg;
                 String cfgBase64 = java.util.Base64.getEncoder().encodeToString(cfgSafe.getBytes("UTF-8"));
                 String cmdCfg = "echo '" + cfgBase64
-                        + "' | base64 -d > /tmp/ansible.cfg.tmp && echo 'STEP1_DONE' && cp /tmp/ansible.cfg.tmp /etc/ansible/ansible.cfg && echo 'STEP2_DONE' && rm /tmp/ansible.cfg.tmp && echo 'STEP3_DONE'";
+                        + "' | base64 -d | sudo tee /etc/ansible/ansible.cfg > /dev/null && echo 'CFG_WRITTEN'";
                 if (pem != null && !pem.isBlank()) {
-                    execCommandWithSudoOptimization(target, cmdCfg, useSudoNopasswd, 30000);
+                    execCommandWithSudoOptimization(target, cmdCfg, useSudoNopasswd, 45000);
                 } else {
                     // Truyen password cho sudo bang echo
                     String cmdCfgWithPassword = "echo '" + sudoPassword + "' | sudo -S bash -c 'echo \"" + cfgBase64
-                            + "\" | base64 -d > /tmp/ansible.cfg.tmp && cp /tmp/ansible.cfg.tmp /etc/ansible/ansible.cfg && rm /tmp/ansible.cfg.tmp'";
+                            + "\" | base64 -d | sudo tee /etc/ansible/ansible.cfg > /dev/null && echo CFG_WRITTEN'";
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword, cmdCfgWithPassword, 30000);
+                            target.getUsername(), sudoPassword, cmdCfgWithPassword, 45000);
                 }
 
                 // Ghi file hosts bang base64 encoding
                 String hostsSafe = hosts == null ? "" : hosts;
                 String hostsBase64 = java.util.Base64.getEncoder().encodeToString(hostsSafe.getBytes("UTF-8"));
                 String cmdHosts = "echo '" + hostsBase64
-                        + "' | base64 -d > /tmp/ansible.hosts.tmp && cp /tmp/ansible.hosts.tmp /etc/ansible/hosts && rm /tmp/ansible.hosts.tmp";
+                        + "' | base64 -d | sudo tee /etc/ansible/hosts > /dev/null && echo 'HOSTS_WRITTEN'";
                 if (pem != null && !pem.isBlank()) {
-                    execCommandWithSudoOptimization(target, cmdHosts, useSudoNopasswd, 30000);
+                    execCommandWithSudoOptimization(target, cmdHosts, useSudoNopasswd, 45000);
                 } else {
                     // Truyen password cho sudo bang echo
                     String cmdHostsWithPassword = "echo '" + sudoPassword + "' | sudo -S bash -c 'echo \"" + hostsBase64
-                            + "\" | base64 -d > /tmp/ansible.hosts.tmp && cp /tmp/ansible.hosts.tmp /etc/ansible/hosts && rm /tmp/ansible.hosts.tmp'";
+                            + "\" | base64 -d | sudo tee /etc/ansible/hosts > /dev/null && echo HOSTS_WRITTEN'";
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword, cmdHostsWithPassword, 30000);
+                            target.getUsername(), sudoPassword, cmdHostsWithPassword, 45000);
                 }
 
                 // Ghi file variables (group_vars/all.yml) bang base64 encoding
@@ -198,7 +208,7 @@ public class AnsibleConfigController {
                     String cmdVars = "echo '" + varsBase64
                             + "' | base64 -d > /tmp/ansible.vars.tmp && cp /tmp/ansible.vars.tmp /etc/ansible/group_vars/all.yml && rm /tmp/ansible.vars.tmp";
                     if (pem != null && !pem.isBlank()) {
-                        execCommandWithSudoOptimization(target, cmdVars, useSudoNopasswd, 30000);
+                        execCommandWithSudoOptimization(target, cmdVars, useSudoNopasswd, 45000);
                     } else {
                         // Truyen password cho sudo bang echo
                         String cmdVarsWithPassword = "echo '" + sudoPassword + "' | sudo -S bash -c 'echo \""
@@ -206,7 +216,7 @@ public class AnsibleConfigController {
                                 + "\" | base64 -d > /tmp/ansible.vars.tmp && cp /tmp/ansible.vars.tmp /etc/ansible/group_vars/all.yml && rm /tmp/ansible.vars.tmp'";
                         serverService.execCommand(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
-                                target.getUsername(), sudoPassword, cmdVarsWithPassword, 30000);
+                                target.getUsername(), sudoPassword, cmdVarsWithPassword, 45000);
                     }
                 }
 
@@ -214,36 +224,36 @@ public class AnsibleConfigController {
                 if (pem != null && !pem.isBlank()) {
                     // Quyen cho file cau hinh (644 = rw-r--r--)
                     execCommandWithSudoOptimization(target, "chmod 644 /etc/ansible/ansible.cfg /etc/ansible/hosts",
-                            useSudoNopasswd, 8000);
+                            useSudoNopasswd, 15000);
                     if (vars != null && !vars.trim().isEmpty()) {
                         execCommandWithSudoOptimization(target, "chmod 644 /etc/ansible/group_vars/all.yml",
-                                useSudoNopasswd, 8000);
+                                useSudoNopasswd, 15000);
                     }
                     // Quyen cho thu muc (755 = rwxr-xr-x)
-                    execCommandWithSudoOptimization(target, "chmod 755 /etc/ansible", useSudoNopasswd, 8000);
+                    execCommandWithSudoOptimization(target, "chmod 755 /etc/ansible", useSudoNopasswd, 15000);
                     // Quyen cho thu muc con (700 = rwx------)
                     execCommandWithSudoOptimization(target, "chmod 700 /etc/ansible/group_vars /etc/ansible/host_vars",
-                            useSudoNopasswd, 8000);
+                            useSudoNopasswd, 15000);
                 } else {
                     // Quyen cho file cau hinh (644 = rw-r--r--)
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword, "chmod 644 /etc/ansible/ansible.cfg /etc/ansible/hosts",
-                            8000);
+                            15000);
                     if (vars != null && !vars.trim().isEmpty()) {
                         serverService.execCommand(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
-                                target.getUsername(), sudoPassword, "chmod 644 /etc/ansible/group_vars/all.yml", 8000);
+                                target.getUsername(), sudoPassword, "chmod 644 /etc/ansible/group_vars/all.yml", 15000);
                     }
                     // Quyen cho thu muc (755 = rwxr-xr-x)
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword, "chmod 755 /etc/ansible", 8000);
+                            target.getUsername(), sudoPassword, "chmod 755 /etc/ansible", 15000);
                     // Quyen cho thu muc con (700 = rwx------)
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword,
-                            "chmod 700 /etc/ansible/group_vars /etc/ansible/host_vars", 8000);
+                            "chmod 700 /etc/ansible/group_vars /etc/ansible/host_vars", 15000);
                 }
 
                 // Xac minh file da duoc ghi thanh cong
@@ -252,18 +262,18 @@ public class AnsibleConfigController {
                 if (pem != null && !pem.isBlank()) {
                     verifyCfg = execCommandWithSudoOptimization(target,
                             "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", useSudoNopasswd,
-                            8000);
+                            15000);
                     verifyHosts = execCommandWithSudoOptimization(target,
-                            "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", useSudoNopasswd, 8000);
+                            "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", useSudoNopasswd, 15000);
                 } else {
                     verifyCfg = serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword,
-                            "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 8000);
+                            "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 15000);
                     verifyHosts = serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword,
-                            "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 8000);
+                            "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 15000);
                 }
 
                 if (!verifyCfg.trim().equals("OK") || !verifyHosts.trim().equals("OK")) {
@@ -283,36 +293,40 @@ public class AnsibleConfigController {
                     if (pem != null && !pem.isBlank()) {
                         configCheck = execCommandWithSudoOptimization(target,
                                 "bash -lc 'ansible-config dump --only-changed 2>&1 || echo CONFIG_ERROR'",
-                                useSudoNopasswd, 10000);
+                                useSudoNopasswd, 15000);
                     } else {
                         configCheck = serverService.execCommand(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
                                 target.getUsername(), sudoPassword,
-                                "bash -lc 'ansible-config dump --only-changed 2>&1 || echo CONFIG_ERROR'", 10000);
+                                "bash -lc 'ansible-config dump --only-changed 2>&1 || echo CONFIG_ERROR'", 15000);
                     }
 
-                    // 2. Kiem tra cu phap inventory
+                    // 2. Kiem tra cu phap inventory - su dung file tam thoi
+                    String hostsBase64Test = java.util.Base64.getEncoder()
+                            .encodeToString((hosts != null ? hosts : "").getBytes("UTF-8"));
+                    String inventoryTestCmd = "echo '" + hostsBase64Test
+                            + "' | base64 -d > /tmp/test_hosts && ansible-inventory -i /tmp/test_hosts --list 2>&1 && rm /tmp/test_hosts || echo INVENTORY_ERROR";
+
                     if (pem != null && !pem.isBlank()) {
                         inventoryCheck = execCommandWithSudoOptimization(target,
-                                "bash -lc 'ansible-inventory --list 2>&1 || echo INVENTORY_ERROR'", useSudoNopasswd,
-                                10000);
+                                "bash -lc '" + inventoryTestCmd + "'", useSudoNopasswd, 15000);
                     } else {
                         inventoryCheck = serverService.execCommand(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
                                 target.getUsername(), sudoPassword,
-                                "bash -lc 'ansible-inventory --list 2>&1 || echo INVENTORY_ERROR'", 10000);
+                                "bash -lc '" + inventoryTestCmd + "'", 15000);
                     }
 
                     // 3. Kiem tra ket noi ping
                     if (pem != null && !pem.isBlank()) {
                         pingCheck = execCommandWithSudoOptimization(target,
                                 "bash -lc 'ansible all -m ping -i /etc/ansible/hosts 2>&1 || echo PING_ERROR'",
-                                useSudoNopasswd, 15000);
+                                useSudoNopasswd, 20000);
                     } else {
                         pingCheck = serverService.execCommand(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
                                 target.getUsername(), sudoPassword,
-                                "bash -lc 'ansible all -m ping -i /etc/ansible/hosts 2>&1 || echo PING_ERROR'", 15000);
+                                "bash -lc 'ansible all -m ping -i /etc/ansible/hosts 2>&1 || echo PING_ERROR'", 20000);
                     }
 
                     // Phan tich ket qua
@@ -446,7 +460,7 @@ public class AnsibleConfigController {
                     pingResult = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), pem, "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'",
-                            15000);
+                            20000);
                 } else {
                     // Khong co SSH key - can password
                     return ResponseEntity.badRequest().body(Map.of(
@@ -496,7 +510,7 @@ public class AnsibleConfigController {
                     String checkCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
                     String result = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), pem, checkCmd, 5000);
+                            target.getUsername(), pem, checkCmd, 10000);
                     hasNopasswd = (result != null && result.contains("HAS_NOPASSWD"));
                 } catch (Exception e) {
                     // Loi kiem tra sudo
@@ -521,7 +535,7 @@ public class AnsibleConfigController {
     @PostMapping("/rollback/{clusterId}")
     public ResponseEntity<Map<String, Object>> rollbackConfig(@PathVariable Long clusterId,
             @RequestParam(required = false) String host,
-            @RequestParam String sudoPassword) {
+            @RequestParam(required = false) String sudoPassword) {
         try {
             var servers = serverService.findByClusterId(clusterId);
             Server target = pickTarget(servers, host, true);
@@ -535,77 +549,141 @@ public class AnsibleConfigController {
             // Uu tien SSH key tu database
             String pem = serverService.resolveServerPrivateKeyPem(target.getId());
             boolean success = true;
+            boolean useSudoNopasswd = false;
 
             try {
-                // Kiem tra file backup co ton tai khong
+                // Kiem tra file backup co ton tai khong (fixed .bak file)
                 String checkBackup = "";
                 if (pem != null && !pem.isBlank()) {
                     checkBackup = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), pem,
-                            "bash -lc '[ -f /etc/ansible/ansible.cfg.bak ] && echo OK || echo FAIL'", 8000);
+                            "bash -lc '[ -f /etc/ansible/ansible.cfg.bak ] && echo OK || echo FAIL'", 15000);
                 } else {
-                    checkBackup = serverService.execCommand(target.getHost(),
+                    // Kiem tra sudo NOPASSWD neu khong co SSH key
+                    String sudoCheck = serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword,
-                            "bash -lc '[ -f /etc/ansible/ansible.cfg.bak ] && echo OK || echo FAIL'", 8000);
+                            "bash -lc 'sudo -n true 2>/dev/null && echo OK || echo FAIL'", 15000);
+
+                    if (sudoCheck.trim().equals("OK")) {
+                        useSudoNopasswd = true;
+                        checkBackup = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'sudo [ -f /etc/ansible/ansible.cfg.bak ] && echo OK || echo FAIL'", 15000);
+                    } else {
+                        checkBackup = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc '[ -f /etc/ansible/ansible.cfg.bak ] && echo OK || echo FAIL'", 15000);
+                    }
                 }
 
                 if (!checkBackup.trim().equals("OK")) {
                     return ResponseEntity.badRequest().body(Map.of(
                             "success", false,
-                            "message", "Khong tim thay file backup de rollback"));
+                            "message",
+                            "Không tìm thấy file backup để rollback. Vui lòng lưu cấu hình trước khi rollback."));
                 }
 
-                // Thuc hien rollback
+                // Thuc hien rollback - su dung file backup co dinh (.bak)
                 if (pem != null && !pem.isBlank()) {
-                    // Rollback ansible.cfg
-                    serverService.execCommandWithKey(target.getHost(),
+                    // Rollback ansible.cfg - su dung sudo cp
+                    String rollbackCfgResult = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), pem,
-                            "bash -lc 'cp -a /etc/ansible/ansible.cfg.bak /etc/ansible/ansible.cfg'", 10000);
+                            "bash -lc 'sudo cp -a /etc/ansible/ansible.cfg.bak /etc/ansible/ansible.cfg && echo CFG_ROLLBACK_OK || echo CFG_ROLLBACK_FAIL'",
+                            15000);
 
-                    // Rollback hosts
-                    serverService.execCommandWithKey(target.getHost(),
+                    // Rollback hosts - su dung sudo cp
+                    String rollbackHostsResult = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), pem,
-                            "bash -lc 'cp -a /etc/ansible/hosts.bak /etc/ansible/hosts'", 10000);
+                            "bash -lc 'sudo cp -a /etc/ansible/hosts.bak /etc/ansible/hosts && echo HOSTS_ROLLBACK_OK || echo HOSTS_ROLLBACK_FAIL'",
+                            15000);
+
+                    // Log rollback results
+                    System.out.println("Rollback CFG Result: " + rollbackCfgResult);
+                    System.out.println("Rollback HOSTS Result: " + rollbackHostsResult);
                 } else {
-                    // Rollback ansible.cfg
-                    serverService.execCommand(target.getHost(),
-                            target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword,
-                            "bash -lc 'cp -a /etc/ansible/ansible.cfg.bak /etc/ansible/ansible.cfg'", 10000);
+                    // Rollback ansible.cfg - su dung file backup co dinh (.bak)
+                    if (useSudoNopasswd) {
+                        String rollbackCfgResult = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'sudo cp -a /etc/ansible/ansible.cfg.bak /etc/ansible/ansible.cfg && echo CFG_ROLLBACK_OK || echo CFG_ROLLBACK_FAIL'",
+                                15000);
 
-                    // Rollback hosts
-                    serverService.execCommand(target.getHost(),
-                            target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword,
-                            "bash -lc 'cp -a /etc/ansible/hosts.bak /etc/ansible/hosts'", 10000);
+                        // Rollback hosts - su dung file backup co dinh (.bak)
+                        String rollbackHostsResult = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'sudo cp -a /etc/ansible/hosts.bak /etc/ansible/hosts && echo HOSTS_ROLLBACK_OK || echo HOSTS_ROLLBACK_FAIL'",
+                                15000);
+
+                        // Log rollback results
+                        System.out.println("Rollback CFG Result: " + rollbackCfgResult);
+                        System.out.println("Rollback HOSTS Result: " + rollbackHostsResult);
+                    } else {
+                        String rollbackCfgResult = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'echo \"" + sudoPassword
+                                        + "\" | sudo -S cp -a /etc/ansible/ansible.cfg.bak /etc/ansible/ansible.cfg && echo CFG_ROLLBACK_OK || echo CFG_ROLLBACK_FAIL'",
+                                15000);
+
+                        // Rollback hosts - su dung file backup co dinh (.bak)
+                        String rollbackHostsResult = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'echo \"" + sudoPassword
+                                        + "\" | sudo -S cp -a /etc/ansible/hosts.bak /etc/ansible/hosts && echo HOSTS_ROLLBACK_OK || echo HOSTS_ROLLBACK_FAIL'",
+                                15000);
+
+                        // Log rollback results
+                        System.out.println("Rollback CFG Result: " + rollbackCfgResult);
+                        System.out.println("Rollback HOSTS Result: " + rollbackHostsResult);
+                    }
                 }
 
-                // Xac minh rollback thanh cong
+                // Xac minh rollback thanh cong va log chi tiet
                 String verifyCfg = "";
                 String verifyHosts = "";
                 if (pem != null && !pem.isBlank()) {
                     verifyCfg = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), pem,
-                            "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 8000);
+                            "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 15000);
                     verifyHosts = serverService.execCommandWithKey(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), pem,
-                            "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 8000);
+                            "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 15000);
                 } else {
-                    verifyCfg = serverService.execCommand(target.getHost(),
-                            target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword,
-                            "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 8000);
-                    verifyHosts = serverService.execCommand(target.getHost(),
-                            target.getPort() != null ? target.getPort() : 22,
-                            target.getUsername(), sudoPassword,
-                            "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 8000);
+                    if (useSudoNopasswd) {
+                        verifyCfg = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'sudo [ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 15000);
+                        verifyHosts = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc 'sudo [ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 15000);
+                    } else {
+                        verifyCfg = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'", 15000);
+                        verifyHosts = serverService.execCommand(target.getHost(),
+                                target.getPort() != null ? target.getPort() : 22,
+                                target.getUsername(), sudoPassword,
+                                "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", 15000);
+                    }
                 }
+
+                // Log verification results
+                System.out.println("Rollback Verification - CFG: " + verifyCfg);
+                System.out.println("Rollback Verification - HOSTS: " + verifyHosts);
 
                 if (!verifyCfg.trim().equals("OK") || !verifyHosts.trim().equals("OK")) {
                     success = false;
@@ -622,13 +700,17 @@ public class AnsibleConfigController {
             }
 
             if (success) {
+                // Log successful rollback
+                System.out.println("Rollback completed successfully for cluster: " + clusterId);
                 return ResponseEntity.ok(Map.of(
                         "success", true,
-                        "message", "Da rollback cau hinh thanh cong"));
+                        "message", "Đã rollback cấu hình thành công từ file backup"));
             } else {
+                // Log failed rollback
+                System.out.println("Rollback failed for cluster: " + clusterId);
                 return ResponseEntity.badRequest().body(Map.of(
                         "success", false,
-                        "message", "Khong the rollback cau hinh"));
+                        "message", "Không thể rollback cấu hình"));
             }
 
         } catch (Exception e) {

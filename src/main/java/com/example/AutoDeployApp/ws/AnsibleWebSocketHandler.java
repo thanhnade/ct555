@@ -149,7 +149,29 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 com.example.AutoDeployApp.entity.Server masterServer = clusterServers.get(0);
                 String masterSudoPassword = sudoPasswords.get(masterServer.getHost());
 
-                if (masterSudoPassword == null || masterSudoPassword.trim().isEmpty()) {
+                // Kiểm tra sudo NOPASSWD trước khi yêu cầu mật khẩu
+                boolean needsPassword = true;
+                try {
+                    String pem = serverService.resolveServerPrivateKeyPem(masterServer.getId());
+                    if (pem != null && !pem.isBlank()) {
+                        String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
+                        String sudoCheckResult = serverService.execCommandWithKey(
+                                masterServer.getHost(),
+                                masterServer.getPort() != null ? masterServer.getPort() : 22,
+                                masterServer.getUsername(),
+                                pem,
+                                checkSudoCmd,
+                                5000);
+                        if (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD")) {
+                            needsPassword = false;
+                            masterSudoPassword = null; // Không cần mật khẩu
+                        }
+                    }
+                } catch (Exception e) {
+                    // Nếu không kiểm tra được sudo NOPASSWD, tiếp tục với logic cũ
+                }
+
+                if (needsPassword && (masterSudoPassword == null || masterSudoPassword.trim().isEmpty())) {
                     sendMessage(session, String.format(
                             "{\"type\":\"error\",\"message\":\"Cần mật khẩu sudo cho MASTER server: %s\"}",
                             masterServer.getHost()));
@@ -966,6 +988,14 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         executeCommandWithTerminalOutput(session, server,
                 "pip3 uninstall -y community.general community.kubernetes || true", sudoPassword, 60000);
 
+        // Gỡ thêm các collections và modules khác
+        executeCommandWithTerminalOutput(session, server,
+                "pip3 uninstall -y ansible-collections-community ansible-collections-kubernetes || true",
+                sudoPassword, 60000);
+        executeCommandWithTerminalOutput(session, server,
+                "pip3 uninstall -y ansible-runner-http ansible-runner-kubernetes || true",
+                sudoPassword, 60000);
+
         // Step 2: Nếu cài qua apt thì gỡ thêm bằng apt
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":2,\"message\":\"Gỡ Ansible bằng apt (nếu có)...\"}",
@@ -988,6 +1018,19 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 "bash -lc 'shopt -s nullglob; rm -rf /usr/local/lib/python3*/dist-packages/ansible* /usr/lib/python3*/dist-packages/ansible*'",
                 sudoPassword, 30000);
 
+        // Dọn dẹp thêm các thư mục collections và cache
+        executeCommandWithTerminalOutput(session, server,
+                "rm -rf ~/.ansible/collections ~/.ansible/cache ~/.ansible/tmp || true",
+                sudoPassword, 30000);
+        executeCommandWithTerminalOutput(session, server,
+                "rm -rf /var/cache/ansible /tmp/ansible* || true",
+                sudoPassword, 30000);
+
+        // Dọn dẹp các file cấu hình Ansible
+        executeCommandWithTerminalOutput(session, server,
+                "rm -rf /etc/ansible/hosts /etc/ansible/ansible.cfg /etc/ansible/group_vars /etc/ansible/host_vars || true",
+                sudoPassword, 30000);
+
         // Step 4: Kiểm tra lại bằng command -v
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":4,\"message\":\"Kiểm tra sau khi gỡ...\"}",
@@ -995,6 +1038,21 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         String pathCheck = executeCommandWithTerminalOutput(session, server,
                 "bash -lc 'command -v ansible >/dev/null 2>&1 && { echo FOUND $(command -v ansible); } || echo NOT_FOUND'",
                 sudoPassword, 10000);
+
+        // Kiểm tra thêm các binary khác
+        executeCommandWithTerminalOutput(session, server,
+                "which ansible-playbook ansible-galaxy ansible-vault ansible-console || true",
+                sudoPassword, 5000);
+
+        // Kiểm tra pip packages còn lại
+        executeCommandWithTerminalOutput(session, server,
+                "pip3 list | grep -i ansible || echo 'No ansible packages found'",
+                sudoPassword, 5000);
+
+        // Kiểm tra dpkg packages còn lại
+        executeCommandWithTerminalOutput(session, server,
+                "dpkg -l | grep -i ansible || echo 'No ansible packages found'",
+                sudoPassword, 5000);
 
         if (pathCheck != null && pathCheck.contains("FOUND ")) {
             return "Ansible vẫn còn trên hệ thống: " + pathCheck.trim();
