@@ -977,31 +977,65 @@
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-              <div class="d-flex justify-content-between mb-2">
+              <div class="d-flex justify-content-between mb-3">
                 <div>
                   <button type="button" class="btn btn-sm btn-outline-primary" id="create-playbook-btn"><i class="bi bi-plus-circle"></i> Tạo playbook</button>
                   <label class="btn btn-sm btn-outline-secondary mb-0">
                     <i class="bi bi-upload"></i> Tải lên <input type="file" id="upload-playbook-input" accept=".yml,.yaml" hidden>
                   </label>
+                  <button type="button" class="btn btn-sm btn-outline-info" id="refresh-playbooks-btn" onclick="refreshPlaybooks()"><i class="bi bi-arrow-clockwise"></i> Làm mới</button>
                 </div>
                 <div class="input-group input-group-sm" style="max-width: 320px;">
                   <span class="input-group-text"><i class="bi bi-search"></i></span>
                   <input type="text" id="search-playbook-input" class="form-control" placeholder="Tìm playbook...">
                 </div>
               </div>
+              
+              <!-- Filename input -->
+              <div class="mb-3">
+                <label class="form-label">Tên file playbook</label>
+                <div class="input-group">
+                  <input type="text" id="playbook-filename" class="form-control" placeholder="example" required>
+                  <span class="input-group-text">.yml</span>
+                </div>
+                <small class="text-muted">Extension .yml sẽ được thêm tự động</small>
+              </div>
+              
               <div class="row g-3">
                 <div class="col-12 col-md-4">
-                  <div class="list-group small" id="playbook-list" style="max-height: 50vh; overflow-y: auto;"></div>
+                  <label class="form-label">Danh sách playbook</label>
+                  <div class="list-group small" id="playbook-list" style="max-height: 50vh; overflow-y: auto;">
+                    <div class="list-group-item text-center text-muted">
+                      <i class="bi bi-folder"></i> Đang tải...
+                    </div>
+                  </div>
                 </div>
                 <div class="col-12 col-md-8">
                   <label class="form-label">Nội dung playbook</label>
                   <textarea id="playbook-editor" class="form-control" rows="18" placeholder="---\n- name: Example\n  hosts: all\n  tasks:\n    - debug: msg=\"hello\"\n"></textarea>
                 </div>
               </div>
+              
+              <!-- Execution status -->
+              <div id="playbook-execution-status" class="mt-3"></div>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-              <button type="button" class="btn btn-primary" id="save-playbook-btn"><i class="bi bi-save"></i> Lưu</button>
+              <div class="d-flex justify-content-between w-100">
+                <div>
+                  <button type="button" class="btn btn-outline-danger" id="delete-playbook-btn" style="display: none;">
+                    <i class="bi bi-trash"></i> Xóa
+                  </button>
+                </div>
+                <div>
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                  <button type="button" class="btn btn-success" id="execute-playbook-btn" style="display: none;">
+                    <i class="bi bi-play-circle"></i> Thực thi
+                  </button>
+                  <button type="button" class="btn btn-primary" id="save-playbook-btn">
+                    <i class="bi bi-save"></i> Lưu
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

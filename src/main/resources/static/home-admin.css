@@ -206,6 +206,20 @@
   }
 }
 
+/* Spin animation for icons */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Cluster info in modal header */
 #current-cluster-name {
   font-weight: 600;
@@ -254,4 +268,37 @@
 
 #config-last-check {
   font-style: italic;
+}
+
+/* Ẩn thanh cuộn trong danh sách playbook */
+#playbook-list {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+
+#playbook-list::-webkit-scrollbar {
+  display: none; /* WebKit browsers (Chrome, Safari, Edge) */
+}
+
+/* Ansible execution output styling */
+#ansible-output {
+  scrollbar-width: thin;
+  scrollbar-color: #6c757d #343a40;
+}
+
+#ansible-output::-webkit-scrollbar {
+  width: 8px;
+}
+
+#ansible-output::-webkit-scrollbar-track {
+  background: #343a40;
+}
+
+#ansible-output::-webkit-scrollbar-thumb {
+  background: #6c757d;
+  border-radius: 4px;
+}
+
+#ansible-output::-webkit-scrollbar-thumb:hover {
+  background: #868e96;
 }
