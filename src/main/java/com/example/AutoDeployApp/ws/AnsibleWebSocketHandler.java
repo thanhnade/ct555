@@ -300,10 +300,20 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         "remote_user    = " + (target.getUsername() != null ? target.getUsername() : "root") + "\n" +
                         "host_key_checking = False\n" +
                         "retry_files_enabled = False\n" +
-                        "timeout = 30\n" +
+                        "timeout = 45\n" +
                         "nocows = 1\n" +
-                        "forks = 5\n" +
-                        "interpreter_python = /usr/bin/python3\n";
+                        "forks = 10\n" +
+                        "interpreter_python = /usr/bin/python3\n" +
+                        "\n" +
+                        "# Hiển thị log rõ ràng, có thời gian từng task\n" +
+                        "stdout_callback = yaml\n" +
+                        "callbacks_enabled = timer, profile_tasks\n" +
+                        "\n" +
+                        "# Tự động kết thúc nếu gặp lỗi nghiêm trọng\n" +
+                        "any_errors_fatal = True\n" +
+                        "\n" +
+                        "# Ẩn cảnh báo \"deprecation\" khi chạy các module builtin\n" +
+                        "deprecation_warnings = False\n";
                 String cmdCfg = "tee /etc/ansible/ansible.cfg > /dev/null <<'EOF'\n"
                         + cfg + "\nEOF";
                 executeCommandWithTerminalOutput(session, target, "mkdir -p /etc/ansible", sudoPassword, 8000);

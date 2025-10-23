@@ -150,7 +150,7 @@ window.deletePlaybook = async function(filename) {
       throw new Error(errorData.error || 'Lỗi xóa playbook');
     }
     
-    showAlert('success', 'Đã xóa playbook thành công');
+    showAlert('success', `Đã xóa playbook "${filename}" thành công `);
     await loadPlaybooks(); // Refresh list
     
   } catch (error) {
@@ -264,24 +264,36 @@ async function monitorPlaybookExecution(taskId) {
         // Hide spinner
         spinnerElement.style.display = 'none';
         
-        // Show completion message
-        const summaryElement = document.createElement('div');
-        summaryElement.className = 'text-success mt-3 border-top pt-2';
-        summaryElement.innerHTML = `
-          <div class="fw-bold">🎉 Hoàn thành thực thi playbook!</div>
-          <div class="small text-white">Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s</div>
-        `;
-        outputElement.appendChild(summaryElement);
+         // Show completion message
+         const summaryElement = document.createElement('div');
+         summaryElement.className = 'text-success mt-3 border-top pt-2';
+         
+         const titleElement = document.createElement('div');
+         titleElement.className = 'fw-bold';
+         titleElement.textContent = '🎉 Hoàn thành thực thi playbook!';
+         
+         const timeElement = document.createElement('div');
+         timeElement.className = 'small text-white';
+         timeElement.textContent = `Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s`;
+         
+         summaryElement.appendChild(titleElement);
+         summaryElement.appendChild(timeElement);
+         outputElement.appendChild(summaryElement);
       }
       
     } catch (error) {
       console.error('Error monitoring execution:', error);
       spinnerElement.style.display = 'none';
       
-      const errorElement = document.createElement('div');
-      errorElement.className = 'text-danger mt-3';
-      errorElement.innerHTML = '<div class="fw-bold">⚠️ Lỗi kiểm tra trạng thái</div>';
-      outputElement.appendChild(errorElement);
+       const errorElement = document.createElement('div');
+       errorElement.className = 'text-danger mt-3';
+       
+       const errorTitle = document.createElement('div');
+       errorTitle.className = 'fw-bold';
+       errorTitle.textContent = '⚠️ Lỗi kiểm tra trạng thái';
+       
+       errorElement.appendChild(errorTitle);
+       outputElement.appendChild(errorElement);
     }
   };
   
@@ -322,13 +334,13 @@ window.uploadPlaybook = async function(file) {
 };
 
 // Generate K8s playbook from template
-async function generateK8sPlaybook(template) {
+async function generateK8sPlaybookFromTemplate(template) {
   if (!getClusterId()) {
     throw new Error('Vui lòng chọn cluster trước');
   }
   
   const templates = {
-    '01-update-hosts-hostname': `---
+    'update-hosts-hostname': `---
 - name: Cập nhật /etc/hosts và hostname cho toàn bộ cluster
   hosts: all
   become: yes
@@ -365,10 +377,11 @@ async function generateK8sPlaybook(template) {
           - "{{ host_info.stdout_lines }}"
       tags: verify`,
 
-    '03-prepare-k8s-and-containerd': `---
+    'prepare-k8s-and-containerd': `---
 - name: ⚙️ Chuẩn bị môi trường Kubernetes: tắt swap, cấu hình sysctl, cài containerd, kubelet/kubeadm/kubectl
   hosts: all
   become: yes
+  gather_facts: yes
   tasks:
     - name: Tắt swap ngay
       command: swapoff -a
@@ -466,7 +479,7 @@ async function generateK8sPlaybook(template) {
     - name: Bật SystemdCgroup trong config containerd
       replace:
         path: /etc/containerd/config.toml
-        regexp: '^\s*SystemdCgroup\s*=\s*false'
+        regexp: '^\\s*SystemdCgroup\\s*=\\s*false'
         replace: '            SystemdCgroup = true'
 
     - name: Restart + enable containerd
@@ -509,7 +522,7 @@ async function generateK8sPlaybook(template) {
         - kubelet
         - kubectl`,
 
-    '04-init-master-calico': `---
+    'init-master-calico': `---
 - name: 🚀 Khởi tạo master và cài Calico CNI
   hosts: master
   become: yes
@@ -575,7 +588,7 @@ async function generateK8sPlaybook(template) {
           status: "True"
         wait_timeout: 300`,
 
-    '05-join-worker': `---
+    'join-worker': `---
 - name: 🔗 Lấy join command từ master
   hosts: master
   become: yes
@@ -603,7 +616,7 @@ async function generateK8sPlaybook(template) {
         var: join_out.stdout
       when: join_out.stdout is defined`,
 
-    '06-install-flannel': `---
+    'install-flannel': `---
 - name: 🌐 Cài Flannel CNI
   hosts: master
   become: yes
@@ -617,7 +630,7 @@ async function generateK8sPlaybook(template) {
         state: present
         src: /tmp/kube-flannel.yml`,
 
-    '07-verify-cluster': `---
+    'verify-cluster': `---
 - name: ✅ Kiểm tra trạng thái cụm
   hosts: master
   become: yes
@@ -636,7 +649,7 @@ async function generateK8sPlaybook(template) {
           - "Nodes:\n{{ nodes.stdout }}"
           - "Pods:\n{{ pods.stdout }}"`,
 
-    '08-reset-cluster': `---
+    'reset-cluster': `---
 - name: 🧹 Reset cluster K8s
   hosts: all
   become: yes
@@ -656,7 +669,7 @@ async function generateK8sPlaybook(template) {
         - containerd
         - kubelet`,
 
-    '10-reboot-all': `---
+    'reboot-all': `---
 - name: 🔄 Reboot tất cả node
   hosts: all
   become: yes
@@ -665,7 +678,7 @@ async function generateK8sPlaybook(template) {
       reboot:
         reboot_timeout: 600`,
 
-    '11-check-containerd': `---
+    'check-containerd': `---
 - name: Kiểm tra service containerd
   hosts: all
   become: yes
@@ -677,7 +690,7 @@ async function generateK8sPlaybook(template) {
     - debug:
         msg: "containerd: {{ st.stdout }}"`,
 
-    '12-check-kubelet': `---
+    'check-kubelet': `---
 - name: Kiểm tra service kubelet
   hosts: all
   become: yes
@@ -1158,3 +1171,4 @@ window.searchPlaybooks = searchPlaybooks;
 window.showPlaybookContentView = showPlaybookContentView;
 window.showPlaybookExecutionView = showPlaybookExecutionView;
 window.setCurrentClusterId = setCurrentClusterId;
+window.generateK8sPlaybookFromTemplate = generateK8sPlaybookFromTemplate;

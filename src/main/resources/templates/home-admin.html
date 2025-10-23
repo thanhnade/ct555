@@ -1034,24 +1034,22 @@
                   <label class="form-label">Template K8s (tùy chọn)</label>
                   <select id="playbook-template-select" class="form-select form-select-sm">
                     <option value="">-- Chọn template K8s --</option>
-                    <option value="01-update-hosts-hostname">01 Cập nhật hosts & hostname</option>
-                    <option value="03-prepare-k8s-and-containerd">03 ⚙️ Cấu hình kernel, sysctl, containerd, cài kubeadm/kubelet/kubectl</option>
-                    <option value="04-init-master-calico">04 🚀 Khởi tạo master + cài Calico CNI</option>
-                    <option value="05-join-worker">05 🔗 Cho worker tham gia cluster</option>
-                    <option value="07-verify-cluster">07 ✅ Kiểm tra trạng thái cụm</option>
-                    <option value="06-install-flannel">06 Cài Flannel CNI (tuỳ chọn)</option>
-                    <option value="08-reset-cluster">08 🧹 Reset cluster (tuỳ chọn)</option>
-                    <option value="10-reboot-all">10 🔄 Reboot toàn bộ node (tuỳ chọn)</option>
-                    <option value="11-check-containerd">11 Kiểm tra service containerd (tuỳ chọn)</option>
-                    <option value="12-check-kubelet">12 Kiểm tra service kubelet (tuỳ chọn)</option>
-                    <option value="05-init-master">05 Khởi tạo master node</option>
-                    <option value="06-install-cni">06 Cài đặt CNI (Calico/Flannel)</option>
-                    <option value="07-join-workers">07 Thêm worker nodes</option>
-                    <option value="08-install-ingress">08 Cài Ingress Controller</option>
-                    <option value="09-install-helm">09 Cài Helm</option>
-                    <option value="10-setup-storage">10 Thiết lập storage</option>
-                    <option value="11-deploy-nginx">11 Deploy Nginx test</option>
-                    <option value="12-reset-cluster">12 Reset cluster</option>
+                    <optgroup label="I. Chuẩn bị môi trường">
+                      <option value="update-hosts-hostname">01 Cập nhật hosts & hostname</option>
+                      <option value="prepare-k8s-and-containerd">02 ⚙️ Cấu hình kernel, sysctl, containerd, cài kubeadm/kubelet/kubectl</option>
+                    </optgroup>
+                    <optgroup label="II. Triển khai cluster">
+                      <option value="init-master-calico">03 🚀 Khởi tạo master + cài Calico CNI</option>
+                      <option value="join-worker">04 🔗 Cho worker tham gia cluster</option>
+                      <option value="verify-cluster">05 ✅ Kiểm tra trạng thái cụm</option>
+                    </optgroup>
+                    <optgroup label="III. Tùy chọn hỗ trợ / bảo trì">
+                      <option value="install-flannel">06 Cài Flannel CNI (tuỳ chọn)</option>
+                      <option value="reset-cluster">07 🧹 Reset cluster (tuỳ chọn)</option>
+                      <option value="reboot-all">08 🔄 Reboot toàn bộ node (tuỳ chọn)</option>
+                      <option value="check-containerd">09 Kiểm tra service containerd (tuỳ chọn)</option>
+                      <option value="check-kubelet">10 Kiểm tra service kubelet (tuỳ chọn)</option>
+                    </optgroup>
                   </select>
                   <small class="text-muted">Chọn template để tự động tạo nội dung playbook</small>
                 </div>
@@ -1062,7 +1060,7 @@
                 <div class="row g-3">
                   <div class="col-12 col-md-4">
                     <label class="form-label">Danh sách playbook</label>
-                    <div class="list-group small" id="playbook-list" style="max-height: 50vh; overflow-y: auto;">
+                    <div class="list-group small" id="playbook-list" style="overflow-y: auto;">
                       <div class="list-group-item text-center text-muted">
                         <i class="bi bi-folder"></i> Đang tải...
                       </div>
