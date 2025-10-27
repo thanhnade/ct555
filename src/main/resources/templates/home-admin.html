@@ -1035,20 +1035,27 @@
                   <select id="playbook-template-select" class="form-select form-select-sm">
                     <option value="">-- Chọn template K8s --</option>
                     <optgroup label="I. Chuẩn bị môi trường">
-                      <option value="update-hosts-hostname">01 Cập nhật hosts & hostname</option>
-                      <option value="prepare-k8s-and-containerd">02 ⚙️ Cấu hình kernel, sysctl, containerd, cài kubeadm/kubelet/kubectl</option>
+                      <option value="update-hosts-hostname">01 📝 Cập nhật hosts & hostname</option>
+                      <option value="kernel-sysctl">02 ⚙️ Cấu hình kernel & sysctl</option>
+                      <option value="install-containerd">03 🐳 Cài đặt containerd</option>
+                      <option value="install-kubernetes">04 ☸️ Cài đặt kubeadm/kubelet/kubectl</option>
                     </optgroup>
                     <optgroup label="II. Triển khai cluster">
-                      <option value="init-master-calico">03 🚀 Khởi tạo master + cài Calico CNI</option>
-                      <option value="join-worker">04 🔗 Cho worker tham gia cluster</option>
-                      <option value="verify-cluster">05 ✅ Kiểm tra trạng thái cụm</option>
+                      <option value="init-master">05 🚀 Khởi tạo master node</option>
+                      <option value="install-cni">06 🌐 Cài đặt Calico CNI</option>
+                      <option value="join-workers">07 🔗 Thêm worker nodes</option>
                     </optgroup>
-                    <optgroup label="III. Tùy chọn hỗ trợ / bảo trì">
-                      <option value="install-flannel">06 Cài Flannel CNI (tuỳ chọn)</option>
-                      <option value="reset-cluster">07 🧹 Reset cluster (tuỳ chọn)</option>
-                      <option value="reboot-all">08 🔄 Reboot toàn bộ node (tuỳ chọn)</option>
-                      <option value="check-containerd">09 Kiểm tra service containerd (tuỳ chọn)</option>
-                      <option value="check-kubelet">10 Kiểm tra service kubelet (tuỳ chọn)</option>
+                    <optgroup label="III. Kiểm tra & Tùy chọn mở rộng">
+                      <option value="see-cluster">08 👀 Kiểm tra trạng thái cluster</option>
+                      <option value="install-ingress">09 🌍 Cài đặt Nginx Ingress</option>
+                      <option value="install-helm">10 📦 Cài đặt Helm 3</option>
+                      <option value="setup-storage">11 💾 Thiết lập Storage</option>
+                    </optgroup>
+                    <optgroup label="IV. Triển khai toàn bộ">
+                      <option value="deploy-full-cluster">🚀 Triển khai toàn bộ cluster (1-8)</option>
+                    </optgroup>
+                    <optgroup label="V. Bảo trì & Reset">
+                      <option value="reset-cluster">🧹 Reset toàn bộ cluster</option>
                     </optgroup>
                   </select>
                   <small class="text-muted">Chọn template để tự động tạo nội dung playbook</small>
@@ -1065,6 +1072,7 @@
                         <i class="bi bi-folder"></i> Đang tải...
                       </div>
                     </div>
+                    
                   </div>
                   <div class="col-12 col-md-8">
                     <div id="playbook-content-area">

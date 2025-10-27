@@ -332,28 +332,34 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
                 // Sinh nội dung hosts theo CSDL, theo nhóm [master], [worker], và [all:vars]
                 StringBuilder hosts = new StringBuilder();
+
                 hosts.append("[master]\n");
                 for (var s : servers) {
                     if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
-                        hosts.append(s.getHost())
-                                .append(" ansible_user=")
-                                .append(s.getUsername() != null ? s.getUsername() : "root");
+                        // Lấy hostname làm inventory_hostname (nếu chưa có, dùng IP tạm)
+                        String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
+                        hosts.append(hostname)
+                                .append(" ansible_host=").append(s.getHost())
+                                .append(" ansible_user=").append(s.getUsername() != null ? s.getUsername() : "root");
                         if (s.getPort() != null)
                             hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
                     }
                 }
-                hosts.append("\n[worker]\n");
+
+                hosts.append("\n[workers]\n");
                 for (var s : servers) {
                     if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER) {
-                        hosts.append(s.getHost())
-                                .append(" ansible_user=")
-                                .append(s.getUsername() != null ? s.getUsername() : "root");
+                        String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
+                        hosts.append(hostname)
+                                .append(" ansible_host=").append(s.getHost())
+                                .append(" ansible_user=").append(s.getUsername() != null ? s.getUsername() : "root");
                         if (s.getPort() != null)
                             hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
                     }
                 }
+
                 hosts.append("\n[all:vars]\n")
                         .append("ansible_python_interpreter=/usr/bin/python3\n")
                         .append("ansible_ssh_private_key_file=/home/")

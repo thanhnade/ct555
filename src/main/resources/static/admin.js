@@ -3373,6 +3373,22 @@ window.uploadPlaybook = async function(file) {
   }
 };
 
+  // Template selector change event listener
+  const templateSelect = document.getElementById('playbook-template-select');
+  if (templateSelect && !templateSelect.dataset.bound) {
+    templateSelect.dataset.bound = '1';
+    templateSelect.addEventListener('change', function() {
+      const filenameInput = document.getElementById('playbook-filename');
+      if (filenameInput && this.value) {
+        // Auto-fill filename based on template selection
+        const templateName = this.value;
+        const displayText = this.options[this.selectedIndex].text;
+        const filename = templateName.replace(/^\d+-/, ''); // Remove number prefix
+        filenameInput.value = filename;
+      }
+    });
+  }
+
   // Generate from template event listener
   const generateFromTemplateBtn = document.getElementById('generate-from-template-btn');
   if (generateFromTemplateBtn && !generateFromTemplateBtn.dataset.bound) {
@@ -3410,6 +3426,13 @@ window.uploadPlaybook = async function(file) {
         }
       } catch (error) {
         console.error('Error generating playbook from template:', error);
+        
+        // Check if user cancelled the operation
+        if (error.message && error.message.includes('Đã hủy')) {
+          // User cancelled - don't show error, just return silently
+          return;
+        }
+        
         showAlert('error', 'Lỗi tạo playbook từ template: ' + error.message);
       }
     });
