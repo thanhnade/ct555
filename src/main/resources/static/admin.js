@@ -221,6 +221,67 @@ async function loadClusterList(){
   }
 }
 
+// Function để reset dữ liệu cluster khi quay lại danh sách
+function resetClusterData() {
+  // Reset global cluster ID
+  currentClusterId = null;
+  window.currentClusterId = null;
+  
+  // Reset trong playbook-manager.js
+  if (window.setCurrentClusterId) {
+    window.setCurrentClusterId(null);
+  }
+  
+  // Clear Chi tiết Cluster (cluster detail UI elements)
+  const elementsToReset = [
+    'cd-name', 'cd-master', 'cd-workers', 'cd-status', 'cd-version'
+  ];
+  
+  elementsToReset.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.textContent = '';
+    }
+  });
+  
+  // Clear Nodes table
+  const nodesTbody = document.getElementById('cd-nodes-tbody');
+  if (nodesTbody) {
+    nodesTbody.innerHTML = '';
+  }
+  
+  // Clear cluster message
+  const msgElement = document.getElementById('cd-msg');
+  if (msgElement) {
+    msgElement.innerHTML = '';
+    msgElement.className = 'small mb-2';
+  }
+  
+  // Clear Chi tiết server (Ansible status display)
+  const ansibleStatusDisplay = document.getElementById('ansible-status-display');
+  if (ansibleStatusDisplay) {
+    ansibleStatusDisplay.innerHTML = `
+      <div class="text-muted text-center py-3">
+        <i class="bi bi-info-circle"></i> Click "Kiểm tra trạng thái" để xem thông tin Ansible trên các MASTER servers
+      </div>
+    `;
+  }
+  
+  // Hide Ansible status table
+  const ansibleStatusTable = document.getElementById('ansible-status-table');
+  if (ansibleStatusTable) {
+    ansibleStatusTable.classList.add('d-none');
+  }
+  
+  // Clear Ansible status tbody (Chi tiết server)
+  const ansibleStatusTbody = document.getElementById('ansible-status-tbody');
+  if (ansibleStatusTbody) {
+    ansibleStatusTbody.innerHTML = '';
+  }
+  
+  console.log('Cluster data has been reset - Chi tiết Cluster, Nodes, Chi tiết server đã được xóa');
+}
+
 async function showClusterDetail(clusterId){
   // Set current cluster ID for Ansible functions
   currentClusterId = clusterId;
@@ -236,15 +297,6 @@ async function showClusterDetail(clusterId){
   document.getElementById('k8s-assign')?.classList.add('d-none');
   document.getElementById('k8s-detail')?.classList.remove('d-none');
 
-  // Tự động kiểm tra trạng thái Ansible và load playbooks khi mở chi tiết cụm (không chặn UI)
-  try { 
-    setTimeout(() => { 
-      try { 
-        checkAnsibleStatus(clusterId); 
-        if (window.loadPlaybooks) { window.loadPlaybooks(clusterId); } else { loadPlaybooks(); }
-      } catch(_){} 
-    }, 0); 
-  } catch(_) {}
 
   // Hiển thị loading state
   const msgElement = document.getElementById('cd-msg');
@@ -278,48 +330,164 @@ async function showClusterDetail(clusterId){
   document.getElementById('cd-status').textContent = detail.status || '';
   document.getElementById('cd-version').textContent = detail.version || '';
 
+  // Tự động kiểm tra trạng thái Ansible và load playbooks sau khi có dữ liệu cluster
+  // Chỉ gọi API nếu cluster có nodes
+  try { 
+    setTimeout(() => { 
+      try { 
+        // Kiểm tra nếu cluster có nodes trước khi gọi API
+        if (detail.nodes && detail.nodes.length > 0) {
+          checkAnsibleStatus(clusterId); 
+          if (window.loadPlaybooks) { window.loadPlaybooks(clusterId); } else { loadPlaybooks(); }
+        } else {
+          console.log('Cluster không có nodes, bỏ qua việc gọi API Ansible và Playbook');
+        }
+      } catch(_){} 
+    }, 100); // Tăng delay để đảm bảo UI đã render xong
+  } catch(_) {}
+
   const tbody = document.getElementById('cd-nodes-tbody');
   tbody.innerHTML = '';
-  (detail.nodes||[]).forEach(n => {
-    // Chỉ hiển thị connection status
-    const connectionStatus = n.isConnected ? 'CONNECTED' : 'OFFLINE';
-    const connectionBadge = n.isConnected ? 'success' : 'secondary';
-    
-    // Color coding cho RAM usage
-    const ramPercentage = n.ramPercentage || 0;
-    let ramColorClass = '';
-    if (ramPercentage >= 90) {
-      ramColorClass = 'text-danger fw-bold'; // Đỏ đậm nếu > 90%
-    } else if (ramPercentage >= 80) {
-      ramColorClass = 'text-danger'; // Đỏ nếu > 80%
-    } else if (ramPercentage >= 70) {
-      ramColorClass = 'text-warning'; // Vàng nếu > 70%
-    } else if (ramPercentage >= 50) {
-      ramColorClass = 'text-info'; // Xanh nhạt nếu > 50%
-    } else {
-      ramColorClass = 'text-success'; // Xanh lá nếu < 50%
-    }
-    
+  // Hiển thị trạng thái đang tải cho bảng Nodes trong khi chờ script/requests
+  const loadingRow = document.createElement('tr');
+  loadingRow.innerHTML = `
+    <td colspan="7" class="text-center py-3">
+      <div class="d-inline-flex align-items-center text-muted">
+        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+        <span>Đang tải dữ liệu cụm...</span>
+      </div>
+    </td>
+  `;
+  tbody.appendChild(loadingRow);
+
+  // Nếu không có nodes, hiển thị thông báo và dừng
+  if (!detail.nodes || detail.nodes.length === 0) {
+    // Thay thế loading bằng thông báo không có máy chủ
+    tbody.innerHTML = '';
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${n.ip}</td>
-      <td>${n.role}</td>
-      <td><span class="badge bg-${connectionBadge}">${connectionStatus}</span></td>
-      <td>${n.cpu || '-'}</td>
-      <td class="${ramColorClass}">${n.ram || '-'}</td>
-      <td>${n.disk || '-'}</td>
-      <td class="text-nowrap">
-        <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">Delete</button>
-        <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">Retry</button>
+      <td colspan="7" class="text-center text-muted py-4">
+        <i class="bi bi-server me-2"></i>
+        Cluster này chưa có máy chủ nào. Vui lòng thêm máy chủ vào cluster để xem thông tin.
       </td>
     `;
     tbody.appendChild(tr);
-  });
+  } else {
+    // Tải trạng thái K8s từ backend để hiển thị Ready/NotReady cho node online
+    let k8sNodeByIP = new Map();
+    let k8sNodeByName = new Map();
+    try {
+      const k8sResp = await fetchJSON(`/admin/clusters/${clusterId}/k8s/nodes`).catch((err)=>{
+        console.error('[k8s/nodes] fetch error:', err);
+        return null;
+      });
+      if (k8sResp && k8sResp.wide) {
+        console.log('[kubectl get nodes -o wide]\n' + k8sResp.wide);
+      } else if (!k8sResp) {
+        console.warn('[k8s/nodes] No response');
+      } else {
+        // Chỉ cảnh báo thiếu "wide" nếu nodes rỗng; nếu đã có nodes thì bỏ qua cảnh báo này
+        const hasNodes = Array.isArray(k8sResp.nodes) && k8sResp.nodes.length > 0;
+        if (!hasNodes) {
+          console.warn('[k8s/nodes] wide output missing');
+          if (k8sResp.rawJson) {
+            console.log('[kubectl get nodes -o json]\n' + k8sResp.rawJson);
+          }
+          if (k8sResp.tried) {
+            console.log('[k8s/nodes] attempts:\n' + k8sResp.tried);
+          }
+        }
+      }
+      if (k8sResp && Array.isArray(k8sResp.nodes)) {
+        console.log('[k8s/nodes] parsed nodes:', k8sResp.nodes);
+        k8sResp.nodes.forEach(nd => {
+          if (nd.internalIP) {
+            k8sNodeByIP.set(String(nd.internalIP), nd);
+          }
+          if (nd.name) {
+            k8sNodeByName.set(String(nd.name), nd);
+          }
+        });
+        console.log('[k8s/nodes] map keys (IP):', Array.from(k8sNodeByIP.keys()));
+        console.log('[k8s/nodes] map keys (Name):', Array.from(k8sNodeByName.keys()));
+      } else if (k8sResp) {
+        console.warn('[k8s/nodes] nodes array missing or empty');
+      }
+    } catch(e){
+      console.error('[k8s/nodes] unexpected error:', e);
+    }
+
+    // Kiểm tra lệch: nodes trong app nhưng không có trong kubectl; và ngược lại
+    try {
+      const appIps = new Set((detail.nodes||[]).map(n => String(n.ip)));
+      const k8sIps = new Set(Array.from(k8sNodeByIP.keys()));
+      const notInK8s = Array.from(appIps).filter(ip => !k8sIps.has(ip));
+      const notInApp = Array.from(k8sIps).filter(ip => !appIps.has(ip));
+      console.log('[k8s/nodes] app-but-not-in-k8s:', notInK8s);
+      console.log('[k8s/nodes] k8s-but-not-in-app:', notInApp);
+    } catch(_){}
+
+    // Đã có dữ liệu, thay thế loading bằng nội dung bảng
+    tbody.innerHTML = '';
+    // Hiển thị danh sách nodes
+    detail.nodes.forEach(n => {
+      const isOnline = !!n.isConnected;
+      // Nếu offline => OFFLINE; nếu online => đọc từ k8s map (Ready/NotReady)
+      let statusLabel = 'OFFLINE';
+      let statusBadge = 'secondary';
+      if (isOnline) {
+        // Tìm theo IP trước, nếu không có thì thử theo name
+        const nd = k8sNodeByIP.get(String(n.ip)) || k8sNodeByName.get(String(n.ip));
+        console.log('[k8s/nodes] map for row', { ip: n.ip, matched: nd });
+        const k8sStatus = nd?.k8sStatus;
+        if (k8sStatus === 'Ready') { statusLabel = 'Ready'; statusBadge = 'success'; }
+        else if (k8sStatus === 'NotReady') { statusLabel = 'NotReady'; statusBadge = 'warning text-dark'; }
+        else {
+          // Không khớp kubectl → đánh dấu là CHƯA THÊM VÀO CLUSTER
+          statusLabel = 'UNREGISTERED';
+          statusBadge = 'dark';
+        }
+      }
+
+      // Color coding cho RAM usage
+      const ramPercentage = n.ramPercentage || 0;
+      let ramColorClass = '';
+      if (ramPercentage >= 90) {
+        ramColorClass = 'text-danger fw-bold';
+      } else if (ramPercentage >= 80) {
+        ramColorClass = 'text-danger';
+      } else if (ramPercentage >= 70) {
+        ramColorClass = 'text-warning';
+      } else if (ramPercentage >= 50) {
+        ramColorClass = 'text-info';
+      } else {
+        ramColorClass = 'text-success';
+      }
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td title="${n.username||''}">${n.ip}</td>
+        <td>${n.role}</td>
+        <td><span class="badge bg-${statusBadge}" title="${statusLabel==='UNREGISTERED'?'Node chưa đăng ký trong cụm (không thấy trong kubectl)':''}">${statusLabel}</span></td>
+        <td>${n.cpu || '-'}</td>
+        <td class="${ramColorClass}">${n.ram || '-'}</td>
+        <td>${n.disk || '-'}</td>
+        <td class="text-nowrap">
+          <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">Delete</button>
+          <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">Retry</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
 
   const backBtn = document.getElementById('cd-back');
   if(backBtn && !backBtn.dataset.bound){
     backBtn.dataset.bound='1';
     backBtn.addEventListener('click', async () => {
+      // Reset Chi tiết Cluster, Nodes, Chi tiết server trước khi quay lại danh sách
+      resetClusterData();
+      
       document.getElementById('k8s-detail')?.classList.add('d-none');
       document.getElementById('k8s-list')?.classList.remove('d-none');
       document.getElementById('k8s-create')?.classList.remove('d-none');
@@ -1596,20 +1764,26 @@ async function checkAnsibleStatus(clusterId) {
     
   } catch (error) {
     console.error('Lỗi kiểm tra trạng thái Ansible:', error);
-    showAlert('error', 'Lỗi kiểm tra trạng thái Ansible: ' + (error.message || 'Không xác định'));
     
     // Hiển thị lỗi chi tiết hơn
     let errorMessage = error.message;
-    if (error.message.includes('Yêu cầu không hợp lệ')) {
+    let alertType = 'danger';
+    let iconClass = 'bi-exclamation-triangle';
+    
+    if (error.message.includes('Cluster không có servers nào')) {
+      errorMessage = 'Cluster này chưa có máy chủ nào. Vui lòng thêm máy chủ vào cluster trước khi kiểm tra Ansible.';
+      alertType = 'warning';
+      iconClass = 'bi-server';
+    } else if (error.message.includes('Yêu cầu không hợp lệ')) {
       errorMessage = 'Không có thông tin xác thực. Vui lòng kết nối lại các server trước khi kiểm tra Ansible.';
     } else if (error.message.includes('Không có session')) {
       errorMessage = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
     }
     
     statusDisplay.innerHTML = `
-      <div class="alert alert-danger">
-        <i class="bi bi-exclamation-triangle"></i> Lỗi kiểm tra trạng thái Ansible: ${errorMessage}
-        <br><small class="text-muted">Vui lòng đảm bảo các server đã được kết nối và có thể SSH.</small>
+      <div class="alert alert-${alertType}">
+        <i class="bi ${iconClass}"></i> ${errorMessage}
+        <br><small class="text-muted">Vui lòng đảm bảo cluster có máy chủ và các server đã được kết nối.</small>
       </div>
     `;
     statusDisplay.classList.remove('d-none');

@@ -45,6 +45,10 @@ public class ClusterAdminController {
             "echo \"DISK_PERCENT:$(df / | awk 'NR==2{print $5}')\"";
     private static final String KUBELET_VERSION_COMMAND = "kubelet --version 2>/dev/null | awk '{print $2}'";
     private static final String KUBEADM_VERSION_COMMAND = "kubeadm version -o short 2>/dev/null";
+    private static final String KUBECTL_GET_NODES_JSON = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o json";
+    private static final String KUBECTL_GET_NODES_JSON_ALT = "KUBECONFIG=/root/.kube/config kubectl get nodes -o json";
+    private static final String KUBECTL_GET_NODES_JSON_SUDO = "sudo -E kubectl get nodes -o json";
+    private static final String KUBECTL_GET_NODES_WIDE = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o wide";
 
     public ClusterAdminController(ClusterService clusterService, ServerService serverService,
             AnsibleInstallationService ansibleInstallationService) {
@@ -143,6 +147,162 @@ public class ClusterAdminController {
         } catch (Exception e) {
             String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             return ResponseEntity.status(500).body(Map.of("error", msg));
+        }
+    }
+
+    /**
+     * Lấy danh sách node từ kubectl (trên MASTER) và trả về trạng thái
+     * Ready/NotReady, IP nội bộ, version
+     */
+    @GetMapping("/{id}/k8s/nodes")
+    public ResponseEntity<?> getKubernetesNodes(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+
+            // Lấy servers trong cluster và chọn MASTER đầu tiên
+            var clusterServers = serverService.findByClusterId(id);
+            if (clusterServers == null || clusterServers.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
+            }
+
+            com.example.AutoDeployApp.entity.Server master = null;
+            for (var s : clusterServers) {
+                if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    master = s;
+                    break;
+                }
+            }
+            if (master == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster."));
+            }
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            String output = null;
+            String wide = null;
+            String rawTried = "";
+            try {
+                if (pem != null && !pem.isBlank()) {
+                    // Try default
+                    output = serverService.execCommandWithKey(
+                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                            master.getUsername(), pem, KUBECTL_GET_NODES_JSON, 8000);
+                    rawTried += "JSON@/etc/kubernetes/admin.conf:" + (output == null ? "null" : output.length()) + "\n";
+                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
+                        // Try alt kubeconfig
+                        output = serverService.execCommandWithKey(
+                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                                master.getUsername(), pem, KUBECTL_GET_NODES_JSON_ALT, 8000);
+                        rawTried += "JSON@/root/.kube/config:" + (output == null ? "null" : output.length()) + "\n";
+                    }
+                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
+                        // Try sudo -E
+                        output = serverService.execCommandWithKey(
+                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                                master.getUsername(), pem, KUBECTL_GET_NODES_JSON_SUDO, 8000);
+                        rawTried += "JSON@sudo -E:" + (output == null ? "null" : output.length()) + "\n";
+                    }
+                    wide = serverService.execCommandWithKey(
+                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                            master.getUsername(), pem, KUBECTL_GET_NODES_WIDE, 8000);
+                } else {
+                    String pw = pwCache.get(master.getId());
+                    if (pw == null || pw.isBlank()) {
+                        return ResponseEntity.badRequest().body(Map.of("error",
+                                "Không có thông tin xác thực để chạy kubectl trên MASTER."));
+                    }
+                    // Try default
+                    output = serverService.execCommand(
+                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                            master.getUsername(), pw, KUBECTL_GET_NODES_JSON, 8000);
+                    rawTried += "JSON@/etc/kubernetes/admin.conf:" + (output == null ? "null" : output.length()) + "\n";
+                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
+                        // Try alt kubeconfig
+                        output = serverService.execCommand(
+                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                                master.getUsername(), pw, KUBECTL_GET_NODES_JSON_ALT, 8000);
+                        rawTried += "JSON@/root/.kube/config:" + (output == null ? "null" : output.length()) + "\n";
+                    }
+                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
+                        // Try sudo -E
+                        output = serverService.execCommand(
+                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                                master.getUsername(), pw, KUBECTL_GET_NODES_JSON_SUDO, 8000);
+                        rawTried += "JSON@sudo -E:" + (output == null ? "null" : output.length()) + "\n";
+                    }
+                    wide = serverService.execCommand(
+                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
+                            master.getUsername(), pw, KUBECTL_GET_NODES_WIDE, 8000);
+                }
+            } catch (Exception e) {
+                return ResponseEntity.status(500)
+                        .body(Map.of("error", "Không thể thực thi kubectl trên MASTER: " + e.getMessage()));
+            }
+
+            if (output == null || output.isBlank()) {
+                return ResponseEntity.ok(Map.of("nodes", java.util.List.of()));
+            }
+
+            // Parse JSON output
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode root = null;
+            try {
+                root = mapper.readTree(output);
+            } catch (Exception parseEx) {
+                // Nếu parse lỗi, trả thông tin debug
+                return ResponseEntity.ok(Map.of(
+                        "nodes", java.util.List.of(),
+                        "wide", wide != null ? wide : "",
+                        "rawJson", output != null ? output : "",
+                        "tried", rawTried));
+            }
+            var items = root.path("items");
+            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+            if (items.isArray()) {
+                for (var node : items) {
+                    String name = node.path("metadata").path("name").asText("");
+                    // internalIP
+                    String internalIP = "";
+                    var addresses = node.path("status").path("addresses");
+                    if (addresses.isArray()) {
+                        for (var addr : addresses) {
+                            if ("InternalIP".equals(addr.path("type").asText())) {
+                                internalIP = addr.path("address").asText("");
+                                break;
+                            }
+                        }
+                    }
+                    // Ready condition
+                    String readyStatus = "Unknown";
+                    var conditions = node.path("status").path("conditions");
+                    if (conditions.isArray()) {
+                        for (var c : conditions) {
+                            if ("Ready".equals(c.path("type").asText())) {
+                                readyStatus = "True".equals(c.path("status").asText()) ? "Ready" : "NotReady";
+                                break;
+                            }
+                        }
+                    }
+                    // Roles (from labels if present)
+                    String roles = node.path("metadata").path("labels").path("kubernetes.io/role").asText("");
+                    if (roles.isBlank()) {
+                        roles = node.path("metadata").path("labels").path("node-role.kubernetes.io/control-plane")
+                                .isMissingNode() ? roles : "master";
+                    }
+                    String kubeletVersion = node.path("status").path("nodeInfo").path("kubeletVersion").asText("");
+
+                    result.add(Map.of(
+                            "name", name,
+                            "internalIP", internalIP,
+                            "k8sStatus", readyStatus,
+                            "roles", roles,
+                            "kubeletVersion", kubeletVersion));
+                }
+            }
+
+            return ResponseEntity.ok(Map.of("nodes", result, "wide", wide != null ? wide : ""));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Lỗi lấy danh sách node: " + e.getMessage()));
         }
     }
 

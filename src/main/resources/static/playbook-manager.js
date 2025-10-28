@@ -69,7 +69,16 @@ async function loadPlaybooks(clusterIdOverride) {
     }
   } catch (error) {
     console.error('Error loading playbooks:', error);
-    showAlert('error', 'Lỗi tải danh sách playbook: ' + error.message);
+    // Hiển thị lỗi trong playbook list thay vì dùng showAlert
+    const playbookList = document.getElementById('playbook-list');
+    if (playbookList) {
+      playbookList.innerHTML = `
+        <div class="list-group-item text-center text-danger">
+          <i class="bi bi-exclamation-triangle me-2"></i>
+          Lỗi tải danh sách playbook: ${error.message}
+        </div>
+      `;
+    }
   }
 }
 
@@ -587,6 +596,24 @@ async function generateK8sPlaybookFromTemplate(template) {
         chown $(id -u):$(id -g) $HOME/.kube/config
       args:
         executable: /bin/bash
+
+    - name: 👤 Cấu hình kubeconfig cho người dùng thường ({{ ansible_user }})
+      when: ansible_user != "root"
+      block:
+        - name: 📁 Tạo thư mục kubeconfig cho user
+          file:
+            path: "/home/{{ ansible_user }}/.kube"
+            state: directory
+            mode: '0755'
+
+        - name: 📦 Sao chép kubeconfig cho user
+          copy:
+            src: /etc/kubernetes/admin.conf
+            dest: "/home/{{ ansible_user }}/.kube/config"
+            owner: "{{ ansible_user }}"
+            group: "{{ ansible_user }}"
+            mode: '0600'
+            remote_src: yes
 
     - name: 🔑 Sinh lệnh join cho worker
       shell: kubeadm token create --print-join-command
@@ -1114,6 +1141,24 @@ async function generateK8sPlaybookFromTemplate(template) {
       args:
         executable: /bin/bash
       when: inventory_hostname in groups['master']
+
+    - name: 👤 Cấu hình kubeconfig cho người dùng thường ({{ ansible_user }})
+      when: ansible_user != "root"
+      block:
+        - name: 📁 Tạo thư mục kubeconfig cho user
+          file:
+            path: "/home/{{ ansible_user }}/.kube"
+            state: directory
+            mode: '0755'
+
+        - name: 📦 Sao chép kubeconfig cho user
+          copy:
+            src: /etc/kubernetes/admin.conf
+            dest: "/home/{{ ansible_user }}/.kube/config"
+            owner: "{{ ansible_user }}"
+            group: "{{ ansible_user }}"
+            mode: '0600'
+            remote_src: yes
 
     # Bước 6: Cài đặt CNI (chỉ trên master)
     - name: 🔍 Kiểm tra Calico CNI có tồn tại không
