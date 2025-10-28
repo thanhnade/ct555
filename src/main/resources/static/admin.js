@@ -279,6 +279,9 @@ function resetClusterData() {
     ansibleStatusTbody.innerHTML = '';
   }
   
+  // Reset K8s resources data
+  resetK8sResourcesData();
+  
   console.log('Cluster data has been reset - Chi tiết Cluster, Nodes, Chi tiết server đã được xóa');
 }
 
@@ -296,18 +299,16 @@ async function showClusterDetail(clusterId){
   document.getElementById('k8s-create')?.classList.add('d-none');
   document.getElementById('k8s-assign')?.classList.add('d-none');
   document.getElementById('k8s-detail')?.classList.remove('d-none');
+  // Luôn hiển thị phần Quản lý tài nguyên Kubernetes khi mở chi tiết cụm
+  showK8sResources();
 
 
   // Hiển thị loading state
   const msgElement = document.getElementById('cd-msg');
   if(msgElement) {
-    msgElement.innerHTML = `
-      <div class="d-flex align-items-center">
-        <div class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></div>
-        <span>Đang tải dữ liệu của cụm...</span>
-      </div>
-    `;
-    msgElement.className = 'alert alert-info mb-2';
+    // Chỉ dùng loading trong bảng nodes; không hiển thị spinner tổng
+    msgElement.innerHTML = '';
+    msgElement.className = 'small mb-2';
   }
 
   const detail = await fetchJSON(`/admin/clusters/${clusterId}/detail`).catch(()=>null);
@@ -354,7 +355,7 @@ async function showClusterDetail(clusterId){
     <td colspan="7" class="text-center py-3">
       <div class="d-inline-flex align-items-center text-muted">
         <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-        <span>Đang tải dữ liệu cụm...</span>
+        <span>Đang tải dữ liệu nodes...</span>
       </div>
     </td>
   `;
@@ -377,29 +378,8 @@ async function showClusterDetail(clusterId){
     let k8sNodeByIP = new Map();
     let k8sNodeByName = new Map();
     try {
-      const k8sResp = await fetchJSON(`/admin/clusters/${clusterId}/k8s/nodes`).catch((err)=>{
-        console.error('[k8s/nodes] fetch error:', err);
-        return null;
-      });
-      if (k8sResp && k8sResp.wide) {
-        console.log('[kubectl get nodes -o wide]\n' + k8sResp.wide);
-      } else if (!k8sResp) {
-        console.warn('[k8s/nodes] No response');
-      } else {
-        // Chỉ cảnh báo thiếu "wide" nếu nodes rỗng; nếu đã có nodes thì bỏ qua cảnh báo này
-        const hasNodes = Array.isArray(k8sResp.nodes) && k8sResp.nodes.length > 0;
-        if (!hasNodes) {
-          console.warn('[k8s/nodes] wide output missing');
-          if (k8sResp.rawJson) {
-            console.log('[kubectl get nodes -o json]\n' + k8sResp.rawJson);
-          }
-          if (k8sResp.tried) {
-            console.log('[k8s/nodes] attempts:\n' + k8sResp.tried);
-          }
-        }
-      }
+      const k8sResp = await fetchJSON(`/admin/clusters/${clusterId}/k8s/nodes`).catch(()=>null);
       if (k8sResp && Array.isArray(k8sResp.nodes)) {
-        console.log('[k8s/nodes] parsed nodes:', k8sResp.nodes);
         k8sResp.nodes.forEach(nd => {
           if (nd.internalIP) {
             k8sNodeByIP.set(String(nd.internalIP), nd);
@@ -408,28 +388,21 @@ async function showClusterDetail(clusterId){
             k8sNodeByName.set(String(nd.name), nd);
           }
         });
-        console.log('[k8s/nodes] map keys (IP):', Array.from(k8sNodeByIP.keys()));
-        console.log('[k8s/nodes] map keys (Name):', Array.from(k8sNodeByName.keys()));
+        try { console.info(`[k8s] nodes loaded: ${k8sResp.nodes.length}`); } catch(_){}
       } else if (k8sResp) {
-        console.warn('[k8s/nodes] nodes array missing or empty');
+        // no nodes returned
       }
     } catch(e){
-      console.error('[k8s/nodes] unexpected error:', e);
+      // suppress debug logs
     }
 
     // Kiểm tra lệch: nodes trong app nhưng không có trong kubectl; và ngược lại
-    try {
-      const appIps = new Set((detail.nodes||[]).map(n => String(n.ip)));
-      const k8sIps = new Set(Array.from(k8sNodeByIP.keys()));
-      const notInK8s = Array.from(appIps).filter(ip => !k8sIps.has(ip));
-      const notInApp = Array.from(k8sIps).filter(ip => !appIps.has(ip));
-      console.log('[k8s/nodes] app-but-not-in-k8s:', notInK8s);
-      console.log('[k8s/nodes] k8s-but-not-in-app:', notInApp);
-    } catch(_){}
+    // Diff debug suppressed
 
     // Đã có dữ liệu, thay thế loading bằng nội dung bảng
     tbody.innerHTML = '';
     // Hiển thị danh sách nodes
+    let readyCount = 0, notReadyCount = 0, offlineCount = 0, unregisteredCount = 0;
     detail.nodes.forEach(n => {
       const isOnline = !!n.isConnected;
       // Nếu offline => OFFLINE; nếu online => đọc từ k8s map (Ready/NotReady)
@@ -437,8 +410,7 @@ async function showClusterDetail(clusterId){
       let statusBadge = 'secondary';
       if (isOnline) {
         // Tìm theo IP trước, nếu không có thì thử theo name
-        const nd = k8sNodeByIP.get(String(n.ip)) || k8sNodeByName.get(String(n.ip));
-        console.log('[k8s/nodes] map for row', { ip: n.ip, matched: nd });
+      const nd = k8sNodeByIP.get(String(n.ip)) || k8sNodeByName.get(String(n.ip));
         const k8sStatus = nd?.k8sStatus;
         if (k8sStatus === 'Ready') { statusLabel = 'Ready'; statusBadge = 'success'; }
         else if (k8sStatus === 'NotReady') { statusLabel = 'NotReady'; statusBadge = 'warning text-dark'; }
@@ -448,6 +420,12 @@ async function showClusterDetail(clusterId){
           statusBadge = 'dark';
         }
       }
+
+      // Tally summary (không log chi tiết node)
+      if (statusLabel === 'Ready') readyCount++;
+      else if (statusLabel === 'NotReady') notReadyCount++;
+      else if (statusLabel === 'UNREGISTERED') unregisteredCount++;
+      else offlineCount++;
 
       // Color coding cho RAM usage
       const ramPercentage = n.ramPercentage || 0;
@@ -479,6 +457,11 @@ async function showClusterDetail(clusterId){
       `;
       tbody.appendChild(tr);
     });
+
+    // Log tóm tắt quan trọng, không lộ dữ liệu máy chủ
+    try {
+      console.info(`[cluster] nodes total: ${detail.nodes.length}; Ready: ${readyCount}, NotReady: ${notReadyCount}, Unregistered: ${unregisteredCount}, Offline: ${offlineCount}`);
+    } catch(_){}
   }
 
   const backBtn = document.getElementById('cd-back');
@@ -495,6 +478,15 @@ async function showClusterDetail(clusterId){
       
       // Reload cả cluster list và server assignment table để cập nhật dữ liệu
       await Promise.all([loadClusterList(), loadClustersAndServers()]);
+    });
+  }
+
+  // Refresh K8s resources button
+  const refreshK8sResourcesBtn = document.getElementById('refresh-k8s-resources');
+  if(refreshK8sResourcesBtn && !refreshK8sResourcesBtn.dataset.bound){
+    refreshK8sResourcesBtn.dataset.bound='1';
+    refreshK8sResourcesBtn.addEventListener('click', () => {
+      loadK8sResources();
     });
   }
 
@@ -4113,12 +4105,360 @@ window.uploadPlaybook = async function(file) {
 });
 
 
-
-
 // Generate K8s playbook from template (wrapper function)
 async function generateK8sPlaybook(template) {
   // Call the function from playbook-manager.js directly
   return await generateK8sPlaybookFromTemplate(template);
+}
+
+// ==================== K8s Resources Management ====================
+
+let k8sResourcesData = {
+  pods: [],
+  namespaces: [],
+  workloads: {
+    deployments: [],
+    statefulSets: [],
+    daemonSets: []
+  }
+};
+
+// Show K8s resources section
+function showK8sResources() {
+  document.getElementById('k8s-resources-detail').classList.remove('d-none');
+  loadK8sResources();
+}
+
+// Hide K8s resources section
+function hideK8sResources() {
+  document.getElementById('k8s-resources-detail').classList.add('d-none');
+}
+
+// Load all K8s resources
+async function loadK8sResources() {
+  if (!currentClusterId) return;
+  
+  try {
+    await Promise.all([
+      loadPods(),
+      loadNamespaces(),
+      loadWorkloads()
+    ]);
+  } catch (error) {
+    console.error('Error loading K8s resources:', error);
+  }
+}
+
+// Load pods
+async function loadPods() {
+  try {
+    const response = await fetch(`/admin/clusters/${currentClusterId}/k8s/pods`);
+    const data = await response.json();
+    
+    if (response.ok) {
+      k8sResourcesData.pods = data.pods || [];
+      renderPods();
+      updatePodsCount();
+    } else {
+      showPodsError(data.error || 'Lỗi tải pods');
+    }
+  } catch (error) {
+    showPodsError('Lỗi kết nối: ' + error.message);
+  }
+}
+
+// Load namespaces
+async function loadNamespaces() {
+  try {
+    const response = await fetch(`/admin/clusters/${currentClusterId}/k8s/namespaces`);
+    const data = await response.json();
+    
+    if (response.ok) {
+      k8sResourcesData.namespaces = data.namespaces || [];
+      renderNamespaces();
+      updateNamespacesCount();
+      updatePodsNamespaceFilter();
+    } else {
+      showNamespacesError(data.error || 'Lỗi tải namespaces');
+    }
+  } catch (error) {
+    showNamespacesError('Lỗi kết nối: ' + error.message);
+  }
+}
+
+// Load workloads
+async function loadWorkloads() {
+  try {
+    const response = await fetch(`/admin/clusters/${currentClusterId}/k8s/workloads`);
+    const data = await response.json();
+    
+    if (response.ok) {
+      k8sResourcesData.workloads = {
+        deployments: data.deployments || [],
+        statefulSets: data.statefulSets || [],
+        daemonSets: data.daemonSets || []
+      };
+      renderWorkloads();
+      updateWorkloadsCount();
+    } else {
+      showWorkloadsError(data.error || 'Lỗi tải workloads');
+    }
+  } catch (error) {
+    showWorkloadsError('Lỗi kết nối: ' + error.message);
+  }
+}
+
+// Render pods table
+function renderPods() {
+  const tbody = document.getElementById('pods-tbody');
+  const pods = k8sResourcesData.pods;
+  
+  if (!pods || pods.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" class="text-center text-muted py-3">
+          <i class="bi bi-inbox"></i> Không có pods nào
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  tbody.innerHTML = pods.map(pod => `
+    <tr>
+      <td><span class="badge bg-secondary">${pod.namespace}</span></td>
+      <td><code>${pod.name}</code></td>
+      <td><small>${pod.node || '-'}</small></td>
+      <td>
+        <span class="badge ${getPodStatusBadgeClass(pod.status)}">${pod.status}</span>
+      </td>
+      <td>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-info btn-sm" onclick="describePod('${pod.namespace}', '${pod.name}')" title="Chi tiết">
+            <i class="bi bi-info-circle"></i>
+          </button>
+          <button class="btn btn-outline-danger btn-sm" onclick="deletePod('${pod.namespace}', '${pod.name}')" title="Xóa">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Render namespaces table
+function renderNamespaces() {
+  const tbody = document.getElementById('namespaces-tbody');
+  const namespaces = k8sResourcesData.namespaces;
+  
+  if (!namespaces || namespaces.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="3" class="text-center text-muted py-3">
+          <i class="bi bi-inbox"></i> Không có namespaces nào
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  tbody.innerHTML = namespaces.map(ns => `
+    <tr>
+      <td><code>${ns.name}</code></td>
+      <td>
+        <span class="badge ${getNamespaceStatusBadgeClass(ns.status)}">${ns.status}</span>
+      </td>
+      <td>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-info btn-sm" onclick="describeNamespace('${ns.name}')" title="Chi tiết">
+            <i class="bi bi-info-circle"></i>
+          </button>
+          <button class="btn btn-outline-danger btn-sm" onclick="deleteNamespace('${ns.name}')" title="Xóa">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Render workloads table
+function renderWorkloads() {
+  const tbody = document.getElementById('workloads-tbody');
+  const { deployments, statefulSets, daemonSets } = k8sResourcesData.workloads;
+  
+  const allWorkloads = [
+    ...deployments.map(d => ({ ...d, type: 'Deployment' })),
+    ...statefulSets.map(s => ({ ...s, type: 'StatefulSet' })),
+    ...daemonSets.map(ds => ({ ...ds, type: 'DaemonSet', ready: ds.ready, total: ds.desired }))
+  ];
+  
+  if (allWorkloads.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" class="text-center text-muted py-3">
+          <i class="bi bi-inbox"></i> Không có workloads nào
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  tbody.innerHTML = allWorkloads.map(workload => `
+    <tr>
+      <td><span class="badge bg-primary">${workload.type}</span></td>
+      <td><span class="badge bg-secondary">${workload.namespace}</span></td>
+      <td><code>${workload.name}</code></td>
+      <td>
+        <span class="badge ${getWorkloadStatusBadgeClass(workload.ready, workload.total)}">
+          ${workload.ready}/${workload.total}
+        </span>
+      </td>
+      <td>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-info btn-sm" onclick="describeWorkload('${workload.type.toLowerCase()}', '${workload.namespace}', '${workload.name}')" title="Chi tiết">
+            <i class="bi bi-info-circle"></i>
+          </button>
+          <button class="btn btn-outline-warning btn-sm" onclick="scaleWorkload('${workload.type.toLowerCase()}', '${workload.namespace}', '${workload.name}')" title="Scale">
+            <i class="bi bi-arrows-expand"></i>
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Helper functions for badge classes
+function getPodStatusBadgeClass(status) {
+  switch (status.toLowerCase()) {
+    case 'running': return 'bg-success';
+    case 'pending': return 'bg-warning';
+    case 'failed': case 'error': return 'bg-danger';
+    case 'succeeded': return 'bg-info';
+    default: return 'bg-secondary';
+  }
+}
+
+function getNamespaceStatusBadgeClass(status) {
+  switch (status.toLowerCase()) {
+    case 'active': return 'bg-success';
+    case 'terminating': return 'bg-warning';
+    default: return 'bg-secondary';
+  }
+}
+
+function getWorkloadStatusBadgeClass(ready, total) {
+  if (ready === total && total > 0) return 'bg-success';
+  if (ready > 0) return 'bg-warning';
+  return 'bg-danger';
+}
+
+// Update count badges
+function updatePodsCount() {
+  document.getElementById('pods-count').textContent = k8sResourcesData.pods.length;
+}
+
+function updateNamespacesCount() {
+  document.getElementById('namespaces-count').textContent = k8sResourcesData.namespaces.length;
+}
+
+function updateWorkloadsCount() {
+  const { deployments, statefulSets, daemonSets } = k8sResourcesData.workloads;
+  const total = deployments.length + statefulSets.length + daemonSets.length;
+  document.getElementById('workloads-count').textContent = total;
+}
+
+// Update pods namespace filter
+function updatePodsNamespaceFilter() {
+  const select = document.getElementById('pods-namespace-filter');
+  const namespaces = k8sResourcesData.namespaces.map(ns => ns.name);
+  
+  // Clear existing options except first
+  select.innerHTML = '<option value="">Tất cả namespace</option>';
+  
+  namespaces.forEach(ns => {
+    const option = document.createElement('option');
+    option.value = ns;
+    option.textContent = ns;
+    select.appendChild(option);
+  });
+}
+
+// Error display functions
+function showPodsError(message) {
+  document.getElementById('pods-tbody').innerHTML = `
+    <tr>
+      <td colspan="5" class="text-center text-danger py-3">
+        <i class="bi bi-exclamation-triangle"></i> ${message}
+      </td>
+    </tr>
+  `;
+}
+
+function showNamespacesError(message) {
+  document.getElementById('namespaces-tbody').innerHTML = `
+    <tr>
+      <td colspan="3" class="text-center text-danger py-3">
+        <i class="bi bi-exclamation-triangle"></i> ${message}
+      </td>
+    </tr>
+  `;
+}
+
+function showWorkloadsError(message) {
+  document.getElementById('workloads-tbody').innerHTML = `
+    <tr>
+      <td colspan="5" class="text-center text-danger py-3">
+        <i class="bi bi-exclamation-triangle"></i> ${message}
+      </td>
+    </tr>
+  `;
+}
+
+// Action functions (placeholders)
+function describePod(namespace, name) {
+  alert(`Describe pod: ${namespace}/${name}`);
+}
+
+function deletePod(namespace, name) {
+  if (confirm(`Xóa pod ${namespace}/${name}?`)) {
+    alert(`Delete pod: ${namespace}/${name}`);
+  }
+}
+
+function describeNamespace(name) {
+  alert(`Describe namespace: ${name}`);
+}
+
+function deleteNamespace(name) {
+  if (confirm(`Xóa namespace ${name}?`)) {
+    alert(`Delete namespace: ${name}`);
+  }
+}
+
+function describeWorkload(type, namespace, name) {
+  alert(`Describe ${type}: ${namespace}/${name}`);
+}
+
+function scaleWorkload(type, namespace, name) {
+  const replicas = prompt(`Số replicas mới cho ${type} ${namespace}/${name}:`);
+  if (replicas !== null) {
+    alert(`Scale ${type} ${namespace}/${name} to ${replicas} replicas`);
+  }
+}
+
+// Reset K8s resources data
+function resetK8sResourcesData() {
+  k8sResourcesData = {
+    pods: [],
+    namespaces: [],
+    workloads: {
+      deployments: [],
+      statefulSets: [],
+      daemonSets: []
+    }
+  };
+  hideK8sResources();
 }
 
 
