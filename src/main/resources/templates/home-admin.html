@@ -1265,16 +1265,18 @@
                     <optgroup label="II. Triển khai cluster">
                       <option value="init-master">05 🚀 Khởi tạo master node</option>
                       <option value="install-cni">06 🌐 Cài đặt Calico CNI</option>
+                      <option value="install-flannel">06 🌐 Cài đặt Flannel CNI</option>
                       <option value="join-workers">07 🔗 Thêm worker nodes</option>
                     </optgroup>
                     <optgroup label="III. Kiểm tra & Tùy chọn mở rộng">
-                      <option value="see-cluster">08 👀 Kiểm tra trạng thái cluster</option>
+                      <option value="verify-cluster">08 🧩 Xác minh trạng thái cụm</option>
                       <option value="install-ingress">09 🌍 Cài đặt Nginx Ingress</option>
                       <option value="install-helm">10 📦 Cài đặt Helm 3</option>
                       <option value="setup-storage">11 💾 Thiết lập Storage</option>
                     </optgroup>
                     <optgroup label="IV. Triển khai toàn bộ">
-                      <option value="deploy-full-cluster">🚀 Triển khai toàn bộ cluster (1-8)</option>
+                      <option value="deploy-full-cluster">🚀 Triển khai toàn bộ cluster (0-8, Calico)</option>
+                      <option value="deploy-full-cluster-flannel">🚀 Triển khai toàn bộ cluster (0-8, Flannel)</option>
                     </optgroup>
                     <optgroup label="V. Bảo trì & Reset">
                       <option value="reset-cluster">🧹 Reset toàn bộ cluster</option>

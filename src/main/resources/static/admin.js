@@ -242,6 +242,9 @@ function resetClusterData() {
   if (window.setCurrentClusterId) {
     window.setCurrentClusterId(null);
   }
+  if (window.resetPlaybookUI) {
+    window.resetPlaybookUI();
+  }
   
   // Clear Chi tiết Cluster (cluster detail UI elements)
   const elementsToReset = [
@@ -308,7 +311,7 @@ async function showClusterDetail(clusterId){
   // Reset dữ liệu K8s của cụm trước (tránh hiển thị nhầm)
   k8sRequestToken++; // vô hiệu hóa mọi request trước đó
   resetK8sResourcesData();
-
+  
   // Chuyển đổi sections
   document.getElementById('k8s-list')?.classList.add('d-none');
   document.getElementById('k8s-create')?.classList.add('d-none');
@@ -481,14 +484,14 @@ async function showClusterDetail(clusterId){
       <td>${n.cpu || '-'}</td>
       <td class="${ramColorClass}">${n.ram || '-'}</td>
       <td>${n.disk || '-'}</td>
-        <td class="text-nowrap">
+      <td class="text-nowrap">
           <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">
             <i class="bi bi-trash me-1"></i> Xóa
           </button>
           <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">
             <i class="bi bi-arrow-repeat me-1"></i> Thử lại
           </button>
-        </td>
+      </td>
     `;
     tbody.appendChild(tr);
   });
@@ -582,8 +585,17 @@ async function showClusterDetail(clusterId){
   const refreshK8sResourcesBtn = document.getElementById('refresh-k8s-resources');
   if(refreshK8sResourcesBtn && !refreshK8sResourcesBtn.dataset.bound){
     refreshK8sResourcesBtn.dataset.bound='1';
-    refreshK8sResourcesBtn.addEventListener('click', () => {
-      loadK8sResources();
+    refreshK8sResourcesBtn.addEventListener('click', async () => {
+      // Show inline refreshing state
+      const originalHtml = refreshK8sResourcesBtn.innerHTML;
+      refreshK8sResourcesBtn.disabled = true;
+      refreshK8sResourcesBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Đang làm mới...';
+      try {
+        await loadK8sResources();
+      } finally {
+        refreshK8sResourcesBtn.disabled = false;
+        refreshK8sResourcesBtn.innerHTML = originalHtml;
+      }
     });
   }
 
@@ -4104,9 +4116,9 @@ window.uploadPlaybook = async function(file) {
         if (!sudoCheckData.success || !sudoCheckData.hasNopasswd) {
           // Không có sudo NOPASSWD, yêu cầu nhập password
           sudoPassword = prompt('Server không có SSH key hoặc sudo NOPASSWD. Nhập mật khẩu sudo để rollback cấu hình:') || '';
-          if (!sudoPassword) {
+    if (!sudoPassword) {
             // User đã hủy nhập password
-            return;
+      return;
           }
         } else {
           // SSH key với sudo NOPASSWD - không cần mật khẩu
@@ -4246,31 +4258,31 @@ window.uploadPlaybook = async function(file) {
         }
       })
     .then(response => response.json())
-      .then(data => {
+    .then(data => {
         const now = new Date().toLocaleTimeString('vi-VN');
-        if (data.success) {
+      if (data.success) {
           // Backend đã trả về raw content, không cần decode escape
-          const cfgEl = document.getElementById('ansible-cfg-editor');
-          const hostsEl = document.getElementById('ansible-inventory-editor');
-          const varsEl = document.getElementById('ansible-vars-editor');
-          
+        const cfgEl = document.getElementById('ansible-cfg-editor');
+        const hostsEl = document.getElementById('ansible-inventory-editor');
+        const varsEl = document.getElementById('ansible-vars-editor');
+        
           if(cfgEl) cfgEl.value = data.cfg || '';
           if(hostsEl) hostsEl.value = data.hosts || '';
           if(varsEl) varsEl.value = data.vars || '';
           
           // Update status to success
           updateConfigStatus('success', 'Cấu hình đã được tải thành công', now);
-        } else {
-          // Silently handle error - don't show alert for read operation
-          console.warn('Could not read config:', data.message);
+      } else {
+        // Silently handle error - don't show alert for read operation
+        console.warn('Could not read config:', data.message);
           updateConfigStatus('warning', 'Không thể tải cấu hình: ' + (data.message || 'Không xác định'), now);
-        }
-      })
-      .catch(error => {
+      }
+    })
+    .catch(error => {
         const now = new Date().toLocaleTimeString('vi-VN');
-        console.error('Error reading config:', error);
+      console.error('Error reading config:', error);
         updateConfigStatus('error', 'Lỗi khi tải cấu hình: ' + (error.message || 'Không xác định'), now);
-      })
+    })
     .finally(() => {
       // Reset reload button state
       const reloadConfigBtn = document.getElementById('reload-config-btn');
@@ -4315,12 +4327,22 @@ let k8sResourcesData = {
   }
 };
 
+// Filters state for K8s resources
+const k8sFilters = {
+  podsSearch: '',
+  podsNamespace: '',
+  namespacesSearch: '',
+  workloadsSearch: '',
+  workloadsType: ''
+};
+
 // Token để vô hiệu hóa kết quả fetch cũ khi chuyển cụm
 let k8sRequestToken = 0;
 
 // Show K8s resources section
 function showK8sResources() {
   document.getElementById('k8s-resources-detail').classList.remove('d-none');
+  bindK8sResourceFilters();
   loadK8sResources();
 }
 
@@ -4410,7 +4432,12 @@ async function loadWorkloads(token) {
 // Render pods table
 function renderPods() {
   const tbody = document.getElementById('pods-tbody');
-  const pods = k8sResourcesData.pods;
+  let pods = k8sResourcesData.pods;
+  // Apply filters
+  const q = (k8sFilters.podsSearch || '').toLowerCase();
+  const nsFilter = k8sFilters.podsNamespace || '';
+  if (nsFilter) pods = pods.filter(p => (p.namespace || '') === nsFilter);
+  if (q) pods = pods.filter(p => (p.name || '').toLowerCase().includes(q) || (p.node || '').toLowerCase().includes(q));
   
   if (!pods || pods.length === 0) {
     tbody.innerHTML = `
@@ -4448,7 +4475,10 @@ function renderPods() {
 // Render namespaces table
 function renderNamespaces() {
   const tbody = document.getElementById('namespaces-tbody');
-  const namespaces = k8sResourcesData.namespaces;
+  let namespaces = k8sResourcesData.namespaces;
+  // Apply filters
+  const q = (k8sFilters.namespacesSearch || '').toLowerCase();
+  if (q) namespaces = namespaces.filter(ns => (ns.name || '').toLowerCase().includes(q) || (ns.status || '').toLowerCase().includes(q));
   
   if (!namespaces || namespaces.length === 0) {
     tbody.innerHTML = `
@@ -4491,8 +4521,14 @@ function renderWorkloads() {
     ...statefulSets.map(s => ({ ...s, type: 'StatefulSet' })),
     ...daemonSets.map(ds => ({ ...ds, type: 'DaemonSet', ready: ds.ready, total: ds.desired }))
   ];
-  
-  if (allWorkloads.length === 0) {
+  // Apply filters
+  const q = (k8sFilters.workloadsSearch || '').toLowerCase();
+  const type = k8sFilters.workloadsType || '';
+  let filtered = allWorkloads;
+  if (type) filtered = filtered.filter(w => w.type.toLowerCase() === type.toLowerCase());
+  if (q) filtered = filtered.filter(w => (w.name || '').toLowerCase().includes(q) || (w.namespace || '').toLowerCase().includes(q));
+
+  if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
         <td colspan="5" class="text-center text-muted py-3">
@@ -4503,7 +4539,7 @@ function renderWorkloads() {
     return;
   }
   
-  tbody.innerHTML = allWorkloads.map(workload => `
+  tbody.innerHTML = filtered.map(workload => `
     <tr>
       <td><span class="badge bg-primary">${workload.type}</span></td>
       <td><span class="badge bg-secondary">${workload.namespace}</span></td>
@@ -4525,6 +4561,25 @@ function renderWorkloads() {
       </td>
     </tr>
   `).join('');
+}
+
+// Bind filters with debounce
+function bindK8sResourceFilters(){
+  const podsSearch = document.getElementById('pods-search');
+  const podsNs = document.getElementById('pods-namespace-filter');
+  const nsSearch = document.getElementById('namespaces-search');
+  const wlSearch = document.getElementById('workloads-search');
+  const wlType = document.getElementById('workloads-type-filter');
+  
+  const debounce = (fn, delay=300) => {
+    let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+  };
+  
+  if (podsSearch && !podsSearch.dataset.bound){ podsSearch.dataset.bound='1'; podsSearch.addEventListener('input', debounce(e=>{ k8sFilters.podsSearch = e.target.value || ''; renderPods(); })); }
+  if (podsNs && !podsNs.dataset.bound){ podsNs.dataset.bound='1'; podsNs.addEventListener('change', e=>{ k8sFilters.podsNamespace = e.target.value || ''; renderPods(); }); }
+  if (nsSearch && !nsSearch.dataset.bound){ nsSearch.dataset.bound='1'; nsSearch.addEventListener('input', debounce(e=>{ k8sFilters.namespacesSearch = e.target.value || ''; renderNamespaces(); })); }
+  if (wlSearch && !wlSearch.dataset.bound){ wlSearch.dataset.bound='1'; wlSearch.addEventListener('input', debounce(e=>{ k8sFilters.workloadsSearch = e.target.value || ''; renderWorkloads(); })); }
+  if (wlType && !wlType.dataset.bound){ wlType.dataset.bound='1'; wlType.addEventListener('change', e=>{ k8sFilters.workloadsType = e.target.value || ''; renderWorkloads(); }); }
 }
 
 // Helper functions for badge classes
