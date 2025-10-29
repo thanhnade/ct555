@@ -1212,7 +1212,7 @@ async function generateK8sPlaybookFromTemplate(template) {
         msg: "{{ host_info.stdout_lines }}"
 
 ---
-- name: ⚙️ Bước 2-3: Kernel, sysctl, containerd
+- name: ⚙️ Bước 2 – Cấu hình kernel & containerd
   hosts: all
   become: yes
   gather_facts: no
@@ -1283,7 +1283,7 @@ async function generateK8sPlaybookFromTemplate(template) {
         state: restarted
 
 ---
-- name: ☸️ Bước 4: Cài đặt Kubernetes
+- name: ☸️ Bước 3 – Cài đặt Kubernetes core
   hosts: all
   become: yes
   gather_facts: no
@@ -1328,7 +1328,7 @@ async function generateK8sPlaybookFromTemplate(template) {
       command: apt-mark hold kubelet kubeadm kubectl
 
 ---
-- name: 🚀 Bước 5: Khởi tạo master
+- name: 🚀 Bước 4 – Khởi tạo Master node
   hosts: master
   become: yes
   gather_facts: yes
@@ -1390,7 +1390,7 @@ async function generateK8sPlaybookFromTemplate(template) {
             remote_src: yes
 
 ---
-- name: 🌐 Bước 6: Cài đặt CNI (Calico)
+- name: 🌐 Bước 5 – Cài đặt Calico CNI
   hosts: master
   become: yes
   gather_facts: false
@@ -1425,7 +1425,7 @@ async function generateK8sPlaybookFromTemplate(template) {
       until: calico_running.stdout | int > 0
 
 ---
-- name: 🔗 Bước 7: Join workers
+- name: 🔗 Bước 6 – Join Worker nodes
   hosts: worker
   become: yes
   gather_facts: false
@@ -1442,7 +1442,7 @@ async function generateK8sPlaybookFromTemplate(template) {
 
     - name: Ghi lệnh join ra file
       copy:
-        content: "{{ hostvars[groups['master'][0]].join_cmd.stdout }} --ignore-preflight-errors=all"
+        content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
         dest: "{{ join_script }}"
         mode: '0755'
 
@@ -1465,7 +1465,7 @@ async function generateK8sPlaybookFromTemplate(template) {
         enabled: yes
 
 ---
-- name: 🧩 Bước 8: Xác minh trạng thái cụm
+- name: 🧩 Bước 7 – Kiểm tra trạng thái cụm Kubernetes
   hosts: master
   become: yes
   gather_facts: false
@@ -1489,43 +1489,64 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: pods_info
       changed_when: false
 
-    - name: Hiển thị thông tin cụm
+    - name: ✅ Hiển thị thông tin cụm
       debug:
         msg:
-          - "📦 Node List:"
+          - "📦 Danh sách Node:"
           - "{{ nodes_info.stdout_lines }}"
           - "📦 Pods trong namespace kube-system:"
           - "{{ pods_info.stdout_lines }}"
 
-    - name: Kiểm tra trạng thái node
-      shell: kubectl get nodes --no-headers | awk '{print $2}' | sort | uniq -c
+    - name: 🧠 Kiểm tra trạng thái node
+      shell: kubectl get nodes --no-headers | awk '{print $1, $2}' | column -t
       register: node_status
       changed_when: false
 
-    - name: Báo cáo tình trạng node
+    - name: 📊 Báo cáo tình trạng node
       debug:
         msg: |
           {% if 'NotReady' in node_status.stdout %}
           ⚠️ Một số node chưa sẵn sàng:
           {{ node_status.stdout }}
+          ➡️ Hãy kiểm tra lại kubelet hoặc CNI (Flannel/Calico) trên các node này.
           {% else %}
-          🎯 Tất cả node đã ở trạng thái Ready!
+          ✅ 🎯 Tất cả node đều ở trạng thái Ready!
+          {{ node_status.stdout }}
           {% endif %}
 
-    - name: Kiểm tra pod lỗi trong kube-system
+    - name: 🔍 Kiểm tra pod lỗi trong kube-system
       shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
       register: bad_pods
       changed_when: false
 
-    - name: Báo cáo pod lỗi
+    - name: 📋 Báo cáo pod lỗi
       debug:
         msg: |
           {% if bad_pods.stdout %}
-          ⚠️ Một số pod chưa ổn định hoặc đang lỗi:
+          ⚠️ Một số pod trong kube-system chưa ổn định hoặc đang lỗi:
           {{ bad_pods.stdout }}
+          ➡️ Hãy kiểm tra log pod để xác định nguyên nhân.
           {% else %}
-          ✅ Tất cả pod trong kube-system đều đang Running hoặc Completed!
-          {% endif %}`
+          ✅ 🟢 Tất cả pod trong kube-system đều Running hoặc Completed!
+          {% endif %}
+
+    - name: 🧾 Lấy log của pod lỗi (nếu có)
+      when: bad_pods.stdout != ""
+      shell: |
+        echo "====== 🧠 LOG POD LỖI ======"
+        for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
+          echo "---------------------------------------------"
+          echo "📄 Pod: $pod"
+          kubectl logs -n kube-system $pod --tail=30 || echo "❌ Không thể lấy log cho $pod"
+          echo
+        done
+      register: bad_pods_logs
+      ignore_errors: yes
+
+    - name: 🧠 Log chi tiết pod lỗi
+      when: bad_pods.stdout != ""
+      debug:
+        msg: "{{ bad_pods_logs.stdout_lines | default(['⚠️ Không có log lỗi hoặc pod đã khởi động lại.']) }}"`
   ,
 
     'deploy-full-cluster-flannel': `---
@@ -1890,6 +1911,16 @@ async function generateK8sPlaybookFromTemplate(template) {
     'deploy-full-cluster-flannel': 'deploy-full-cluster-flannel',
     'reset-cluster': '00-reset-cluster'
   };
+  
+  // Get the actual template key
+  const actualTemplate = templateMapping[template] || template;
+  
+  const playbookContent = templates[actualTemplate];
+  if (!playbookContent) {
+    throw new Error('Template không tồn tại');
+  }
+  
+  const filename = actualTemplate + '.yml';
   
   // Check if playbook already exists
   const exists = await checkPlaybookExists(filename);
