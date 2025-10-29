@@ -42,7 +42,7 @@ async function loadUsers(){
           <option ${u.role==='ADMIN'?'selected':''}>ADMIN</option>
         </select>
       </td>
-      <td><input type="number" class="form-control form-control-sm" min="100" step="100" value="${u.dataLimitMb}" data-id="${u.id}" data-field="dataLimitMb" /></td>
+      <td><input type="number" class="form-control form-control-sm" min="100" step="1" value="${u.dataLimitMb}" data-id="${u.id}" data-field="dataLimitMb" /></td>
       <td><input type="text" class="form-control form-control-sm" value="${u.pathOnServer||''}" placeholder="/data/${u.username}" data-id="${u.id}" data-field="pathOnServer" /></td>
       <td class="text-nowrap">
         <button class="btn btn-sm btn-primary me-1" onclick="saveUser(${u.id})">Lưu</button>
@@ -53,6 +53,17 @@ async function loadUsers(){
     `;
     tbody.appendChild(tr);
   });
+}
+
+
+function getRoleBadge(role) {
+  const roleMap = {
+    'ADMIN': '<span class="badge bg-primary">👑 Admin</span>',
+    'OPERATOR': '<span class="badge bg-warning">⚙️ Operator</span>',
+    'VIEWER': '<span class="badge bg-info">👁️ Viewer</span>',
+    'CLIENT': '<span class="badge bg-secondary">👤 Client</span>'
+  };
+  return roleMap[role] || '<span class="badge bg-secondary">❓ Không xác định</span>';
 }
 
 // Server Management
@@ -294,23 +305,24 @@ async function showClusterDetail(clusterId){
     window.setCurrentClusterId(clusterId);
   }
   
+  // Reset dữ liệu K8s của cụm trước (tránh hiển thị nhầm)
+  k8sRequestToken++; // vô hiệu hóa mọi request trước đó
+  resetK8sResourcesData();
+
   // Chuyển đổi sections
   document.getElementById('k8s-list')?.classList.add('d-none');
   document.getElementById('k8s-create')?.classList.add('d-none');
   document.getElementById('k8s-assign')?.classList.add('d-none');
   document.getElementById('k8s-detail')?.classList.remove('d-none');
-  // Luôn hiển thị phần Quản lý tài nguyên Kubernetes khi mở chi tiết cụm
-  showK8sResources();
-
 
   // Hiển thị loading state
   const msgElement = document.getElementById('cd-msg');
   if(msgElement) {
-    // Chỉ dùng loading trong bảng nodes; không hiển thị spinner tổng
-    msgElement.innerHTML = '';
-    msgElement.className = 'small mb-2';
+    msgElement.innerHTML = '<span class="text-info">🔄 Đang tải chi tiết cluster...</span>';
+    msgElement.className = 'alert alert-info mb-2';
   }
 
+  // BƯỚC 1: Load Chi tiết Cluster trước
   const detail = await fetchJSON(`/admin/clusters/${clusterId}/detail`).catch(()=>null);
   if(!detail){
     if(msgElement) { 
@@ -320,16 +332,35 @@ async function showClusterDetail(clusterId){
     return;
   }
   
-  // Xóa loading state khi có dữ liệu
+  // Xóa loading state khi có dữ liệu cluster
   if(msgElement) {
     msgElement.innerHTML = '';
     msgElement.className = 'small mb-2';
   }
+  
+  // Hiển thị thông tin cluster
   document.getElementById('cd-name').textContent = detail.name || '';
   document.getElementById('cd-master').textContent = detail.masterNode || '';
   document.getElementById('cd-workers').textContent = detail.workerCount ?? 0;
   document.getElementById('cd-status').textContent = detail.status || '';
-  document.getElementById('cd-version').textContent = detail.version || '';
+  (function(){
+    const verEl = document.getElementById('cd-version');
+    const version = (detail.version || '').trim();
+    if (!version) {
+      // Khi chưa có version, hiển thị CTA cài đặt K8s
+      verEl.innerHTML = `
+        <span class="text-muted">Chưa cài đặt</span>
+        <button type="button" class="btn btn-sm btn-outline-primary ms-2" data-bs-toggle="modal" data-bs-target="#playbookManagerModal">
+          <i class="bi bi-gear"></i> Cài đặt K8s
+        </button>
+      `;
+    } else {
+      verEl.textContent = version;
+    }
+  })();
+
+  // BƯỚC 2: Load K8s Resources sau khi có chi tiết cluster
+  showK8sResources();
 
   // Tự động kiểm tra trạng thái Ansible và load playbooks sau khi có dữ liệu cluster
   // Chỉ gọi API nếu cluster có nodes
@@ -426,37 +457,41 @@ async function showClusterDetail(clusterId){
       else if (statusLabel === 'NotReady') notReadyCount++;
       else if (statusLabel === 'UNREGISTERED') unregisteredCount++;
       else offlineCount++;
-
-      // Color coding cho RAM usage
-      const ramPercentage = n.ramPercentage || 0;
-      let ramColorClass = '';
-      if (ramPercentage >= 90) {
+    
+    // Color coding cho RAM usage
+    const ramPercentage = n.ramPercentage || 0;
+    let ramColorClass = '';
+    if (ramPercentage >= 90) {
         ramColorClass = 'text-danger fw-bold';
-      } else if (ramPercentage >= 80) {
+    } else if (ramPercentage >= 80) {
         ramColorClass = 'text-danger';
-      } else if (ramPercentage >= 70) {
+    } else if (ramPercentage >= 70) {
         ramColorClass = 'text-warning';
-      } else if (ramPercentage >= 50) {
+    } else if (ramPercentage >= 50) {
         ramColorClass = 'text-info';
-      } else {
+    } else {
         ramColorClass = 'text-success';
-      }
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
+    }
+    
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
         <td title="${n.username||''}">${n.ip}</td>
-        <td>${n.role}</td>
+      <td>${n.role}</td>
         <td><span class="badge bg-${statusBadge}" title="${statusLabel==='UNREGISTERED'?'Node chưa đăng ký trong cụm (không thấy trong kubectl)':''}">${statusLabel}</span></td>
-        <td>${n.cpu || '-'}</td>
-        <td class="${ramColorClass}">${n.ram || '-'}</td>
-        <td>${n.disk || '-'}</td>
+      <td>${n.cpu || '-'}</td>
+      <td class="${ramColorClass}">${n.ram || '-'}</td>
+      <td>${n.disk || '-'}</td>
         <td class="text-nowrap">
-          <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">Delete</button>
-          <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">Retry</button>
+          <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">
+            <i class="bi bi-trash me-1"></i> Xóa
+          </button>
+          <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">
+            <i class="bi bi-arrow-repeat me-1"></i> Thử lại
+          </button>
         </td>
-      `;
-      tbody.appendChild(tr);
-    });
+    `;
+    tbody.appendChild(tr);
+  });
 
     // Log tóm tắt quan trọng, không lộ dữ liệu máy chủ
     try {
@@ -478,6 +513,68 @@ async function showClusterDetail(clusterId){
       
       // Reload cả cluster list và server assignment table để cập nhật dữ liệu
       await Promise.all([loadClusterList(), loadClustersAndServers()]);
+    });
+  }
+
+  // Reload button
+  const reloadBtn = document.getElementById('cd-reload');
+  if(reloadBtn && !reloadBtn.dataset.bound){
+    reloadBtn.dataset.bound='1';
+    reloadBtn.addEventListener('click', async () => {
+      if (!currentClusterId) return;
+      
+      // Disable button và hiển thị loading
+      reloadBtn.disabled = true;
+      const originalText = reloadBtn.innerHTML;
+      reloadBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Đang reload...';
+      
+      // Pre-reset: header fields, nodes table, K8s resources loading
+      try {
+        const headerIds = ['cd-name','cd-master','cd-workers','cd-status','cd-version'];
+        headerIds.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = '—';
+        });
+        const msgElement = document.getElementById('cd-msg');
+        if (msgElement) {
+          msgElement.innerHTML = '<span class="text-info">🔄 Đang tải chi tiết cluster...</span>';
+          msgElement.className = 'alert alert-info mb-2';
+        }
+        const tbody = document.getElementById('cd-nodes-tbody');
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" class="text-center py-3">
+                <div class="d-inline-flex align-items-center text-muted">
+                  <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                  <span>Đang tải dữ liệu nodes...</span>
+                </div>
+              </td>
+            </tr>
+          `;
+        }
+        if (typeof showK8sResourcesLoading === 'function') {
+          showK8sResourcesLoading();
+        }
+      } catch(_) {}
+      
+      try {
+        // Reload cluster detail
+        await showClusterDetail(currentClusterId);
+        console.log('[cluster] Reloaded cluster detail successfully');
+      } catch (error) {
+        console.error('[cluster] Error reloading cluster detail:', error);
+        // Hiển thị thông báo lỗi
+        const msgElement = document.getElementById('cd-msg');
+        if (msgElement) {
+          msgElement.innerHTML = '<span class="text-danger">❌ Lỗi reload: ' + error.message + '</span>';
+          msgElement.className = 'alert alert-danger mb-2';
+        }
+      } finally {
+        // Restore button
+        reloadBtn.disabled = false;
+        reloadBtn.innerHTML = originalText;
+      }
     });
   }
 
@@ -581,9 +678,13 @@ async function showClusterDetail(clusterId){
   if(addNodeBtn && !addNodeBtn.dataset.clusterBound) {
     addNodeBtn.dataset.clusterBound = '1';
     addNodeBtn.addEventListener('click', () => {
-      // Lưu cluster ID và tên vào modal
-      document.getElementById('add-node-cluster-id').value = clusterId;
-      document.getElementById('add-node-cluster-name').textContent = detail.name || '';
+      // Lưu cluster ID và tên vào modal (đọc từ state/UI hiện tại để tránh capture sai cụm)
+      const currentId = window.currentClusterId || currentClusterId;
+      const currentName = (document.getElementById('cd-name')?.textContent || '').trim();
+      const idInput = document.getElementById('add-node-cluster-id');
+      const nameSpan = document.getElementById('add-node-cluster-name');
+      if (idInput) idInput.value = currentId ?? '';
+      if (nameSpan) nameSpan.textContent = currentName;
       
       // Reset form thêm node mới
       const form = document.getElementById('add-node-form');
@@ -1458,9 +1559,48 @@ async function createUser(ev){
     dataLimitMb: parseInt(form.dataLimitMb.value, 10),
     pathOnServer: form.pathOnServer.value.trim() || null
   };
+  
+  try {
   await fetchJSON('/admin/users', {method: 'POST', body: JSON.stringify(body)});
   form.reset();
   loadUsers();
+    showCreateUserAlert('Thêm người dùng thành công!', 'success');
+  } catch (error) {
+    showCreateUserAlert(error.message, 'danger');
+  }
+}
+
+function showCreateUserAlert(message, type) {
+  const alertDiv = document.getElementById('create-user-alert');
+  const messageSpan = document.getElementById('create-user-message');
+  
+  // Remove existing alert classes
+  alertDiv.classList.remove('alert-success', 'alert-danger', 'alert-warning', 'alert-info');
+  
+  // Add new alert class
+  alertDiv.classList.add(`alert-${type}`);
+  
+  // Set message
+  messageSpan.textContent = message;
+  
+  // Show alert
+  alertDiv.style.display = 'block';
+  alertDiv.classList.add('show');
+  
+  // Auto hide after 5 seconds for success messages
+  if (type === 'success') {
+    setTimeout(() => {
+      hideCreateUserAlert();
+    }, 5000);
+  }
+}
+
+function hideCreateUserAlert() {
+  const alertDiv = document.getElementById('create-user-alert');
+  alertDiv.classList.remove('show');
+  setTimeout(() => {
+    alertDiv.style.display = 'none';
+  }, 150);
 }
 
 async function saveUser(id){
@@ -1485,6 +1625,7 @@ async function deleteUser(id){
   loadUsers();
 }
 
+
 async function viewActivities(id, username){
   const data = await fetchJSON(`/admin/users/${id}/activities`);
   const list = document.getElementById('activity-list');
@@ -1505,6 +1646,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const form = document.getElementById('create-user-form');
   form.addEventListener('submit', createUser);
   loadUsers();
+  
+  // Alert close button event listener
+  const alertCloseBtn = document.querySelector('#create-user-alert .btn-close');
+  if (alertCloseBtn) {
+    alertCloseBtn.addEventListener('click', hideCreateUserAlert);
+  }
+  
   
   // Tự động kết nối các máy chủ khi đăng nhập vào home-admin
   async function autoConnectServers() {
@@ -1547,7 +1695,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(autoConnectServers, 45000);
   
   // Section toggling
-  const sectionIds = ['user','server','k8s','service','app','monitor'];
+  const sectionIds = ['user','server','k8s','app','monitor'];
   async function showSection(key){
     sectionIds.forEach(id => {
       const el = document.getElementById('section-'+id);
@@ -1568,9 +1716,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       const href = a.getAttribute('href') || '';
       if(href.startsWith('#')){
         const key = href.replace('#','');
-        if(['user','server','k8s','service','app','monitor'].includes(key)){
+        if(['user','server','k8s','app','monitor'].includes(key)){
           e.preventDefault();
           showSection(key);
+          document.querySelector('.navbar-collapse')?.classList.remove('show');
+        } else if(['svc-list','svc-actions','svc-logs'].includes(key)){
+          e.preventDefault();
+          showSection('server');
+          // Scroll to specific service section
+          setTimeout(() => {
+            const targetElement = document.getElementById(key);
+            if(targetElement) {
+              targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
+          document.querySelector('.navbar-collapse')?.classList.remove('show');
+        } else if(['k8s-ansible','k8s-playbook','k8s-namespace','k8s-pods','k8s-service'].includes(key)){
+          e.preventDefault();
+          showSection('k8s');
+          // Scroll to specific k8s section
+          setTimeout(() => {
+            const targetElement = document.getElementById(key);
+            if(targetElement) {
+              targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
+          document.querySelector('.navbar-collapse')?.classList.remove('show');
+        } else if(['app-update','app-namespace','app-deployment','app-service','app-domain','app-autoscale','app-logs'].includes(key)){
+          e.preventDefault();
+          showSection('app');
+          // Scroll to specific app section
+          setTimeout(() => {
+            const targetElement = document.getElementById(key);
+            if(targetElement) {
+              targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
+          document.querySelector('.navbar-collapse')?.classList.remove('show');
+        } else if(['server-monitor','performance','resource-usage','alerts','notifications','charts','export'].includes(key)){
+          e.preventDefault();
+          showSection('monitor');
+          // Scroll to specific monitor section
+          setTimeout(() => {
+            const targetElement = document.getElementById(key);
+            if(targetElement) {
+              targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
           document.querySelector('.navbar-collapse')?.classList.remove('show');
         }
       }
@@ -4123,6 +4315,9 @@ let k8sResourcesData = {
   }
 };
 
+// Token để vô hiệu hóa kết quả fetch cũ khi chuyển cụm
+let k8sRequestToken = 0;
+
 // Show K8s resources section
 function showK8sResources() {
   document.getElementById('k8s-resources-detail').classList.remove('d-none');
@@ -4137,12 +4332,13 @@ function hideK8sResources() {
 // Load all K8s resources
 async function loadK8sResources() {
   if (!currentClusterId) return;
-  
+  // Tăng token để vô hiệu hóa mọi request cũ
+  const myToken = ++k8sRequestToken;
   try {
     await Promise.all([
-      loadPods(),
-      loadNamespaces(),
-      loadWorkloads()
+      loadPods(myToken),
+      loadNamespaces(myToken),
+      loadWorkloads(myToken)
     ]);
   } catch (error) {
     console.error('Error loading K8s resources:', error);
@@ -4150,11 +4346,12 @@ async function loadK8sResources() {
 }
 
 // Load pods
-async function loadPods() {
+async function loadPods(token) {
   try {
     const response = await fetch(`/admin/clusters/${currentClusterId}/k8s/pods`);
     const data = await response.json();
     
+    if (token !== k8sRequestToken) return; // bỏ kết quả cũ
     if (response.ok) {
       k8sResourcesData.pods = data.pods || [];
       renderPods();
@@ -4168,11 +4365,12 @@ async function loadPods() {
 }
 
 // Load namespaces
-async function loadNamespaces() {
+async function loadNamespaces(token) {
   try {
     const response = await fetch(`/admin/clusters/${currentClusterId}/k8s/namespaces`);
     const data = await response.json();
     
+    if (token !== k8sRequestToken) return; // bỏ kết quả cũ
     if (response.ok) {
       k8sResourcesData.namespaces = data.namespaces || [];
       renderNamespaces();
@@ -4187,11 +4385,12 @@ async function loadNamespaces() {
 }
 
 // Load workloads
-async function loadWorkloads() {
+async function loadWorkloads(token) {
   try {
     const response = await fetch(`/admin/clusters/${currentClusterId}/k8s/workloads`);
     const data = await response.json();
     
+    if (token !== k8sRequestToken) return; // bỏ kết quả cũ
     if (response.ok) {
       k8sResourcesData.workloads = {
         deployments: data.deployments || [],
@@ -4235,10 +4434,10 @@ function renderPods() {
       <td>
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-info btn-sm" onclick="describePod('${pod.namespace}', '${pod.name}')" title="Chi tiết">
-            <i class="bi bi-info-circle"></i>
+            <i class="bi bi-info-circle me-1"></i> Chi tiết
           </button>
           <button class="btn btn-outline-danger btn-sm" onclick="deletePod('${pod.namespace}', '${pod.name}')" title="Xóa">
-            <i class="bi bi-trash"></i>
+            <i class="bi bi-trash me-1"></i> Xóa
           </button>
         </div>
       </td>
@@ -4271,10 +4470,10 @@ function renderNamespaces() {
       <td>
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-info btn-sm" onclick="describeNamespace('${ns.name}')" title="Chi tiết">
-            <i class="bi bi-info-circle"></i>
+            <i class="bi bi-info-circle me-1"></i> Chi tiết
           </button>
           <button class="btn btn-outline-danger btn-sm" onclick="deleteNamespace('${ns.name}')" title="Xóa">
-            <i class="bi bi-trash"></i>
+            <i class="bi bi-trash me-1"></i> Xóa
           </button>
         </div>
       </td>
@@ -4317,10 +4516,10 @@ function renderWorkloads() {
       <td>
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-info btn-sm" onclick="describeWorkload('${workload.type.toLowerCase()}', '${workload.namespace}', '${workload.name}')" title="Chi tiết">
-            <i class="bi bi-info-circle"></i>
+            <i class="bi bi-info-circle me-1"></i> Chi tiết
           </button>
           <button class="btn btn-outline-warning btn-sm" onclick="scaleWorkload('${workload.type.toLowerCase()}', '${workload.namespace}', '${workload.name}')" title="Scale">
-            <i class="bi bi-arrows-expand"></i>
+            <i class="bi bi-arrows-expand me-1"></i> Scale
           </button>
         </div>
       </td>

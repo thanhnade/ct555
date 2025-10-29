@@ -30,54 +30,81 @@
             <a class="nav-link dropdown-toggle" href="#user" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">👤User Management</a>
             <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="#user-list">Danh sách user</a></li>
-              <li><a class="dropdown-item" href="#user-create">Thêm/Sửa/Xoá user</a></li>
-              <li><a class="dropdown-item" href="#user-quota">Cấp quota</a></li>
+              <li><h6 class="dropdown-header">👥 Quản lý Người dùng</h6></li>
+              <li><a class="dropdown-item" href="#user-list">📋 Danh sách người dùng</a></li>
+              <li><a class="dropdown-item" href="#user-create">➕ Thêm người dùng mới</a></li>
             </ul>
           </li>
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#server" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">🖥️Server Management</a>
             <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="#server-list">Danh sách server</a></li>
-              <li><a class="dropdown-item" href="#server-crud">Thêm/Xoá server</a></li>
-
+              <li><h6 class="dropdown-header">📡 Quản lý Server</h6></li>
+              <li><a class="dropdown-item" href="#server-list">📋 Danh sách server</a></li>
+              <li><a class="dropdown-item" href="#server-crud">➕ Thêm server mới</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><h6 class="dropdown-header">⚙️ Quản lý Dịch vụ</h6></li>
+              <li><a class="dropdown-item" href="#svc-list">📋 Danh sách dịch vụ</a></li>
+              <li><a class="dropdown-item" href="#svc-actions">▶️ Điều khiển dịch vụ</a></li>
+              <li><a class="dropdown-item" href="#svc-logs">📄 Xem log dịch vụ</a></li>
             </ul>
           </li>
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#k8s" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">☸️Kubernetes Cluster</a>
             <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="#k8s-create">Tạo cluster</a></li>
-              <li><a class="dropdown-item" href="#k8s-status">Xem trạng thái cluster</a></li>
-              <li><a class="dropdown-item" href="#k8s-add-node">Thêm node</a></li>
-              <li><a class="dropdown-item" href="#k8s-delete">Xoá cluster</a></li>
-            </ul>
-          </li>
-          <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#service" role="button" data-bs-toggle="dropdown"
-              aria-expanded="false">⚙️Service Management</a>
-            <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="#svc-list">Danh sách dịch vụ</a></li>
-              <li><a class="dropdown-item" href="#svc-actions">Start/Stop/Restart</a></li>
-              <li><a class="dropdown-item" href="#svc-logs">Xem log dịch vụ</a></li>
+              <li><h6 class="dropdown-header">🏗️ Quản lý Cluster</h6></li>
+              <li><a class="dropdown-item" href="#k8s-create">🚀 Tạo Cluster mới</a></li>
+              <li><a class="dropdown-item" href="#k8s-status">📊 Xem Trạng thái</a></li>
+              <li><a class="dropdown-item" href="#k8s-add-node">➕ Thêm Node</a></li>
+              <li><a class="dropdown-item" href="#k8s-delete">🗑️ Xóa Cluster</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><h6 class="dropdown-header">🔧 Cài đặt & Cấu hình</h6></li>
+              <li><a class="dropdown-item" href="#k8s-ansible">⚙️ Cấu hình Ansible</a></li>
+              <li><a class="dropdown-item" href="#k8s-playbook">📝 Quản lý Playbook</a></li>
+              <li><a class="dropdown-item" href="#k8s-namespace">🧱 Quản lý Namespace</a></li>
+              <li><a class="dropdown-item" href="#k8s-pods">📦 Quản lý Pods & Workloads</a></li>
+              <li><a class="dropdown-item" href="#k8s-service">🌐 Quản lý Service / Ingress</a></li>
             </ul>
           </li>
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#app" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">📦App Deployment</a>
             <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="#app-list">Danh sách app</a></li>
-              <li><a class="dropdown-item" href="#app-deploy">Triển khai app</a></li>
-              <li><a class="dropdown-item" href="#app-ns">Quản lý namespace/quota</a></li>
+              <li><h6 class="dropdown-header">🚀 Triển khai Ứng dụng</h6></li>
+              <li><a class="dropdown-item" href="#app-list">📋 Danh sách Ứng dụng</a></li>
+              <li><a class="dropdown-item" href="#app-deploy">➕ Triển khai Mới</a></li>
+              <li><a class="dropdown-item" href="#app-update">🔄 Cập nhật / Rollback Ứng dụng</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><h6 class="dropdown-header">🏗️ Quản lý Tài nguyên</h6></li>
+              <li><a class="dropdown-item" href="#app-namespace">📁 Namespace & Quota</a></li>
+              <li><a class="dropdown-item" href="#app-deployment">🧩 Deployment / ReplicaSet</a></li>
+              <li><a class="dropdown-item" href="#app-service">📡 Service / Ingress Routes</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><h6 class="dropdown-header">⚙️ Cấu hình Nâng cao</h6></li>
+              <li><a class="dropdown-item" href="#app-domain">🌍 Quản lý Domain / Ingress Host</a></li>
+              <li><a class="dropdown-item" href="#app-autoscale">🧰 Tự động Scale</a></li>
+              <li><a class="dropdown-item" href="#app-logs">🧾 Log Triển khai & Trạng thái</a></li>
             </ul>
           </li>
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#monitor" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">📊Monitoring & Logs</a>
             <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="#sys-logs">Xem log hệ thống</a></li>
-              <li><a class="dropdown-item" href="#cluster-resources">Xem tài nguyên cluster</a></li>
+              <li><h6 class="dropdown-header">📈 Giám sát Hệ thống</h6></li>
+              <li><a class="dropdown-item" href="#sys-logs">📄 Log hệ thống & Ứng dụng</a></li>
+              <li><a class="dropdown-item" href="#server-monitor">🖥️ Giám sát Server (CPU, RAM, Disk)</a></li>
+              <li><a class="dropdown-item" href="#cluster-resources">☸️ Giám sát Cluster (Pods, Nodes)</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><h6 class="dropdown-header">📉 Báo cáo & Thống kê</h6></li>
+              <li><a class="dropdown-item" href="#performance">⚡ Hiệu suất tổng thể</a></li>
+              <li><a class="dropdown-item" href="#resource-usage">🧠 Sử dụng tài nguyên</a></li>
+              <li><a class="dropdown-item" href="#alerts">🚨 Cảnh báo / Alerts</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><h6 class="dropdown-header">🔔 Thông báo & Báo cáo</h6></li>
+              <li><a class="dropdown-item" href="#notifications">🔔 Thông báo Realtime</a></li>
+              <li><a class="dropdown-item" href="#charts">📆 Biểu đồ thống kê</a></li>
+              <li><a class="dropdown-item" href="#export">📤 Xuất báo cáo</a></li>
             </ul>
           </li>
         </ul>
@@ -90,68 +117,95 @@
   <div id="section-user">
     <div class="container">
       <div class="d-flex align-items-center justify-content-between mb-4">
-        <h1 class="m-0">Quản lý User</h1>
+        <h1 class="m-0">👤 User Management</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
 
-      <div class="card mb-4" id="user-create">
+      <!-- User List -->
+      <div class="card mb-4" id="user-list">
         <div class="card-body">
-          <h2 class="h6">Thêm user</h2>
-          <form id="create-user-form" class="row g-2 mt-2">
-            <div class="col-12 col-md-3">
-              <input class="form-control" name="username" placeholder="Tên đăng nhập" required>
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h2 class="h6 m-0">📋 Danh sách người dùng</h2>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" id="refresh-users-btn">
+                <i class="bi bi-arrow-clockwise"></i> Làm mới
+              </button>
+              <button class="btn btn-sm btn-outline-success" id="export-users-btn">
+                <i class="bi bi-download"></i> Xuất danh sách
+              </button>
             </div>
-            <div class="col-12 col-md-3">
-              <input class="form-control" type="password" name="password" placeholder="Mật khẩu" required>
-            </div>
-            <div class="col-6 col-md-2">
-              <select class="form-select" name="role">
-                <option value="CLIENT">CLIENT</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-            </div>
-            <div class="col-6 col-md-2">
-              <input class="form-control" type="number" name="dataLimitMb" value="1024" min="100" step="100" title="MB">
-            </div>
-            <div class="col-12 col-md-2">
-              <input class="form-control" name="pathOnServer" placeholder="/data/user">
-            </div>
-            <div class="col-12">
-              <button class="btn btn-success" type="submit">Thêm</button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <div class="card" id="user-list">
-        <div class="card-body">
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <h2 class="h6 m-0">Danh sách user</h2>
           </div>
           <div class="table-responsive table-fixed" style="max-height: 60vh;">
-            <table class="table table-sm align-middle" id="user-quota">
+            <table class="table table-sm align-middle">
               <thead>
                 <tr>
                   <th>ID</th>
                   <th>Username</th>
                   <th>Role</th>
                   <th>Quota (MB)</th>
-                  <th>Path</th>
+                <th>Đường dẫn</th>
                   <th>Hành động</th>
-                  <th>Lịch sử</th>
                 </tr>
               </thead>
               <tbody id="users-tbody"></tbody>
             </table>
           </div>
+          
         </div>
       </div>
 
+      <!-- Create User -->
+      <div class="card mb-4" id="user-create">
+        <div class="card-body">
+          <h2 class="h6">➕ Thêm người dùng mới</h2>
+          <!-- Alert Messages -->
+          <div id="create-user-alert" class="alert alert-dismissible fade" role="alert" style="display: none;">
+            <span id="create-user-message"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+          <form id="create-user-form" class="row g-2 align-items-end">
+            <div class="col-md-2">
+              <label class="form-label small">Tên đăng nhập <span class="text-danger">*</span></label>
+              <input class="form-control form-control-sm" name="username" placeholder="username" required>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">Mật khẩu <span class="text-danger">*</span></label>
+              <input class="form-control form-control-sm" type="password" name="password" placeholder="password" required>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">Vai trò <span class="text-danger">*</span></label>
+              <select class="form-select form-select-sm" name="role" required>
+                <option value="">-- Chọn --</option>
+                <option value="ADMIN">ADMIN</option>
+                <option value="CLIENT">CLIENT</option>
+              </select>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">Quota (MB)</label>
+              <input class="form-control form-control-sm" type="number" name="dataLimitMb" value="1024" min="100" step="1">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small">Đường dẫn</label>
+              <input class="form-control form-control-sm" name="pathOnServer" placeholder="/data/user">
+            </div>
+            <div class="col-md-2">
+              <button class="btn btn-success btn-sm" type="submit">
+                <i class="bi bi-person-plus me-1"></i> Thêm
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+
+
+
+      <!-- Activity Modal -->
       <div class="modal fade" id="activityModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-dialog modal-dialog-scrollable modal-lg">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title" id="activity-title">Lịch sử</h5>
+              <h5 class="modal-title" id="activity-title">📈 Lịch sử hoạt động</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -163,7 +217,6 @@
           </div>
         </div>
       </div>
-
 
     </div>
   </div>
@@ -282,6 +335,26 @@
       </div>
       <!-- End Terminal Modal -->
 
+      <!-- Service Management Section -->
+      <div class="card mb-3" id="svc-list">
+        <div class="card-body">
+          <h2 class="h6">Danh sách dịch vụ</h2>
+          <p class="text-muted">Quản lý các dịch vụ hệ thống trên server (đang cập nhật)</p>
+        </div>
+      </div>
+      <div class="card mb-3" id="svc-actions">
+        <div class="card-body">
+          <h2 class="h6">Start/Stop/Restart dịch vụ</h2>
+          <p class="text-muted">Điều khiển trạng thái các dịch vụ (đang cập nhật)</p>
+        </div>
+      </div>
+      <div class="card mb-3" id="svc-logs">
+        <div class="card-body">
+          <h2 class="h6">Xem log dịch vụ</h2>
+          <p class="text-muted">Theo dõi log của các dịch vụ hệ thống (đang cập nhật)</p>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -385,6 +458,9 @@
           <div class="d-flex align-items-center justify-content-between mb-2">
             <h2 class="h6 m-0">Chi tiết Cluster: <span id="cd-name"></span></h2>
             <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" id="cd-reload">
+                <i class="bi bi-arrow-clockwise"></i> Reload cluster
+              </button>
               <button class="btn btn-sm btn-outline-secondary" id="cd-back">Quay lại danh sách</button>
             </div>
           </div>
@@ -1257,42 +1333,237 @@
       </div>
       <!-- End Playbook Manager Modal -->
 
+      <!-- Kubernetes Namespace Management -->
+      <div class="card mb-3 d-none" id="k8s-namespace">
+        <div class="card-body">
+          <h2 class="h6">🧱 Quản lý Namespace</h2>
+          <p class="text-muted">Tạo, xóa và quản lý các namespace trong cluster (đang cập nhật)</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Chức năng quản lý namespace sẽ được tích hợp với phần "Quản lý tài nguyên Kubernetes" ở trên.
+          </div>
+    </div>
+  </div>
+
+      <!-- Kubernetes Pods & Workloads Management -->
+      <div class="card mb-3 d-none" id="k8s-pods">
+        <div class="card-body">
+          <h2 class="h6">📦 Quản lý Pods & Workloads</h2>
+          <p class="text-muted">Quản lý pods, deployments, statefulsets và các workload khác (đang cập nhật)</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Chức năng quản lý pods và workloads sẽ được tích hợp với phần "Quản lý tài nguyên Kubernetes" ở trên.
+      </div>
+      </div>
+      </div>
+
+      <!-- Kubernetes Service & Ingress Management -->
+      <div class="card mb-3 d-none" id="k8s-service">
+        <div class="card-body">
+          <h2 class="h6">🌐 Quản lý Service / Ingress</h2>
+          <p class="text-muted">Quản lý services, ingress và network policies (đang cập nhật)</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Chức năng quản lý service và ingress sẽ được tích hợp với phần "Quản lý tài nguyên Kubernetes" ở trên.
+      </div>
+    </div>
+  </div>
 
     </div>
   </div>
 
-  <div id="section-service" class="d-none">
-    <div class="container">
-      <div class="d-flex align-items-center justify-content-between mb-4">
-        <h1 class="m-0">Service Management</h1>
-        <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
-      </div>
-      <div class="card mb-3" id="svc-list">
-        <div class="card-body">Danh sách dịch vụ (đang cập nhật)</div>
-      </div>
-      <div class="card mb-3" id="svc-actions">
-        <div class="card-body">Start/Stop/Restart (đang cập nhật)</div>
-      </div>
-      <div class="card mb-3" id="svc-logs">
-        <div class="card-body">Xem log dịch vụ (đang cập nhật)</div>
-      </div>
-    </div>
-  </div>
 
   <div id="section-app" class="d-none">
     <div class="container">
       <div class="d-flex align-items-center justify-content-between mb-4">
-        <h1 class="m-0">App Deployment</h1>
+        <h1 class="m-0">📦 App Deployment</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
+      
+      <!-- App List -->
       <div class="card mb-3" id="app-list">
-        <div class="card-body">Danh sách app (đang cập nhật)</div>
+        <div class="card-body">
+          <h2 class="h6">📋 Danh sách Ứng dụng</h2>
+          <p class="text-muted">Quản lý các ứng dụng container hóa đã triển khai (microservice, web app, backend API...)</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Hiển thị danh sách các ứng dụng đang chạy trong cluster với thông tin chi tiết về trạng thái, tài nguyên và cấu hình.
       </div>
+        </div>
+      </div>
+
+      <!-- App Deploy -->
       <div class="card mb-3" id="app-deploy">
-        <div class="card-body">Triển khai app (đang cập nhật)</div>
+        <div class="card-body">
+          <h2 class="h6">➕ Triển khai Mới</h2>
+          <p class="text-muted">Triển khai ứng dụng mới bằng cách upload YAML hoặc chọn từ template có sẵn</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Hỗ trợ upload file YAML, chọn template từ thư viện, hoặc tạo deployment từ Docker image.
       </div>
-      <div class="card mb-3" id="app-ns">
-        <div class="card-body">Quản lý namespace/quota (đang cập nhật)</div>
+        </div>
+      </div>
+
+      <!-- App Update -->
+      <div class="card mb-3" id="app-update">
+        <div class="card-body">
+          <h2 class="h6">🔄 Cập nhật / Rollback Ứng dụng</h2>
+          <p class="text-muted">Cập nhật phiên bản ứng dụng hoặc rollback về phiên bản trước đó</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Quản lý versioning, rolling updates, và rollback an toàn cho các ứng dụng đang chạy.
+          </div>
+        </div>
+      </div>
+
+      <!-- App Namespace -->
+      <div class="card mb-3" id="app-namespace">
+        <div class="card-body">
+          <h2 class="h6">📁 Namespace & Quota</h2>
+          <p class="text-muted">Quản lý namespace và cấp phát quota cho các ứng dụng</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Tạo, cấu hình namespace và thiết lập resource quota cho từng ứng dụng hoặc team.
+          </div>
+        </div>
+      </div>
+
+      <!-- App Deployment -->
+      <div class="card mb-3" id="app-deployment">
+        <div class="card-body">
+          <h2 class="h6">🧩 Deployment / ReplicaSet</h2>
+          <p class="text-muted">Quản lý các workload controllers (Deployment, ReplicaSet, StatefulSet...)</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Cấu hình và quản lý các loại workload khác nhau phù hợp với từng loại ứng dụng.
+          </div>
+        </div>
+      </div>
+
+      <!-- App Service -->
+      <div class="card mb-3" id="app-service">
+        <div class="card-body">
+          <h2 class="h6">📡 Service / Ingress Routes</h2>
+          <p class="text-muted">Cấu hình networking và routing cho ứng dụng</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Thiết lập Service, Ingress, LoadBalancer và các network policies cho ứng dụng.
+          </div>
+        </div>
+      </div>
+
+      <!-- App Domain Management -->
+      <div class="card mb-3" id="app-domain">
+        <div class="card-body">
+          <h2 class="h6">🌍 Quản lý Domain / Ingress Host</h2>
+          <p class="text-muted">Cấu hình domain và host cho ứng dụng (ví dụ: app.demo.local)</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Quản lý domain, subdomain, SSL certificates, và cấu hình Ingress host cho các ứng dụng.
+            <br><strong>Ví dụ:</strong> app.demo.local, api.company.com, admin.example.org
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Chức năng chính:</h6>
+              <ul class="small">
+                <li>Thêm/sửa/xóa domain</li>
+                <li>Cấu hình SSL/TLS certificates</li>
+                <li>Quản lý subdomain routing</li>
+                <li>Wildcard domain support</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Tích hợp:</h6>
+              <ul class="small">
+                <li>Let's Encrypt auto-renewal</li>
+                <li>DNS management</li>
+                <li>Load balancer configuration</li>
+                <li>Health check endpoints</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- App Autoscaling -->
+      <div class="card mb-3" id="app-autoscale">
+        <div class="card-body">
+          <h2 class="h6">🧰 Tự động Scale (Replica Autoscaling)</h2>
+          <p class="text-muted">Cấu hình tự động scale pods dựa trên CPU, memory và custom metrics</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Thiết lập Horizontal Pod Autoscaler (HPA) và Vertical Pod Autoscaler (VPA) để tự động điều chỉnh số lượng replicas.
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">HPA (Horizontal):</h6>
+              <ul class="small">
+                <li>CPU-based scaling</li>
+                <li>Memory-based scaling</li>
+                <li>Custom metrics scaling</li>
+                <li>Min/Max replica limits</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">VPA (Vertical):</h6>
+              <ul class="small">
+                <li>Resource request optimization</li>
+                <li>Memory limit adjustment</li>
+                <li>CPU limit adjustment</li>
+                <li>Pod restart management</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- App Logs -->
+      <div class="card mb-3" id="app-logs">
+        <div class="card-body">
+          <h2 class="h6">🧾 Log Triển khai & Trạng thái Pods</h2>
+          <p class="text-muted">Theo dõi và quản lý logs của quá trình triển khai và trạng thái pods</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Lưu trữ và hiển thị logs của quá trình triển khai, trạng thái pods, events và các thông tin quan trọng khác.
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Deployment Logs:</h6>
+              <ul class="small">
+                <li>Rollout history</li>
+                <li>Deployment events</li>
+                <li>Error tracking</li>
+                <li>Performance metrics</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Pod Status Logs:</h6>
+              <ul class="small">
+                <li>Pod lifecycle events</li>
+                <li>Container logs</li>
+                <li>Resource usage logs</li>
+                <li>Health check results</li>
+              </ul>
+            </div>
+          </div>
+          <div class="mt-3">
+            <h6 class="text-primary">Tính năng nâng cao:</h6>
+            <div class="row">
+              <div class="col-md-4">
+                <span class="badge bg-primary me-1">Real-time streaming</span>
+                <span class="badge bg-success me-1">Log filtering</span>
+              </div>
+              <div class="col-md-4">
+                <span class="badge bg-info me-1">Export logs</span>
+                <span class="badge bg-warning me-1">Alert rules</span>
+              </div>
+              <div class="col-md-4">
+                <span class="badge bg-secondary me-1">Retention policy</span>
+                <span class="badge bg-dark me-1">Search & analytics</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1300,14 +1571,337 @@
   <div id="section-monitor" class="d-none">
     <div class="container">
       <div class="d-flex align-items-center justify-content-between mb-4">
-        <h1 class="m-0">Monitoring & Logs</h1>
+        <h1 class="m-0">📊 Monitoring & Logs</h1>
         <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
       </div>
+      
+      <!-- System Logs -->
       <div class="card mb-3" id="sys-logs">
-        <div class="card-body">Xem log hệ thống (đang cập nhật)</div>
+        <div class="card-body">
+          <h2 class="h6">📄 Log hệ thống & Ứng dụng</h2>
+          <p class="text-muted">Tập trung và quản lý logs từ hệ thống và các ứng dụng</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Thu thập, lưu trữ và hiển thị logs từ tất cả các thành phần hệ thống và ứng dụng container hóa.
       </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Log Sources:</h6>
+              <ul class="small">
+                <li>System logs (syslog, journald)</li>
+                <li>Application logs (stdout/stderr)</li>
+                <li>Kubernetes events</li>
+                <li>Container runtime logs</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Features:</h6>
+              <ul class="small">
+                <li>Real-time log streaming</li>
+                <li>Log filtering & search</li>
+                <li>Log aggregation</li>
+                <li>Retention policies</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Server Monitoring -->
+      <div class="card mb-3" id="server-monitor">
+        <div class="card-body">
+          <h2 class="h6">🖥️ Giám sát Server (CPU, RAM, Disk)</h2>
+          <p class="text-muted">Theo dõi hiệu suất và tài nguyên của các server</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Giám sát real-time CPU, RAM, Disk, Network và các metrics quan trọng khác của server.
+          </div>
+          <div class="row">
+            <div class="col-md-4">
+              <h6 class="text-primary">CPU Metrics:</h6>
+              <ul class="small">
+                <li>CPU Usage %</li>
+                <li>Load Average</li>
+                <li>Process Count</li>
+                <li>Context Switches</li>
+              </ul>
+            </div>
+            <div class="col-md-4">
+              <h6 class="text-primary">Memory Metrics:</h6>
+              <ul class="small">
+                <li>RAM Usage %</li>
+                <li>Swap Usage</li>
+                <li>Memory Available</li>
+                <li>Buffer/Cache</li>
+              </ul>
+            </div>
+            <div class="col-md-4">
+              <h6 class="text-primary">Disk Metrics:</h6>
+              <ul class="small">
+                <li>Disk Usage %</li>
+                <li>I/O Operations</li>
+                <li>Read/Write Speed</li>
+                <li>Disk Health</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cluster Monitoring -->
       <div class="card mb-3" id="cluster-resources">
-        <div class="card-body">Xem tài nguyên cluster (đang cập nhật)</div>
+        <div class="card-body">
+          <h2 class="h6">☸️ Giám sát Cluster (Pods, Nodes)</h2>
+          <p class="text-muted">Theo dõi trạng thái và hiệu suất của Kubernetes cluster</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Giám sát pods, nodes, services và các tài nguyên Kubernetes với metrics chi tiết.
+      </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Node Monitoring:</h6>
+              <ul class="small">
+                <li>Node status & health</li>
+                <li>Resource allocation</li>
+                <li>Pod distribution</li>
+                <li>Network connectivity</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Pod Monitoring:</h6>
+              <ul class="small">
+                <li>Pod lifecycle</li>
+                <li>Resource consumption</li>
+                <li>Restart counts</li>
+                <li>Health checks</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Performance Overview -->
+      <div class="card mb-3" id="performance">
+        <div class="card-body">
+          <h2 class="h6">⚡ Hiệu suất tổng thể</h2>
+          <p class="text-muted">Tổng quan về hiệu suất hệ thống và ứng dụng</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Dashboard tổng hợp hiển thị hiệu suất tổng thể của toàn bộ hệ thống và các ứng dụng.
+          </div>
+          <div class="row">
+            <div class="col-md-3">
+              <div class="text-center p-3 border rounded">
+                <h4 class="text-success">99.9%</h4>
+                <small class="text-muted">Uptime</small>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="text-center p-3 border rounded">
+                <h4 class="text-primary">45ms</h4>
+                <small class="text-muted">Avg Response</small>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="text-center p-3 border rounded">
+                <h4 class="text-warning">1.2k</h4>
+                <small class="text-muted">Requests/min</small>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="text-center p-3 border rounded">
+                <h4 class="text-info">12</h4>
+                <small class="text-muted">Active Apps</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resource Usage -->
+      <div class="card mb-3" id="resource-usage">
+        <div class="card-body">
+          <h2 class="h6">🧠 Sử dụng tài nguyên</h2>
+          <p class="text-muted">Phân tích chi tiết việc sử dụng tài nguyên hệ thống</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Theo dõi và phân tích việc sử dụng CPU, RAM, Disk, Network theo thời gian thực và lịch sử.
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Resource Trends:</h6>
+              <ul class="small">
+                <li>CPU utilization over time</li>
+                <li>Memory consumption patterns</li>
+                <li>Disk I/O trends</li>
+                <li>Network traffic analysis</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Capacity Planning:</h6>
+              <ul class="small">
+                <li>Resource forecasting</li>
+                <li>Scaling recommendations</li>
+                <li>Bottleneck identification</li>
+                <li>Cost optimization</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alerts -->
+      <div class="card mb-3" id="alerts">
+        <div class="card-body">
+          <h2 class="h6">🚨 Cảnh báo / Alerts</h2>
+          <p class="text-muted">Cấu hình và quản lý các cảnh báo hệ thống</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Thiết lập rules cảnh báo và nhận thông báo qua Email hoặc UI khi có sự cố xảy ra.
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Alert Types:</h6>
+              <ul class="small">
+                <li>High CPU usage (>80%)</li>
+                <li>Low disk space (<10%)</li>
+                <li>Pod failures</li>
+                <li>Service downtime</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Notification Channels:</h6>
+              <ul class="small">
+                <li>Email notifications</li>
+                <li>UI popup alerts</li>
+                <li>Webhook integration</li>
+                <li>Slack/Discord</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-time Notifications -->
+      <div class="card mb-3" id="notifications">
+        <div class="card-body">
+          <h2 class="h6">🔔 Thông báo Realtime</h2>
+          <p class="text-muted">Thông báo tức thì khi server hoặc node gặp sự cố</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            WebSocket-based real-time notifications cho các sự kiện quan trọng và cảnh báo khẩn cấp.
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Real-time Events:</h6>
+              <ul class="small">
+                <li>Server down/up events</li>
+                <li>Node failure alerts</li>
+                <li>Pod crash notifications</li>
+                <li>Resource threshold breaches</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Delivery Methods:</h6>
+              <ul class="small">
+                <li>WebSocket push notifications</li>
+                <li>Email alerts</li>
+                <li>Browser notifications</li>
+                <li>Mobile push (future)</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts & Statistics -->
+      <div class="card mb-3" id="charts">
+        <div class="card-body">
+          <h2 class="h6">📆 Biểu đồ thống kê</h2>
+          <p class="text-muted">Biểu đồ và thống kê theo ngày/tuần/tháng</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Trực quan hóa dữ liệu với các biểu đồ tương tác theo thời gian và xu hướng sử dụng.
+          </div>
+          <div class="row">
+            <div class="col-md-4">
+              <h6 class="text-primary">Time Ranges:</h6>
+              <ul class="small">
+                <li>Last 24 hours</li>
+                <li>Last 7 days</li>
+                <li>Last 30 days</li>
+                <li>Custom range</li>
+              </ul>
+            </div>
+            <div class="col-md-4">
+              <h6 class="text-primary">Chart Types:</h6>
+              <ul class="small">
+                <li>Line charts (trends)</li>
+                <li>Bar charts (comparison)</li>
+                <li>Pie charts (distribution)</li>
+                <li>Heatmaps (patterns)</li>
+              </ul>
+            </div>
+            <div class="col-md-4">
+              <h6 class="text-primary">Metrics:</h6>
+              <ul class="small">
+                <li>CPU/Memory usage</li>
+                <li>Request rates</li>
+                <li>Error rates</li>
+                <li>Response times</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export Reports -->
+      <div class="card mb-3" id="export">
+        <div class="card-body">
+          <h2 class="h6">📤 Xuất báo cáo</h2>
+          <p class="text-muted">Xuất báo cáo định dạng PDF hoặc CSV</p>
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Tạo và xuất báo cáo chi tiết về hiệu suất, sử dụng tài nguyên và các metrics quan trọng.
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-primary">Export Formats:</h6>
+              <ul class="small">
+                <li>PDF reports (formatted)</li>
+                <li>CSV data (raw data)</li>
+                <li>Excel spreadsheets</li>
+                <li>JSON data export</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-primary">Report Types:</h6>
+              <ul class="small">
+                <li>Performance reports</li>
+                <li>Resource utilization</li>
+                <li>System health summary</li>
+                <li>Custom metrics reports</li>
+              </ul>
+            </div>
+          </div>
+          <div class="mt-3">
+            <h6 class="text-primary">Scheduled Reports:</h6>
+            <div class="row">
+              <div class="col-md-4">
+                <span class="badge bg-primary me-1">Daily</span>
+                <span class="badge bg-success me-1">Weekly</span>
+              </div>
+              <div class="col-md-4">
+                <span class="badge bg-info me-1">Monthly</span>
+                <span class="badge bg-warning me-1">Custom</span>
+              </div>
+              <div class="col-md-4">
+                <span class="badge bg-secondary me-1">Auto-email</span>
+                <span class="badge bg-dark me-1">Download</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

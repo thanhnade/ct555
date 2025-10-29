@@ -327,7 +327,7 @@ public class ClusterAdminController {
             String pem = serverService.resolveServerPrivateKeyPem(master.getId());
             int port = master.getPort() != null ? master.getPort() : 22;
             String user = master.getUsername();
-            String cmd = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get ns -o json";
+            String cmd = "kubectl get ns -o json";
             String output = null;
             try {
                 if (pem != null && !pem.isBlank()) {
@@ -377,7 +377,7 @@ public class ClusterAdminController {
             String pem = serverService.resolveServerPrivateKeyPem(master.getId());
             int port = master.getPort() != null ? master.getPort() : 22;
             String user = master.getUsername();
-            String cmd = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods -A -o json";
+            String cmd = "kubectl get pods -A -o json";
             String output = null;
             try {
                 if (pem != null && !pem.isBlank()) {
@@ -434,9 +434,9 @@ public class ClusterAdminController {
             int port = master.getPort() != null ? master.getPort() : 22;
             String user = master.getUsername();
 
-            String cmdDeploy = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get deploy -A -o json";
-            String cmdSts = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get statefulset -A -o json";
-            String cmdDs = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get daemonset -A -o json";
+            String cmdDeploy = "kubectl get deploy -A -o json";
+            String cmdSts = "kubectl get statefulset -A -o json";
+            String cmdDs = "kubectl get daemonset -A -o json";
 
             String outDeploy, outSts, outDs;
             try {

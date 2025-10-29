@@ -641,7 +641,7 @@ async function generateK8sPlaybookFromTemplate(template) {
 - name: 🌐 Cài đặt hoặc cập nhật Calico CNI (tự động)
   hosts: master
   become: yes
-  gather_facts: no
+  gather_facts: false
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
     DEBIAN_FRONTEND: noninteractive
@@ -652,16 +652,45 @@ async function generateK8sPlaybookFromTemplate(template) {
 
   tasks:
     - name: 🔍 Kiểm tra Calico CNI có tồn tại không
-      shell: kubectl get daemonset calico-node -n kube-system -o jsonpath='{.metadata.name}' 2>/dev/null || true
+      command: kubectl get daemonset calico-node -n kube-system
       register: calico_check
+      ignore_errors: true
 
     - name: 📋 Hiển thị trạng thái hiện tại
       debug:
         msg: >
-          {{ '🔧 Calico đã được cài: ' + calico_check.stdout if calico_check.stdout != '' else '🚫 Chưa có Calico, sẽ tiến hành cài đặt mới.' }}
+          {% if calico_check.rc == 0 %}
+            🔧 Calico đã được cài đặt.
+          {% else %}
+            🚫 Chưa có Calico, sẽ tiến hành cài đặt mới.
+          {% endif %}
+
+    - name: 🧩 Kiểm tra kernel modules overlay & br_netfilter
+      shell: |
+        modprobe overlay || true
+        modprobe br_netfilter || true
+        lsmod | grep -E 'overlay|br_netfilter' || echo "⚠️  Thiếu module kernel"
+      register: kernel_status
+      ignore_errors: true
+
+    - name: 📋 Kết quả kiểm tra module kernel
+      debug:
+        var: kernel_status.stdout_lines
+
+    - name: ⚙️ Kiểm tra cấu hình sysctl
+      shell: |
+        echo "net.bridge.bridge-nf-call-iptables = 1" | tee /etc/sysctl.d/k8s.conf >/dev/null
+        echo "net.ipv4.ip_forward = 1" | tee -a /etc/sysctl.d/k8s.conf >/dev/null
+        sysctl --system | grep -E "net.bridge.bridge-nf-call|net.ipv4.ip_forward"
+      register: sysctl_status
+      ignore_errors: true
+
+    - name: 📋 Kết quả sysctl
+      debug:
+        var: sysctl_status.stdout_lines
 
     - name: 🌐 Áp dụng Calico manifest (cài mới hoặc cập nhật)
-      shell: >
+      shell: |
         kubectl apply -f {{ calico_url }}
       args:
         executable: /bin/bash
@@ -670,29 +699,48 @@ async function generateK8sPlaybookFromTemplate(template) {
       delay: 10
       until: calico_apply.rc == 0
 
-    - name: 🧾 Hiển thị kết quả cài / cập nhật
+    - name: 🧾 Hiển thị kết quả cài đặt
       debug:
-        msg: "{{ calico_apply.stdout_lines | default(['CNI applied']) }}"
+        var: calico_apply.stdout_lines
 
-    - name: ⏳ Chờ Calico node pod chạy
-      shell: >
-        kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers | grep -c 'Running'
-      register: calico_pods
+    - name: ⏳ Kiểm tra Calico node pod đang khởi động
+      shell: |
+        kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers 2>/dev/null | grep -c 'Running' || true
+      register: calico_running
+
+    - name: 🕒 Chờ pod khởi động (tối đa 10 lần)
+      until: calico_running.stdout | int > 0
       retries: 10
       delay: 15
-      until: calico_pods.stdout | int > 0
+      shell: |
+        kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers 2>/dev/null | grep -c 'Running' || true
+      register: calico_running
+      ignore_errors: true
 
     - name: 🟢 Xác nhận Calico pods đang chạy
+      when: calico_running.stdout | int > 0
       debug:
-        msg: "✅ Calico đang hoạt động ({{ calico_pods.stdout }} pods Running)."
+        msg: "✅ Calico đang hoạt động ({{ calico_running.stdout }} pods Running)."
+
+    - name: 🧾 Log pod Calico nếu lỗi
+      when: calico_running.stdout | int == 0
+      shell: kubectl logs -n kube-system -l k8s-app=calico-node --tail=50 || true
+      register: calico_logs
+      ignore_errors: true
+
+    - name: 📋 Hiển thị log pod Calico
+      when: calico_running.stdout | int == 0
+      debug:
+        msg: "{{ calico_logs.stdout_lines | default(['⚠️ Pod Calico chưa sẵn sàng hoặc không có log.']) }}"
 
     - name: 🔍 Kiểm tra trạng thái node
-      shell: kubectl get nodes -o wide
+      command: kubectl get nodes -o wide
       register: nodes_status
+      ignore_errors: true
 
     - name: 🧾 Hiển thị kết quả cluster
       debug:
-        msg: "{{ nodes_status.stdout_lines }}"`,
+        var: nodes_status.stdout_lines`,
 
     '07-join-workers': `---
 - hosts: workers
