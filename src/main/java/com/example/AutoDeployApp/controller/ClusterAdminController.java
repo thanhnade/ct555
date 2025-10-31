@@ -313,6 +313,13 @@ public class ClusterAdminController {
     public ResponseEntity<?> listNamespaces(@PathVariable Long id, HttpServletRequest request) {
         try {
             var session = request.getSession(false);
+
+            // Kiểm tra master online trước
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.ok(Map.of("namespaces", new java.util.ArrayList<>(),
+                        "error", "Master server đang offline"));
+            }
+
             java.util.Map<Long, String> pwCache = getPasswordCache(session);
             var clusterServers = serverService.findByClusterId(id);
             if (clusterServers == null || clusterServers.isEmpty()) {
@@ -363,6 +370,13 @@ public class ClusterAdminController {
     public ResponseEntity<?> listPods(@PathVariable Long id, HttpServletRequest request) {
         try {
             var session = request.getSession(false);
+
+            // Kiểm tra master online trước
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.ok(Map.of("pods", new java.util.ArrayList<>(),
+                        "error", "Master server đang offline"));
+            }
+
             java.util.Map<Long, String> pwCache = getPasswordCache(session);
             var clusterServers = serverService.findByClusterId(id);
             if (clusterServers == null || clusterServers.isEmpty()) {
@@ -419,6 +433,16 @@ public class ClusterAdminController {
     public ResponseEntity<?> listWorkloads(@PathVariable Long id, HttpServletRequest request) {
         try {
             var session = request.getSession(false);
+
+            // Kiểm tra master online trước
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.ok(Map.of(
+                        "deployments", new java.util.ArrayList<>(),
+                        "statefulSets", new java.util.ArrayList<>(),
+                        "daemonSets", new java.util.ArrayList<>(),
+                        "error", "Master server đang offline"));
+            }
+
             java.util.Map<Long, String> pwCache = getPasswordCache(session);
             var clusterServers = serverService.findByClusterId(id);
             if (clusterServers == null || clusterServers.isEmpty()) {
@@ -500,6 +524,259 @@ public class ClusterAdminController {
                     "deployments", deployments,
                     "statefulSets", statefulSets,
                     "daemonSets", daemonSets));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ===================== K8s Resource Actions (Describe/Delete/Scale)
+    // =====================
+
+    @GetMapping("/{id}/k8s/pods/{namespace}/{name}")
+    public ResponseEntity<?> describePod(@PathVariable Long id,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " get pod " + name + " -o yaml";
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/{id}/k8s/pods/{namespace}/{name}")
+    public ResponseEntity<?> deletePod(@PathVariable Long id,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            // Chặn xóa namespace hệ thống
+            String nsLower = namespace == null ? "" : namespace.toLowerCase();
+            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Không cho phép xóa pod trong namespace hệ thống"));
+            }
+
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " delete pod " + name;
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/{id}/k8s/{type}/{namespace}/{name}")
+    public ResponseEntity<?> describeWorkload(@PathVariable Long id,
+            @PathVariable String type,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            String t = type == null ? "" : type.toLowerCase();
+            if (!(t.equals("deployment") || t.equals("statefulset") || t.equals("daemonset"))) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Loại workload không hợp lệ"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " get " + t + " " + name + " -o yaml";
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    public static class ScaleRequest {
+        public Integer replicas;
+
+        public Integer getReplicas() {
+            return replicas;
+        }
+
+        public void setReplicas(Integer r) {
+            this.replicas = r;
+        }
+    }
+
+    @PostMapping("/{id}/k8s/{type}/{namespace}/{name}/scale")
+    public ResponseEntity<?> scaleWorkload(@PathVariable Long id,
+            @PathVariable String type,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            @org.springframework.web.bind.annotation.RequestBody ScaleRequest body,
+            HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            String t = type == null ? "" : type.toLowerCase();
+            if (!(t.equals("deployment") || t.equals("statefulset"))) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Chỉ hỗ trợ scale Deployment/StatefulSet"));
+            }
+            String nsLower = namespace == null ? "" : namespace.toLowerCase();
+            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Không cho phép scale trong namespace hệ thống"));
+            }
+            if (body == null || body.replicas == null || body.replicas < 0) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Giá trị replicas không hợp lệ"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " scale " + t + "/" + name + " --replicas=" + body.replicas;
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/{id}/k8s/{type}/{namespace}/{name}")
+    public ResponseEntity<?> deleteWorkload(@PathVariable Long id,
+            @PathVariable String type,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            String t = type == null ? "" : type.toLowerCase();
+            if (!(t.equals("deployment") || t.equals("statefulset") || t.equals("daemonset"))) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Chỉ cho phép xóa Deployment/StatefulSet/DaemonSet"));
+            }
+            String nsLower = namespace == null ? "" : namespace.toLowerCase();
+            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Không cho phép xóa trong namespace hệ thống"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " delete " + t + " " + name;
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1094,27 +1371,49 @@ public class ClusterAdminController {
                 .toList();
 
         // Xử lý servers song song để tăng hiệu suất
+        // Tối ưu: chỉ load metrics cho nodes online, nodes offline chỉ hiển thị thông
+        // tin cơ bản
         List<CompletableFuture<Map<String, Object>>> futures = serverData.stream()
-                .map(serverDataItem -> getServerMetricsAsync(serverDataItem, pwCache)
-                        .thenApply(metrics -> {
-                            // Lấy phiên bản Kubernetes từ master node (chỉ một lần)
-                            String version = "";
-                            if (serverDataItem.role == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
-                                version = getKubernetesVersion(serverDataItem, pwCache);
-                            }
+                .map(serverDataItem -> {
+                    // Nếu node offline, trả về ngay thông tin cơ bản (không gọi SSH để giảm thời
+                    // gian load)
+                    if (!serverDataItem.isConnected) {
+                        return CompletableFuture.<Map<String, Object>>completedFuture(
+                                java.util.Map.of(
+                                        "id", serverDataItem.id,
+                                        "ip", serverDataItem.host,
+                                        "role", serverDataItem.role.name(),
+                                        "status", serverDataItem.status.name(),
+                                        "isConnected", false,
+                                        "cpu", "-",
+                                        "ram", "-",
+                                        "ramPercentage", 0,
+                                        "disk", "-",
+                                        "version", ""));
+                    }
 
-                            return java.util.Map.<String, Object>of(
-                                    "id", serverDataItem.id,
-                                    "ip", serverDataItem.host,
-                                    "role", serverDataItem.role.name(),
-                                    "status", serverDataItem.status.name(),
-                                    "isConnected", serverDataItem.isConnected,
-                                    "cpu", metrics.get("cpu"),
-                                    "ram", metrics.get("ram"),
-                                    "ramPercentage", metrics.get("ramPercentage"),
-                                    "disk", metrics.get("disk"),
-                                    "version", version);
-                        }))
+                    // Chỉ load metrics và version cho nodes online
+                    return getServerMetricsAsync(serverDataItem, pwCache)
+                            .thenApply(metrics -> {
+                                // Lấy phiên bản Kubernetes từ master node (chỉ một lần)
+                                String version = "";
+                                if (serverDataItem.role == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                                    version = getKubernetesVersion(serverDataItem, pwCache);
+                                }
+
+                                return java.util.Map.<String, Object>of(
+                                        "id", serverDataItem.id,
+                                        "ip", serverDataItem.host,
+                                        "role", serverDataItem.role.name(),
+                                        "status", serverDataItem.status.name(),
+                                        "isConnected", serverDataItem.isConnected,
+                                        "cpu", metrics.get("cpu"),
+                                        "ram", metrics.get("ram"),
+                                        "ramPercentage", metrics.get("ramPercentage"),
+                                        "disk", metrics.get("disk"),
+                                        "version", version);
+                            });
+                })
                 .toList();
 
         // Chờ tất cả futures hoàn thành và thu thập kết quả
@@ -1164,6 +1463,41 @@ public class ClusterAdminController {
                 "status", sum.status(),
                 "version", version,
                 "nodes", nodes));
+    }
+
+    /**
+     * Kiểm tra xem master server có online không
+     */
+    private boolean isMasterOnline(Long clusterId, jakarta.servlet.http.HttpSession session) {
+        if (session == null)
+            return false;
+
+        var clusterServers = serverService.findByClusterId(clusterId);
+        if (clusterServers == null || clusterServers.isEmpty())
+            return false;
+
+        var master = clusterServers.stream()
+                .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                .findFirst()
+                .orElse(null);
+        if (master == null)
+            return false;
+
+        java.util.Set<Long> connectedIds = new java.util.HashSet<>();
+        Object connectedAttr = session.getAttribute("CONNECTED_SERVERS");
+        if (connectedAttr instanceof java.util.Set<?> set) {
+            for (Object o : set) {
+                if (o instanceof Number n) {
+                    connectedIds.add(n.longValue());
+                } else if (o instanceof String str) {
+                    try {
+                        connectedIds.add(Long.parseLong(str));
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+        return connectedIds.contains(master.getId());
     }
 
     /**

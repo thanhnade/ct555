@@ -1,6 +1,8 @@
 package com.example.AutoDeployApp.controller;
 
 import com.example.AutoDeployApp.service.AnsibleService;
+import com.example.AutoDeployApp.service.ServerService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -13,17 +15,62 @@ import java.util.Map;
 public class AnsiblePlaybookController {
 
     private final AnsibleService ansibleService;
+    private final ServerService serverService;
 
-    public AnsiblePlaybookController(AnsibleService ansibleService) {
+    public AnsiblePlaybookController(AnsibleService ansibleService, ServerService serverService) {
         this.ansibleService = ansibleService;
+        this.serverService = serverService;
+    }
+
+    /**
+     * Kiểm tra xem master server có online không
+     */
+    private boolean isMasterOnline(Long clusterId, jakarta.servlet.http.HttpSession session) {
+        if (session == null)
+            return false;
+
+        var clusterServers = serverService.findByClusterId(clusterId);
+        if (clusterServers == null || clusterServers.isEmpty())
+            return false;
+
+        var master = clusterServers.stream()
+                .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                .findFirst()
+                .orElse(null);
+        if (master == null)
+            return false;
+
+        java.util.Set<Long> connectedIds = new java.util.HashSet<>();
+        Object connectedAttr = session.getAttribute("CONNECTED_SERVERS");
+        if (connectedAttr instanceof java.util.Set<?> set) {
+            for (Object o : set) {
+                if (o instanceof Number n) {
+                    connectedIds.add(n.longValue());
+                } else if (o instanceof String str) {
+                    try {
+                        connectedIds.add(Long.parseLong(str));
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+        return connectedIds.contains(master.getId());
     }
 
     /**
      * 📄 Liệt kê tất cả playbook trong thư mục /etc/ansible/playbooks của cluster
      */
     @GetMapping("/list/{clusterId}")
-    public ResponseEntity<List<String>> listPlaybooks(@PathVariable Long clusterId) {
+    public ResponseEntity<List<String>> listPlaybooks(@PathVariable Long clusterId, HttpServletRequest request) {
         try {
+            var session = request.getSession(false);
+
+            // Kiểm tra master online trước
+            if (!isMasterOnline(clusterId, session)) {
+                // Trả về danh sách rỗng thay vì lỗi
+                return ResponseEntity.ok(List.of());
+            }
+
             List<String> playbooks = ansibleService.listPlaybooks(clusterId);
             return ResponseEntity.ok(playbooks);
         } catch (Exception e) {

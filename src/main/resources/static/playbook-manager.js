@@ -1,8 +1,4 @@
 // Playbook Manager - Quản lý playbook và template K8s
-// =====================================================
-
-// Use the global cluster id managed by admin.js
-// Access via window.currentClusterId to avoid duplicate declarations
 
 function getClusterId() {
   let cid = window.currentClusterId;
@@ -14,21 +10,20 @@ function getClusterId() {
         window.currentClusterId = fromUrl;
         cid = fromUrl;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
   return cid;
 }
-
-// Load playbooks for current cluster (optional override)
+// Load playbook cho cluster hiện tại (optional override)
 async function loadPlaybooks(clusterIdOverride) {
   const cid = clusterIdOverride || getClusterId();
   if (!cid) {
     console.error('No cluster selected');
     return;
   }
-  
+
   try {
-    // Persist override to global if provided
+    // Lưu lại override nếu có
     if (clusterIdOverride) {
       window.currentClusterId = clusterIdOverride;
     }
@@ -36,10 +31,10 @@ async function loadPlaybooks(clusterIdOverride) {
     if (!response.ok) {
       throw new Error('Failed to load playbooks');
     }
-    
+
     const playbooks = await response.json();
     const playbookList = document.getElementById('playbook-list');
-    
+
     if (playbooks.length === 0) {
       playbookList.innerHTML = '<div class="list-group-item text-center text-muted">Chưa có playbook nào</div>';
     } else {
@@ -82,43 +77,43 @@ async function loadPlaybooks(clusterIdOverride) {
   }
 }
 
-// Load playbook content
-window.loadPlaybook = async function(filename) {
+// Tải nội dung playbook
+window.loadPlaybook = async function (filename) {
   const cid = getClusterId();
   if (!cid || !filename) return;
-  
+
   try {
     const response = await fetch(`/api/ansible-playbook/read/${cid}/${filename}`);
     if (!response.ok) {
       throw new Error('Failed to load playbook');
     }
-    
+
     const data = await response.json();
     document.getElementById('playbook-filename').value = filename.replace('.yml', '');
     document.getElementById('playbook-editor').value = data.content;
-    
-    // Show content view and hide execution view
+
+    // Hiển thị view nội dung và ẩn view thực thi
     showPlaybookContentView();
-    
+
   } catch (error) {
     console.error('Error loading playbook:', error);
     showAlert('error', 'Lỗi tải playbook: ' + error.message);
   }
 };
 
-// Save playbook
-window.savePlaybook = async function() {
+// Lưu playbook
+window.savePlaybook = async function () {
   const cid = getClusterId();
   if (!cid) return;
-  
+
   const filename = document.getElementById('playbook-filename')?.value;
   const content = document.getElementById('playbook-editor')?.value;
-  
+
   if (!filename || !content) {
     showAlert('error', 'Vui lòng nhập tên file và nội dung');
     return;
   }
-  
+
   try {
     const response = await fetch(`/api/ansible-playbook/save/${cid}`, {
       method: 'POST',
@@ -127,56 +122,56 @@ window.savePlaybook = async function() {
       },
       body: `filename=${encodeURIComponent(filename)}&content=${encodeURIComponent(content)}`
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi lưu playbook');
     }
-    
+
     showAlert('success', 'Đã lưu playbook thành công');
-    await loadPlaybooks(); // Refresh list
-    
+    await loadPlaybooks(); // Cập nhật danh sách
+
   } catch (error) {
     console.error('Error saving playbook:', error);
     showAlert('error', 'Lỗi lưu playbook: ' + error.message);
   }
 };
 
-// Delete playbook
-window.deletePlaybook = async function(filename) {
+// Xóa playbook
+window.deletePlaybook = async function (filename) {
   const cid = getClusterId();
   if (!cid || !filename) return;
-  
+
   if (!confirm(`Xóa playbook "${filename}"?`)) return;
-  
+
   try {
     const response = await fetch(`/api/ansible-playbook/delete/${cid}/${filename}`, {
       method: 'DELETE'
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi xóa playbook');
     }
-    
+
     showAlert('success', `Đã xóa playbook "${filename}" thành công `);
-    await loadPlaybooks(); // Refresh list
-    
+    await loadPlaybooks(); // Cập nhật danh sách
+
   } catch (error) {
     console.error('Error deleting playbook:', error);
     showAlert('error', 'Lỗi xóa playbook: ' + error.message);
   }
 };
 
-// Execute playbook
-window.executePlaybook = async function(filename, extraVars = '') {
+// Thực thi playbook
+window.executePlaybook = async function (filename, extraVars = '') {
   const cid = getClusterId();
   if (!cid || !filename) return;
-  
+
   try {
-    // Show execution view and hide content view
+    // Hiển thị thực thi và ẩn nội dung
     showPlaybookExecutionView();
-    
+
     const response = await fetch(`/api/ansible-playbook/execute/${cid}`, {
       method: 'POST',
       headers: {
@@ -184,71 +179,71 @@ window.executePlaybook = async function(filename, extraVars = '') {
       },
       body: `filename=${encodeURIComponent(filename)}&extraVars=${encodeURIComponent(extraVars)}`
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi thực thi playbook');
     }
-    
+
     const result = await response.json();
     showAlert('success', `Đã bắt đầu thực thi playbook: ${filename}`);
-    
-    // Start monitoring execution status
+
+    // Bắt đầu theo dõi trạng thái thực thi
     if (result.taskId) {
       monitorPlaybookExecution(result.taskId);
     }
-    
+
     return result;
   } catch (error) {
     console.error('Error executing playbook:', error);
     showAlert('error', 'Lỗi thực thi playbook: ' + error.message);
-    showPlaybookContentView(); // Show content view on error
+    showPlaybookContentView(); // Hiển thị nội dung khi có lỗi
     throw error;
   }
 };
 
-// Monitor playbook execution
+// Theo dõi thực thi playbook
 async function monitorPlaybookExecution(taskId) {
   const outputElement = document.getElementById('ansible-output');
   const progressElement = document.getElementById('execution-progress');
   const spinnerElement = document.getElementById('execution-spinner');
-  
+
   if (!outputElement || !progressElement || !spinnerElement) {
     console.error('Execution elements not found');
     return;
   }
-  
-  // Clear previous output
+
+  // Xóa output trước
   outputElement.innerHTML = '';
-  
-  // Show progress and spinner
+
+  // Hiển thị progress và spinner
   progressElement.style.display = 'block';
   spinnerElement.style.display = 'inline-block';
-  
+
   const checkStatus = async () => {
     try {
       const response = await fetch(`/api/ansible-playbook/status/${getClusterId()}/${taskId}`);
       if (!response.ok) {
         throw new Error('Failed to check status');
       }
-      
+
       const status = await response.json();
-      
-      // Update progress bar
+
+      // Cập nhật progress bar
       const progressBar = progressElement.querySelector('.progress-bar');
       if (progressBar) {
         progressBar.style.width = `${status.progress || 0}%`;
         progressBar.setAttribute('aria-valuenow', status.progress || 0);
       }
-      
-      // Update output
+
+      // Cập nhật output
       if (status.output && status.output.length > 0) {
         const newOutput = status.output.slice(outputElement.children.length);
         newOutput.forEach(line => {
           const lineElement = document.createElement('div');
           lineElement.className = 'output-line';
-          
-          // Color coding for different types of output
+
+          // Mã hóa màu cho các loại output khác nhau
           if (line.includes('TASK') || line.includes('PLAY')) {
             lineElement.className += ' task-header';
           } else if (line.includes('ok:') || line.includes('changed:')) {
@@ -258,148 +253,148 @@ async function monitorPlaybookExecution(taskId) {
           } else if (line.includes('skipping:')) {
             lineElement.className += ' warning';
           }
-          
+
           lineElement.textContent = line;
           outputElement.appendChild(lineElement);
         });
-        
-        // Scroll to bottom
+
+        // Cuộn xuống cuối
         outputElement.scrollTop = outputElement.scrollHeight;
       }
-      
+
       if (status.status === 'running') {
         setTimeout(checkStatus, 1000);
       } else {
-        // Hide spinner
+        // Ẩn spinner
         spinnerElement.style.display = 'none';
-        
-         // Show completion message
-         const summaryElement = document.createElement('div');
-         summaryElement.className = 'text-success mt-3 border-top pt-2';
-         
-         const titleElement = document.createElement('div');
-         titleElement.className = 'fw-bold';
-         titleElement.textContent = '🎉 Hoàn thành thực thi playbook!';
-         
-         const timeElement = document.createElement('div');
-         timeElement.className = 'small text-white';
-         timeElement.textContent = `Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s`;
-         
-         summaryElement.appendChild(titleElement);
-         summaryElement.appendChild(timeElement);
-         outputElement.appendChild(summaryElement);
+
+        // Hiển thị thông báo hoàn thành
+        const summaryElement = document.createElement('div');
+        summaryElement.className = 'text-success mt-3 border-top pt-2';
+
+        const titleElement = document.createElement('div');
+        titleElement.className = 'fw-bold';
+        titleElement.textContent = 'Hoàn thành thực thi playbook!';
+
+        const timeElement = document.createElement('div');
+        timeElement.className = 'small text-white';
+        timeElement.textContent = `Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s`;
+
+        summaryElement.appendChild(titleElement);
+        summaryElement.appendChild(timeElement);
+        outputElement.appendChild(summaryElement);
       }
-      
+
     } catch (error) {
-      console.error('Error monitoring execution:', error);
+      console.error('Lỗi theo dõi thực thi:', error);
       spinnerElement.style.display = 'none';
-      
-       const errorElement = document.createElement('div');
-       errorElement.className = 'text-danger mt-3';
-       
-       const errorTitle = document.createElement('div');
-       errorTitle.className = 'fw-bold';
-       errorTitle.textContent = '⚠️ Lỗi kiểm tra trạng thái';
-       
-       errorElement.appendChild(errorTitle);
-       outputElement.appendChild(errorElement);
+
+      const errorElement = document.createElement('div');
+      errorElement.className = 'text-danger mt-3';
+
+      const errorTitle = document.createElement('div');
+      errorTitle.className = 'fw-bold';
+      errorTitle.textContent = 'Lỗi kiểm tra trạng thái thực thi';
+
+      errorElement.appendChild(errorTitle);
+      outputElement.appendChild(errorElement);
     }
   };
-  
+
   checkStatus();
 }
 
-// Check if playbook exists
+// Kiểm tra xem playbook có tồn tại không
 async function checkPlaybookExists(filename) {
   const cid = getClusterId();
   if (!cid) {
-    console.log('No cluster ID found');
+    console.log('Không tìm thấy ID cluster');
     return false;
   }
-  
+
   try {
     const response = await fetch(`/api/ansible-playbook/list/${cid}`);
     if (!response.ok) {
-      console.log('Failed to fetch playbook list:', response.status);
+      console.log('Lỗi tải danh sách playbook:', response.status);
       return false;
     }
-    
+
     const playbooks = await response.json();
-    console.log('Current playbooks:', playbooks);
-    console.log('Looking for:', filename);
-    
+    console.log('Playbook hiện tại:', playbooks);
+    console.log('Tìm kiếm:', filename);
+
     const exists = playbooks.includes(filename);
-    console.log('File exists:', exists);
+    console.log('File tồn tại:', exists);
     return exists;
   } catch (error) {
-    console.error('Error checking playbook:', error);
+    console.error('Lỗi kiểm tra playbook:', error);
     return false;
   }
 }
 
-// Upload playbook
-window.uploadPlaybook = async function(file) {
+// Tải lên playbook
+window.uploadPlaybook = async function (file) {
   const cid = getClusterId();
   if (!cid || !file) return;
-  
+
   try {
-    // Check if file already exists
+    // Kiểm tra xem file đã tồn tại chưa
     const originalFilename = file.name;
-    const finalFilename = originalFilename.toLowerCase().endsWith('.yml') || originalFilename.toLowerCase().endsWith('.yaml') 
-      ? originalFilename 
+    const finalFilename = originalFilename.toLowerCase().endsWith('.yml') || originalFilename.toLowerCase().endsWith('.yaml')
+      ? originalFilename
       : originalFilename + '.yml';
-    
+
     const exists = await checkPlaybookExists(finalFilename);
-    
+
     if (exists) {
-      const confirmMessage = `Playbook "${finalFilename}" đã tồn tại. Bạn có muốn ghi đè lên file cũ?`;
+      const confirmMessage = `Playbook "${finalFilename}" đã tồn tại. Bạn có muốn ghi đè lên file cũ không?`;
       if (!confirm(confirmMessage)) {
         showAlert('info', 'Đã hủy tải lên playbook');
         return;
       }
     }
-    
+
     const formData = new FormData();
     formData.append('file', file);
-    
+
     const response = await fetch(`/api/ansible-playbook/upload/${cid}`, {
       method: 'POST',
       body: formData
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi tải lên playbook');
     }
-    
+
     const result = await response.json();
     showAlert('success', `Đã tải lên playbook: ${result.filename}`);
-    await loadPlaybooks(); // Refresh list
-    
-    // Load the uploaded playbook content
+    await loadPlaybooks(); // Cập nhật danh sách
+
+    // Tải nội dung playbook đã tải lên
     await loadPlaybook(result.filename);
-    
+
   } catch (error) {
-    console.error('Error uploading playbook:', error);
+    console.error('Lỗi tải lên playbook:', error);
     showAlert('error', 'Lỗi tải lên playbook: ' + error.message);
     throw error;
   }
 };
 
-// Generate K8s playbook from template
+// Tạo playbook K8s từ template
 async function generateK8sPlaybookFromTemplate(template) {
   if (!getClusterId()) {
     throw new Error('Vui lòng chọn cluster trước');
   }
-  
+
   const templates = {
     '01-update-hosts-hostname': `---
-- name: Cập nhật /etc/hosts và hostname cho toàn bộ cluster
+- name: Update /etc/hosts and hostname for entire cluster
   hosts: all
   become: yes
   gather_facts: yes
   tasks:
-    - name: Thêm tất cả node trong inventory vào /etc/hosts (chỉ khi chưa có)
+    - name: Add all inventory nodes to /etc/hosts
       lineinfile:
         path: /etc/hosts
         line: "{{ hostvars[item].ansible_host | default(item) }} {{ hostvars[item].ansible_user }}"
@@ -409,26 +404,30 @@ async function generateK8sPlaybookFromTemplate(template) {
       loop: "{{ groups['all'] }}"
       when: hostvars[item].ansible_user is defined
       tags: addhosts
+      # Thêm tất cả node trong inventory vào /etc/hosts
       
-    - name: Đặt hostname theo inventory (nếu khác)
+    - name: Set hostname according to inventory
       hostname:
         name: "{{ hostvars[inventory_hostname].ansible_user }}"
       when: ansible_hostname != hostvars[inventory_hostname].ansible_user
       tags: sethostname
+      # Đặt hostname theo inventory
       
-    - name: Kiểm tra hostname sau khi cập nhật
+    - name: Verify hostname after update
       command: hostnamectl
       register: host_info
       changed_when: false
       tags: verify
+      # Kiểm tra hostname sau khi cập nhật
       
-    - name: Hiển thị thông tin sau khi cập nhật
+    - name: Display information after update
       debug:
         msg:
           - "Hostname hiện tại: {{ ansible_hostname }}"
           - "Kết quả lệnh hostnamectl:"
           - "{{ host_info.stdout_lines }}"
-      tags: verify`,
+      tags: verify
+      # Hiển thị thông tin sau khi cập nhật`,
 
     '02-kernel-sysctl': `---
 - hosts: all
@@ -436,38 +435,44 @@ async function generateK8sPlaybookFromTemplate(template) {
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Tắt swap
+    - name: Disable swap
       shell: swapoff -a || true
       ignore_errors: true
+      # Tắt swap vì Kubernetes không hỗ trợ
 
-    - name: Comment dòng swap trong /etc/fstab
+    - name: Comment swap lines in /etc/fstab
       replace:
         path: /etc/fstab
         regexp: '(^.*swap.*$)'
         replace: '# \\1'
+      # Comment dòng swap trong /etc/fstab
 
-    - name: Tải module kernel
+    - name: Load kernel modules
       copy:
         dest: /etc/modules-load.d/containerd.conf
         content: |
           overlay
           br_netfilter
+      # Tải module kernel cho containerd
 
-    - name: modprobe overlay và br_netfilter
+    - name: Load overlay and br_netfilter modules
       shell: |
         modprobe overlay
         modprobe br_netfilter
+      # Kích hoạt module overlay và br_netfilter
 
-    - name: Cấu hình sysctl cho Kubernetes
+    - name: Configure sysctl for Kubernetes
       copy:
         dest: /etc/sysctl.d/99-kubernetes-cri.conf
         content: |
           net.bridge.bridge-nf-call-iptables  = 1
           net.bridge.bridge-nf-call-ip6tables = 1
           net.ipv4.ip_forward                 = 1
+      # Cấu hình sysctl cho Kubernetes
 
-    - name: Áp dụng sysctl
-      command: sysctl --system`,
+    - name: Apply sysctl configuration
+      command: sysctl --system
+      # Áp dụng cấu hình sysctl`,
 
     '03-install-containerd': `---
 - hosts: all
@@ -475,35 +480,41 @@ async function generateK8sPlaybookFromTemplate(template) {
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Cập nhật cache
+    - name: Update apt cache
       apt:
         update_cache: yes
+      # Cập nhật cache APT
 
-    - name: Cài containerd
+    - name: Install containerd
       apt:
         name: containerd
         state: present
         force_apt_get: yes
+      # Cài đặt containerd container runtime
 
-    - name: Tạo thư mục cấu hình containerd
+    - name: Create containerd configuration directory
       file:
         path: /etc/containerd
         state: directory
+      # Tạo thư mục cấu hình containerd
 
-    - name: Sinh file config mặc định
+    - name: Generate default containerd configuration
       shell: "containerd config default > /etc/containerd/config.toml"
+      # Tạo file cấu hình mặc định cho containerd
 
-    - name: Bật SystemdCgroup
+    - name: Enable SystemdCgroup
       replace:
         path: /etc/containerd/config.toml
         regexp: 'SystemdCgroup = false'
         replace: 'SystemdCgroup = true'
+      # Bật SystemdCgroup trong containerd
 
-    - name: Khởi động lại containerd
+    - name: Restart containerd service
       systemd:
         name: containerd
         enabled: yes
-        state: restarted`,
+        state: restarted
+      # Khởi động lại containerd`,
 
     '04-install-kubernetes': `---
 - hosts: all
@@ -511,7 +522,7 @@ async function generateK8sPlaybookFromTemplate(template) {
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Cài gói phụ thuộc
+    - name: Install required packages
       apt:
         name:
           - apt-transport-https
@@ -519,25 +530,28 @@ async function generateK8sPlaybookFromTemplate(template) {
           - curl
         state: present
         update_cache: yes
+      # Cài các gói phụ thuộc cần thiết
 
-    - name: Thêm GPG key Kubernetes
+    - name: Add Kubernetes GPG key
       shell: |
         if [ ! -f /usr/share/keyrings/kubernetes-archive-keyring.gpg ]; then
           curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \\
           gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
         else
-          echo "🔁 GPG key đã tồn tại, bỏ qua bước này."
+          echo "GPG key đã tồn tại, bỏ qua bước này."
         fi
       changed_when: false
-      register: gpg_status  
+      register: gpg_status
+      # Thêm GPG key chính thức của Kubernetes
 
-    - name: Thêm repository Kubernetes
+    - name: Add Kubernetes repository
       copy:
         dest: /etc/apt/sources.list.d/kubernetes.list
         content: |
           deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
+      # Thêm repository APT của Kubernetes
 
-    - name: Cài kubelet, kubeadm, kubectl
+    - name: Install kubelet, kubeadm, kubectl
       apt:
         name:
           - kubelet
@@ -545,9 +559,11 @@ async function generateK8sPlaybookFromTemplate(template) {
           - kubectl
         state: present
         update_cache: yes
+      # Cài đặt các thành phần core của Kubernetes
 
-    - name: Giữ phiên bản
-      command: apt-mark hold kubelet kubeadm kubectl`,
+    - name: Hold package versions
+      command: apt-mark hold kubelet kubeadm kubectl
+      # Giữ phiên bản các package để tránh cập nhật tự động`,
 
     '05-init-master': `---
 - hosts: master
@@ -562,21 +578,25 @@ async function generateK8sPlaybookFromTemplate(template) {
     join_script: "/etc/kubernetes/join-command.sh"
 
   tasks:
-    - name: 🔍 Lấy địa chỉ master động
+    - name: Get dynamic master IP address
       set_fact:
         master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
+      # Lấy địa chỉ IP động của master
 
-    - debug:
-        msg: "📡 Sử dụng địa chỉ master: {{ master_ip }}"
+    - name: Display master IP being used
+      debug:
+        msg: "Sử dụng địa chỉ master: {{ master_ip }}"
+      # Hiển thị địa chỉ master đang được sử dụng
 
-    - name: 🧹 Reset cluster cũ và dọn sạch dữ liệu
+    - name: Reset old cluster and clean up data
       shell: |
         kubeadm reset -f || true
         rm -rf /etc/kubernetes /var/lib/etcd /var/lib/kubelet /etc/cni/net.d
         systemctl restart containerd || true
       ignore_errors: yes
+      # Reset cụm cũ và dọn sạch dữ liệu
 
-    - name: 🚀 Khởi tạo Control Plane (Master)
+    - name: Initialize Kubernetes Control Plane
       command: >
         kubeadm init
         --control-plane-endpoint "{{ master_ip }}:6443"
@@ -588,25 +608,28 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: kubeadm_init
       failed_when: "'error' in kubeadm_init.stderr"
       changed_when: "'Your Kubernetes control-plane has initialized successfully' in kubeadm_init.stdout"
+      # Khởi tạo Control Plane với Calico CNI
 
-    - name: ⚙️ Cấu hình kubeconfig cho root
+    - name: Configure kubeconfig for root user
       shell: |
         mkdir -p $HOME/.kube
         cp /etc/kubernetes/admin.conf $HOME/.kube/config
         chown $(id -u):$(id -g) $HOME/.kube/config
       args:
         executable: /bin/bash
+      # Cấu hình kubeconfig cho root
 
-    - name: 👤 Cấu hình kubeconfig cho người dùng thường ({{ ansible_user }})
+    - name: Configure kubeconfig for normal user
       when: ansible_user != "root"
       block:
-        - name: 📁 Tạo thư mục kubeconfig cho user
+        - name: Create kubeconfig directory for user
           file:
             path: "/home/{{ ansible_user }}/.kube"
             state: directory
             mode: '0755'
+          # Tạo thư mục kubeconfig cho user
 
-        - name: 📦 Sao chép kubeconfig cho user
+        - name: Copy kubeconfig for user
           copy:
             src: /etc/kubernetes/admin.conf
             dest: "/home/{{ ansible_user }}/.kube/config"
@@ -614,31 +637,37 @@ async function generateK8sPlaybookFromTemplate(template) {
             group: "{{ ansible_user }}"
             mode: '0600'
             remote_src: yes
+          # Sao chép kubeconfig cho user
+      # Cấu hình kubeconfig cho user thường (nếu không phải root)
 
-    - name: 🔑 Sinh lệnh join cho worker
+    - name: Generate join command for workers
       shell: kubeadm token create --print-join-command
       register: join_cmd
       changed_when: false
+      # Sinh lệnh join cho worker
 
-    - name: 💾 Lưu lệnh join ra file
+    - name: Save join command to file
       copy:
         content: "{{ join_cmd.stdout }}"
         dest: "{{ join_script }}"
         mode: '0755'
+      # Lưu lệnh join ra file
 
-    - name: 🧾 Hiển thị join command
+    - name: Display join command
       debug:
         msg:
-          - "🎯 Lệnh join worker:"
+          - "Lệnh join worker:"
           - "{{ join_cmd.stdout }}"
-          - "➡️ File lưu tại: {{ join_script }}"
+          - "File lưu tại: {{ join_script }}"
+      # Hiển thị join command
 
-    - name: ✅ Hoàn tất khởi tạo master
+    - name: Complete master initialization
       debug:
-        msg: "🎉 Master {{ inventory_hostname }} đã sẵn sàng cho worker join!"`,
+        msg: "Master {{ inventory_hostname }} đã sẵn sàng cho worker join!"
+      # Hoàn tất khởi tạo master`,
 
     '06-install-cni': `---
-- name: 🌐 Cài đặt hoặc cập nhật Calico CNI (tự động)
+- name: Install or update Calico CNI (automatic)
   hosts: master
   become: yes
   gather_facts: false
@@ -651,33 +680,33 @@ async function generateK8sPlaybookFromTemplate(template) {
     calico_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml"
 
   tasks:
-    - name: 🔍 Kiểm tra Calico CNI có tồn tại không
+    - name: Check if Calico CNI exists
       command: kubectl get daemonset calico-node -n kube-system
       register: calico_check
       ignore_errors: true
 
-    - name: 📋 Hiển thị trạng thái hiện tại
+    - name: Display current status
       debug:
         msg: >
           {% if calico_check.rc == 0 %}
-            🔧 Calico đã được cài đặt.
+            Calico đã được cài đặt.
           {% else %}
-            🚫 Chưa có Calico, sẽ tiến hành cài đặt mới.
+            Chưa có Calico, sẽ tiến hành cài đặt mới.
           {% endif %}
 
-    - name: 🧩 Kiểm tra kernel modules overlay & br_netfilter
+    - name: Verify kernel modules overlay and br_netfilter
       shell: |
         modprobe overlay || true
         modprobe br_netfilter || true
-        lsmod | grep -E 'overlay|br_netfilter' || echo "⚠️  Thiếu module kernel"
+        lsmod | grep -E 'overlay|br_netfilter' || echo "Thiếu module kernel"
       register: kernel_status
       ignore_errors: true
 
-    - name: 📋 Kết quả kiểm tra module kernel
+    - name: Display kernel module check result
       debug:
         var: kernel_status.stdout_lines
 
-    - name: ⚙️ Kiểm tra cấu hình sysctl
+    - name: Verify sysctl configuration
       shell: |
         echo "net.bridge.bridge-nf-call-iptables = 1" | tee /etc/sysctl.d/k8s.conf >/dev/null
         echo "net.ipv4.ip_forward = 1" | tee -a /etc/sysctl.d/k8s.conf >/dev/null
@@ -685,11 +714,11 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: sysctl_status
       ignore_errors: true
 
-    - name: 📋 Kết quả sysctl
+    - name: Display sysctl result
       debug:
         var: sysctl_status.stdout_lines
 
-    - name: 🌐 Áp dụng Calico manifest (cài mới hoặc cập nhật)
+    - name: Apply Calico manifest (install or update)
       shell: |
         kubectl apply -f {{ calico_url }}
       args:
@@ -699,16 +728,16 @@ async function generateK8sPlaybookFromTemplate(template) {
       delay: 10
       until: calico_apply.rc == 0
 
-    - name: 🧾 Hiển thị kết quả cài đặt
+    - name: Display installation result
       debug:
         var: calico_apply.stdout_lines
 
-    - name: ⏳ Kiểm tra Calico node pod đang khởi động
+    - name: Check Calico node pods running
       shell: |
         kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers 2>/dev/null | grep -c 'Running' || true
       register: calico_running
 
-    - name: 🕒 Chờ pod khởi động (tối đa 10 lần)
+    - name: Wait for pods to start (max 10 attempts)
       until: calico_running.stdout | int > 0
       retries: 10
       delay: 15
@@ -717,33 +746,33 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: calico_running
       ignore_errors: true
 
-    - name: 🟢 Xác nhận Calico pods đang chạy
+    - name: Confirm Calico pods are running
       when: calico_running.stdout | int > 0
       debug:
-        msg: "✅ Calico đang hoạt động ({{ calico_running.stdout }} pods Running)."
+        msg: "Calico đang hoạt động ({{ calico_running.stdout }} pods Running)."
 
-    - name: 🧾 Log pod Calico nếu lỗi
+    - name: Log Calico pods if failed
       when: calico_running.stdout | int == 0
       shell: kubectl logs -n kube-system -l k8s-app=calico-node --tail=50 || true
       register: calico_logs
       ignore_errors: true
 
-    - name: 📋 Hiển thị log pod Calico
+    - name: Display Calico pod logs
       when: calico_running.stdout | int == 0
       debug:
-        msg: "{{ calico_logs.stdout_lines | default(['⚠️ Pod Calico chưa sẵn sàng hoặc không có log.']) }}"
+        msg: "{{ calico_logs.stdout_lines | default(['Pod Calico chưa sẵn sàng hoặc không có log.']) }}"
 
-    - name: 🔍 Kiểm tra trạng thái node
+    - name: Check node status
       command: kubectl get nodes -o wide
       register: nodes_status
       ignore_errors: true
 
-    - name: 🧾 Hiển thị kết quả cluster
+    - name: Display cluster result
       debug:
         var: nodes_status.stdout_lines`,
 
     '06-install-flannel': `---
-- name: 🌐 Cài đặt hoặc cập nhật Flannel CNI (tương thích WSL2)
+- name: Install or update Flannel CNI (WSL2 compatible)
   hosts: master
   become: yes
   gather_facts: false
@@ -755,47 +784,47 @@ async function generateK8sPlaybookFromTemplate(template) {
     flannel_manifest: "https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml"
 
   tasks:
-    - name: 🔍 Kiểm tra Flannel CNI có tồn tại không
+    - name: Check if Flannel CNI exists
       command: kubectl get daemonset kube-flannel-ds -n kube-flannel
       register: flannel_check
       ignore_errors: true
 
-    - name: 📋 Hiển thị trạng thái hiện tại
+    - name: Display current status
       debug:
         msg: >
           {% if flannel_check.rc == 0 %}
-            🔧 Flannel đã được cài đặt trước đó.
+            Flannel đã được cài đặt trước đó.
           {% else %}
-            🚀 Chưa có Flannel, sẽ tiến hành cài đặt mới.
+            Chưa có Flannel, sẽ tiến hành cài đặt mới.
           {% endif %}
 
-    - name: ⚙️ Bật IP forwarding
+    - name: Enable IP forwarding
       shell: |
         echo "net.ipv4.ip_forward = 1" | tee /etc/sysctl.d/k8s.conf >/dev/null
         sysctl --system | grep net.ipv4.ip_forward
       register: sysctl_status
       ignore_errors: true
 
-    - name: 📋 Kết quả sysctl
+    - name: Display sysctl result
       debug:
         var: sysctl_status.stdout_lines
 
-    - name: 🌐 Áp dụng Flannel manifest (tự động tải bản mới nhất)
+    - name: Apply Flannel manifest (auto latest)
       command: kubectl apply -f {{ flannel_manifest }}
       register: flannel_apply
       changed_when: "'created' in flannel_apply.stdout or 'configured' in flannel_apply.stdout"
       failed_when: flannel_apply.rc != 0
 
-    - name: 🧾 Hiển thị kết quả áp dụng
+    - name: Display apply result
       debug:
         var: flannel_apply.stdout_lines
 
-    - name: ⏳ Kiểm tra số pod Flannel đang chạy
+    - name: Check number of running Flannel pods
       shell: |
         kubectl get pods -n kube-flannel --no-headers 2>/dev/null | grep -c 'Running' || true
       register: flannel_running
 
-    - name: 🕒 Chờ pod Flannel hoạt động (tối đa 10 lần)
+    - name: Wait for Flannel pods to be running (max 10 attempts)
       until: flannel_running.stdout | int > 0
       retries: 10
       delay: 15
@@ -804,28 +833,28 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: flannel_running
       ignore_errors: true
 
-    - name: 🟢 Xác nhận Flannel pod đã hoạt động
+    - name: Confirm Flannel pods are running
       when: flannel_running.stdout | int > 0
       debug:
-        msg: "✅ Flannel đang hoạt động ({{ flannel_running.stdout }} pods Running)."
+        msg: "Flannel đang hoạt động ({{ flannel_running.stdout }} pods Running)."
 
-    - name: 🧾 Log Flannel nếu pod chưa chạy
+    - name: Log Flannel if pods not running
       when: flannel_running.stdout | int == 0
       shell: kubectl logs -n kube-flannel -l app=flannel --tail=50 || true
       register: flannel_logs
       ignore_errors: true
 
-    - name: 📋 Hiển thị log Flannel
+    - name: Display Flannel logs
       when: flannel_running.stdout | int == 0
       debug:
-        msg: "{{ flannel_logs.stdout_lines | default(['⚠️ Pod Flannel chưa sẵn sàng hoặc không có log.']) }}"
+        msg: "{{ flannel_logs.stdout_lines | default(['Pod Flannel chưa sẵn sàng hoặc không có log.']) }}"
 
-    - name: 🔍 Kiểm tra trạng thái node
+    - name: Check node status
       command: kubectl get nodes -o wide
       register: nodes_status
       ignore_errors: true
 
-    - name: 🧾 Hiển thị kết quả cluster
+    - name: Display cluster result
       debug:
         var: nodes_status.stdout_lines`,
 
@@ -835,54 +864,76 @@ async function generateK8sPlaybookFromTemplate(template) {
   gather_facts: no
   environment:
     DEBIAN_FRONTEND: noninteractive
-
   vars:
     join_script: /tmp/kube_join.sh
-
   tasks:
-    - name: 🔍 Lấy địa chỉ master động
-      set_fact:
-        master_ip: "{{ hostvars[groups['master'][0]].ansible_host | default(hostvars[groups['master'][0]].ansible_default_ipv4.address) }}"
-    - debug:
-        msg: "📡 Master IP được sử dụng để join: {{ master_ip }}"
+    - name: Test SSH connectivity to worker node
+      ping:
+      register: ping_result
+      ignore_errors: yes
+      # Kiểm tra kết nối SSH đến worker node
 
-    - name: 🔑 Lấy lệnh join từ master
-      delegate_to: "{{ master_ip }}"
+    - name: Skip offline workers
+      set_fact:
+        worker_online: "{{ ping_result is succeeded }}"
+      # Đánh dấu worker nào online/offline
+
+    - name: Display worker online status
+      debug:
+        msg: "Worker {{ inventory_hostname }} is {{ 'ONLINE' if worker_online else 'OFFLINE' }}"
+      # Hiển thị trạng thái online/offline
+
+    - name: Get join command from master
+      delegate_to: "{{ groups['master'][0] }}"
       run_once: true
       shell: kubeadm token create --print-join-command
       register: join_cmd
+      when: worker_online
+      # Lấy lệnh join từ master node (chỉ chạy 1 lần)
 
-    - name: 💾 Ghi lệnh join ra file
+    - name: Save join command to file
       copy:
         content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
         dest: "{{ join_script }}"
         mode: '0755'
+      when: worker_online
+      ignore_errors: yes
+      # Ghi lệnh join ra file script
 
-    - name: 🧹 Reset node (nếu có cụm cũ)
+    - name: Reset node if old cluster exists
       shell: |
         kubeadm reset -f || true
         rm -rf /etc/kubernetes /var/lib/kubelet /etc/cni/net.d
         systemctl restart containerd || true
       ignore_errors: yes
+      when: worker_online
+      # Reset node cũ (nếu có)
 
-    - name: 🚀 Join vào cụm Kubernetes
+    - name: Join to Kubernetes cluster
       shell: "{{ join_script }}"
       register: join_output
       ignore_errors: yes
+      when: worker_online
+      # Thực thi lệnh join vào cluster
 
-    - name: 🧾 Hiển thị kết quả join
+    - name: Display join result
       debug:
-        msg: "{{ join_output.stdout_lines | default(['Đã join thành công!']) }}"
+        msg: "{{ join_output.stdout_lines | default(['Đã join thành công!']) if worker_online else ['Worker offline, skip join'] }}"
+      # Hiển thị kết quả join
 
-    - name: 🔁 Khởi động lại kubelet
+    - name: Restart kubelet service
       systemd:
         name: kubelet
         state: restarted
         enabled: yes
+      ignore_errors: yes
+      when: worker_online
+      # Khởi động lại kubelet
 
-    - name: ✅ Hoàn tất
+    - name: Complete join process
       debug:
-        msg: "✅ Node {{ inventory_hostname }} đã tham gia cụm thành công!"`,
+        msg: "{{ 'Node ' + inventory_hostname + ' đã tham gia cụm thành công!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Bỏ qua join' }}"
+      # Báo cáo kết quả cuối cùng`,
 
     '09-install-ingress': `---
 - hosts: master
@@ -892,13 +943,13 @@ async function generateK8sPlaybookFromTemplate(template) {
     DEBIAN_FRONTEND: noninteractive
 
   tasks:
-    - name: 🔍 Lấy địa chỉ master động
+    - name: Get dynamic master IP address
       set_fact:
         master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
     - debug:
-        msg: "📡 Cài đặt Ingress trên master: {{ master_ip }}"
+        msg: "Cài đặt Ingress trên master: {{ master_ip }}"
 
-    - name: 🌐 Cài đặt Ingress Controller (nginx)
+    - name: Install Ingress Controller (NGINX)
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
@@ -907,23 +958,23 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: ingress_install
       ignore_errors: yes
 
-    - name: 🧾 Kết quả cài Ingress
+    - name: Display Ingress installation result
       debug:
         msg: "{{ ingress_install.stdout_lines | default(['Ingress Controller applied']) }}"
 
-    - name: 🧠 Kiểm tra trạng thái pod ingress-nginx
+    - name: Check ingress-nginx pod status
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl get pods -n ingress-nginx -o wide
       register: ingress_pods
 
-    - name: 📋 Hiển thị pod ingress-nginx
+    - name: Display ingress-nginx pods
       debug:
         msg: "{{ ingress_pods.stdout_lines }}"
 
-    - name: ✅ Hoàn tất
+    - name: Complete
       debug:
-        msg: "🎉 Ingress Controller (NGINX) đã được cài đặt thành công!"`,
+        msg: "Ingress Controller (NGINX) đã được cài đặt thành công!"`,
 
     '10-install-helm': `---
 - hosts: master
@@ -933,7 +984,7 @@ async function generateK8sPlaybookFromTemplate(template) {
     DEBIAN_FRONTEND: noninteractive
 
   tasks:
-    - name: 📦 Cài đặt Helm nếu chưa có
+    - name: Install Helm if missing
       shell: |
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
       args:
@@ -941,21 +992,21 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: helm_install
       ignore_errors: yes
 
-    - name: 🧾 Kết quả cài đặt Helm
+    - name: Display Helm installation result
       debug:
         msg: "{{ helm_install.stdout_lines | default(['Helm installed']) }}"
 
-    - name: 🔍 Kiểm tra phiên bản Helm
+    - name: Check Helm version
       shell: helm version --short
       register: helm_version
 
-    - name: 📊 Hiển thị thông tin Helm
+    - name: Display Helm info
       debug:
-        msg: "🎯 Phiên bản Helm hiện tại: {{ helm_version.stdout | default('Không xác định') }}"
+        msg: "Phiên bản Helm hiện tại: {{ helm_version.stdout | default('Không xác định') }}"
 
-    - name: ✅ Hoàn tất
+    - name: Complete
       debug:
-        msg: "🎉 Helm đã được cài đặt thành công trên master!"`,
+        msg: "Helm đã được cài đặt thành công trên master!"`,
 
     '11-setup-storage': `---
 - hosts: master
@@ -968,13 +1019,13 @@ async function generateK8sPlaybookFromTemplate(template) {
     nfs_manifest_dir: /etc/kubernetes/storage
 
   tasks:
-    - name: 📁 Tạo thư mục manifest NFS
+    - name: Create NFS manifest directory
       file:
         path: "{{ nfs_manifest_dir }}"
         state: directory
         mode: '0755'
 
-    - name: 📦 Tải và áp dụng NFS Provisioner (example)
+    - name: Download and apply NFS Provisioner (example)
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/nfs-subdir-external-provisioner/master/deploy/rbac.yaml
@@ -985,263 +1036,92 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: nfs_apply
       ignore_errors: yes
 
-    - name: 🧾 Kết quả triển khai NFS
+    - name: Display NFS deployment result
       debug:
         msg: "{{ nfs_apply.stdout_lines | default(['NFS Provisioner applied']) }}"
 
-    - name: 🧩 Đặt StorageClass mặc định
+    - name: Set default StorageClass
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl patch storageclass nfs-client -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}' || true
       args:
         executable: /bin/bash
 
-    - name: ✅ Hoàn tất
+    - name: Complete
       debug:
-        msg: "🎉 Cấu hình StorageClass (NFS) mặc định đã hoàn tất!"`,
+        msg: "Cấu hình StorageClass (NFS) mặc định đã hoàn tất!"`,
 
-    
+    '12-prepare-and-join-worker': `---
+# All-in-one: Chuẩn bị node và join vào cụm (02 → 03 → 04 → 07)
 
-    '08-verify-cluster': `---
-- name: 🧩 Kiểm tra trạng thái cụm Kubernetes
+# Precheck: Chỉ định nhóm target_workers gồm các worker chưa Ready hoặc chưa có trong kubectl
+- name: Precheck not-ready workers
   hosts: master
-  become: yes
   gather_facts: no
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-    DEBIAN_FRONTEND: noninteractive
-
   tasks:
-    - name: ⚙️ Kiểm tra kubectl có sẵn không
+    - name: Check if kubectl is available
       command: which kubectl
       register: kubectl_check
-      failed_when: kubectl_check.rc != 0
+      failed_when: false
       changed_when: false
 
-    - name: 📋 Liệt kê danh sách node
-      command: kubectl get nodes -o wide
-      register: nodes_info
+    - name: Get existing node list
+      command: kubectl get nodes --no-headers
+      register: nodes_tbl
       changed_when: false
+      failed_when: false
+      when: kubectl_check.rc == 0
 
-    - name: 📦 Liệt kê pods hệ thống
-      command: kubectl get pods -n kube-system -o wide
-      register: pods_info
-      changed_when: false
+    - name: Ensure node_lines fact always exists
+      set_fact:
+        node_lines: "{{ nodes_tbl.stdout_lines | default([]) if (nodes_tbl is defined and nodes_tbl.stdout_lines is defined) else [] }}"
 
-    - name: ✅ Hiển thị thông tin cụm
-      debug:
-        msg:
-          - "📦 Danh sách Node:"
-          - "{{ nodes_info.stdout_lines }}"
-          - "📦 Pods trong namespace kube-system:"
-          - "{{ pods_info.stdout_lines }}"
+    - name: Parse node information safely
+      set_fact:
+        node_names: "{{ node_lines | map('split') | map('first') | list | default([]) }}"
+        not_ready_names: "{{ node_lines | map('split') | selectattr('1','ne','Ready') | map('first') | list | default([]) }}"
 
-    - name: 🧠 Kiểm tra trạng thái node
-      shell: kubectl get nodes --no-headers | awk '{print $2}' | sort | uniq -c
-      register: node_status
-      changed_when: false
+    - name: Add unregistered or not-ready workers to target group
+      add_host:
+        name: "{{ item }}"
+        groups: target_workers
+      loop: "{{ groups['workers'] | default([]) }}"
+      when: kubectl_check.rc != 0 or
+            nodes_tbl is not defined or
+            item not in (node_names | default([])) or
+            item in (not_ready_names | default([]))
 
-    - name: 📊 Báo cáo tình trạng node
-      debug:
-        msg: |
-          {% if 'NotReady' in node_status.stdout %}
-          ⚠️ Một số node chưa sẵn sàng:
-          {{ node_status.stdout }}
-          {% else %}
-          🎯 Tất cả node đã ở trạng thái Ready!
-          {% endif %}
-
-    - name: 🔍 Kiểm tra pod lỗi trong kube-system
-      shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
-      register: bad_pods
-      changed_when: false
-
-    - name: 📋 Báo cáo pod lỗi
-      debug:
-        msg: |
-          {% if bad_pods.stdout %}
-          ⚠️ Một số pod chưa ổn định hoặc đang lỗi:
-          {{ bad_pods.stdout }}
-          {% else %}
-          ✅ Tất cả pod trong kube-system đều đang Running hoặc Completed!
-          {% endif %}
-
-    - name: 🧾 Hiển thị log của pod lỗi (nếu có)
-      when: bad_pods.stdout != ""
-      shell: |
-        for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
-          echo "📄 Log của $pod:"; kubectl logs -n kube-system $pod --tail=30 || true; echo "--------------------------------";
-        done
-      register: bad_pods_logs
-      ignore_errors: yes
-
-    - name: 🧠 Log chi tiết
-      when: bad_pods.stdout != ""
-      debug:
-        msg: "{{ bad_pods_logs.stdout_lines | default(['Không có log lỗi']) }}"`,
-
-    '00-reset-cluster': `---
-- name: 🧹 Reset toàn bộ cụm Kubernetes (master + worker)
-  hosts: all
-  become: yes
-  gather_facts: no
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-
-  tasks:
-    - name: 🧽 Gỡ cụm Kubernetes (kubeadm reset -f)
-      shell: kubeadm reset -f
-      ignore_errors: true
-      register: reset_output
-
-    - name: 📋 Hiển thị kết quả reset
-      debug:
-        msg: "{{ reset_output.stdout_lines | default(['Không có cluster cũ để reset.']) }}"
-
-    - name: 🧹 Xóa thư mục cấu hình Kubernetes
-      file:
-        path: /etc/kubernetes
-        state: absent
-
-    - name: 🧹 Xóa cấu hình mạng CNI
-      file:
-        path: /etc/cni/net.d
-        state: absent
-
-    - name: 🧹 Xóa file kubeconfig của root
-      file:
-        path: /root/.kube
-        state: absent
-
-    - name: 🧹 Xóa file kubeconfig của user thường ({{ ansible_user }})
-      file:
-        path: "/home/{{ ansible_user }}/.kube"
-        state: absent
-      when: ansible_user != "root"
-
-    - name: 🧩 Dọn iptables
-      shell: |
-        iptables -F && iptables -X
-        iptables -t nat -F && iptables -t nat -X
-        iptables -t mangle -F && iptables -t mangle -X
-        iptables -P FORWARD ACCEPT
-      ignore_errors: true
-
-    - name: 🧰 Khởi động lại containerd
-      systemd:
-        name: containerd
-        state: restarted
-        enabled: yes
-
-    - name: ✅ Xác nhận reset hoàn tất
-      debug:
-        msg:
-          - "🎯 Node {{ inventory_hostname }} đã được reset sạch (chỉ xóa dữ liệu)."`,
-
-    'deploy-full-cluster': `---
-- name: 🧹 Bước 0: Reset cụm (tất cả node)
-  hosts: all
-  become: yes
-  gather_facts: yes
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: 🧽 Gỡ cụm Kubernetes (kubeadm reset -f)
-      shell: kubeadm reset -f
-      ignore_errors: true
-      register: reset_output
-
-    - name: 📋 Kết quả reset cụm
-      debug:
-        msg: "{{ reset_output.stdout_lines | default(['Không có cluster cũ để reset.']) }}"
-
-    - name: 🧹 Xóa thư mục cấu hình Kubernetes
-      file:
-        path: /etc/kubernetes
-        state: absent
-
-    - name: 🧹 Xóa cấu hình mạng CNI
-      file:
-        path: /etc/cni/net.d
-        state: absent
-
-    - name: 🧹 Xóa kubeconfig của root
-      file:
-        path: /root/.kube
-        state: absent
-
-    - name: 🧹 Xóa kubeconfig của user thường ({{ ansible_user }})
-      file:
-        path: "/home/{{ ansible_user }}/.kube"
-        state: absent
-      when: ansible_user != "root"
-
-    - name: 🧰 Khởi động lại containerd
-      systemd:
-        name: containerd
-        state: restarted
-        enabled: yes
-
----
-- name: 📝 Bước 1: Cập nhật hosts & hostname
-  hosts: all
-  become: yes
-  gather_facts: yes
-  tasks:
-    - name: 🧠 Thêm tất cả node vào /etc/hosts
-      lineinfile:
-        path: /etc/hosts
-        line: "{{ hostvars[item].ansible_host }} {{ item }}"
-        state: present
-        create: yes
-        insertafter: EOF
-      loop: "{{ groups['all'] }}"
-      when: hostvars[item].ansible_host is defined
-
-    - name: 🖥️ Đặt hostname theo inventory
-      hostname:
-        name: "{{ inventory_hostname }}"
-      when: ansible_hostname != inventory_hostname
-
-    - name: 📋 Kiểm tra hostname
-      shell: hostnamectl
-      register: host_info
-
-    - name: 🧾 Hiển thị thông tin hostname
-      debug:
-        msg: "{{ host_info.stdout_lines }}"
-
----
-- name: ⚙️ Bước 2 – Cấu hình kernel & containerd
-  hosts: all
+- name: 02 - Configure kernel and sysctl
+  hosts: target_workers
   become: yes
   gather_facts: no
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Tắt swap
+    - name: Disable swap
       shell: swapoff -a || true
       ignore_errors: true
 
-    - name: Comment dòng swap trong /etc/fstab
+    - name: Comment swap entries in /etc/fstab
       replace:
         path: /etc/fstab
         regexp: '(^.*swap.*$)'
         replace: '# \\1'
+      ignore_errors: yes
 
-    - name: Tải module kernel
+    - name: Create modules-load file for containerd
       copy:
         dest: /etc/modules-load.d/containerd.conf
         content: |
           overlay
           br_netfilter
 
-    - name: modprobe overlay và br_netfilter
+    - name: Enable overlay and br_netfilter modules
       shell: |
-        modprobe overlay
-        modprobe br_netfilter
+        modprobe overlay || true
+        modprobe br_netfilter || true
 
-    - name: Cấu hình sysctl cho Kubernetes
+    - name: Configure sysctl for Kubernetes
       copy:
         dest: /etc/sysctl.d/99-kubernetes-cri.conf
         content: |
@@ -1249,10 +1129,18 @@ async function generateK8sPlaybookFromTemplate(template) {
           net.bridge.bridge-nf-call-ip6tables = 1
           net.ipv4.ip_forward                 = 1
 
-    - name: Áp dụng sysctl
+    - name: Apply sysctl
       command: sysctl --system
+      ignore_errors: yes
 
-    - name: Cập nhật cache
+- name: 03 - Install and configure containerd
+  hosts: target_workers
+  become: yes
+  gather_facts: no
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  tasks:
+    - name: Cập nhật cache APT
       apt:
         update_cache: yes
 
@@ -1267,7 +1155,7 @@ async function generateK8sPlaybookFromTemplate(template) {
         path: /etc/containerd
         state: directory
 
-    - name: Sinh file config mặc định
+    - name: Sinh file cấu hình mặc định cho containerd
       shell: "containerd config default > /etc/containerd/config.toml"
 
     - name: Bật SystemdCgroup
@@ -1282,40 +1170,29 @@ async function generateK8sPlaybookFromTemplate(template) {
         enabled: yes
         state: restarted
 
----
-- name: ☸️ Bước 3 – Cài đặt Kubernetes core
-  hosts: all
+- name: 04 - Install Kubernetes (kubelet, kubeadm, kubectl)
+  hosts: target_workers
   become: yes
   gather_facts: no
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Cài gói phụ thuộc
-      apt:
-        name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-        state: present
-        update_cache: yes
-
-    - name: Thêm GPG key Kubernetes
+    - name: Add Kubernetes GPG key (if missing)
       shell: |
         if [ ! -f /usr/share/keyrings/kubernetes-archive-keyring.gpg ]; then
-          curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \\
+          curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \
           gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
-        else
-          echo "🔁 GPG key đã tồn tại, bỏ qua bước này."
         fi
       changed_when: false
+      ignore_errors: true
 
-    - name: Thêm repository Kubernetes
+    - name: Add Kubernetes repository
       copy:
         dest: /etc/apt/sources.list.d/kubernetes.list
         content: |
           deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
 
-    - name: Cài kubelet, kubeadm, kubectl
+    - name: Install kubelet, kubeadm, kubectl
       apt:
         name:
           - kubelet
@@ -1324,33 +1201,395 @@ async function generateK8sPlaybookFromTemplate(template) {
         state: present
         update_cache: yes
 
-    - name: Giữ phiên bản
+    - name: Hold kubelet/kubeadm/kubectl versions
       command: apt-mark hold kubelet kubeadm kubectl
 
----
-- name: 🚀 Bước 4 – Khởi tạo Master node
+- name: 07 - Join workers to cluster
+  hosts: target_workers
+  become: yes
+  gather_facts: no
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  vars:
+    join_script: /tmp/kube_join.sh
+  tasks:
+    - name: Check SSH connectivity to worker
+      ping:
+      register: ping_result
+      ignore_errors: yes
+
+    - name: Mark online status
+      set_fact:
+        worker_online: "{{ ping_result is succeeded }}"
+
+    - name: Get join command from master
+      delegate_to: "{{ groups['master'][0] }}"
+      run_once: true
+      shell: kubeadm token create --print-join-command
+      register: join_cmd
+      when: worker_online
+
+    - name: Write join command to file
+      copy:
+        content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
+        dest: "{{ join_script }}"
+        mode: '0755'
+      when: worker_online
+      ignore_errors: yes
+
+    - name: Reset old node (if exists)
+      shell: |
+        kubeadm reset -f || true
+        rm -rf /etc/kubernetes /var/lib/kubelet /etc/cni/net.d
+        systemctl restart containerd || true
+      ignore_errors: yes
+      when: worker_online
+
+    - name: Execute join command
+      shell: "{{ join_script }}"
+      register: join_output
+      ignore_errors: yes
+      when: worker_online
+
+    - name: Restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+      ignore_errors: yes
+      when: worker_online
+
+    - name: Summarize results
+      debug:
+        msg: "{{ 'Node ' + inventory_hostname + ' đã tham gia cụm thành công!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Bỏ qua join' }}"`,
+
+
+
+    '08-verify-cluster': `---
+- name: Verify Kubernetes cluster status
+  hosts: master
+  become: yes
+  gather_facts: no
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+    DEBIAN_FRONTEND: noninteractive
+
+  tasks:
+    - name: Check kubectl availability
+      command: which kubectl
+      register: kubectl_check
+      failed_when: kubectl_check.rc != 0
+      changed_when: false
+
+    - name: List nodes
+      command: kubectl get nodes
+      register: nodes_info
+      changed_when: false
+
+    - name: List system pods
+      command: kubectl get pods -n kube-system
+      register: pods_info
+      changed_when: false
+
+    - name: Display cluster information
+      debug:
+        msg:
+          - "Danh sách Node:"
+          - "{{ nodes_info.stdout_lines }}"
+          - "Pods trong namespace kube-system:"
+          - "{{ pods_info.stdout_lines }}"
+
+    - name: Check node status
+      shell: kubectl get nodes --no-headers | awk '{print $2}' | sort | uniq -c
+      register: node_status
+      changed_when: false
+
+    - name: Report node status
+      debug:
+        msg: |
+          {% if 'NotReady' in node_status.stdout %}
+          Một số node chưa sẵn sàng:
+          {{ node_status.stdout }}
+          {% else %}
+          Tất cả node đã ở trạng thái Ready!
+          {% endif %}
+
+    - name: Check failing pods in kube-system
+      shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
+      register: bad_pods
+      changed_when: false
+
+    - name: Report problematic pods
+      debug:
+        msg: |
+          {% if bad_pods.stdout %}
+          Một số pod chưa ổn định hoặc đang lỗi:
+          {{ bad_pods.stdout }}
+          {% else %}
+          Tất cả pod trong kube-system đều đang Running hoặc Completed!
+          {% endif %}
+
+    - name: Show logs of problematic pods (if any)
+      when: bad_pods.stdout != ""
+      shell: |
+        for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
+          echo "Log của $pod:"; kubectl logs -n kube-system $pod --tail=30 || true; echo "--------------------------------";
+        done
+      register: bad_pods_logs
+      ignore_errors: yes
+
+    - name: Detailed logs
+      when: bad_pods.stdout != ""
+      debug:
+        msg: "{{ bad_pods_logs.stdout_lines | default(['Không có log lỗi']) }}"`,
+
+    '00-reset-cluster': `---
+- name: Reset entire Kubernetes cluster
+  hosts: all
+  become: yes
+  gather_facts: no
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  tasks:
+    - name: Reset Kubernetes cluster
+      shell: kubeadm reset -f
+      ignore_errors: true
+      register: reset_output
+      # Gỡ cụm Kubernetes (kubeadm reset -f)
+
+    - name: Display reset results
+      debug:
+        msg: "{{ reset_output.stdout_lines | default(['Không có cluster cũ để reset.']) }}"
+      # Hiển thị kết quả reset
+
+    - name: Remove Kubernetes configuration directory
+      file:
+        path: /etc/kubernetes
+        state: absent
+      # Xóa thư mục cấu hình Kubernetes
+
+    - name: Remove CNI network configuration
+      file:
+        path: /etc/cni/net.d
+        state: absent
+      # Xóa cấu hình mạng CNI
+
+    - name: Remove root kubeconfig
+      file:
+        path: /root/.kube
+        state: absent
+      # Xóa file kubeconfig của root
+
+    - name: Remove normal user kubeconfig
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: absent
+      when: ansible_user != "root"
+      # Xóa file kubeconfig của user thường
+
+    - name: Clean up iptables rules
+      shell: |
+        iptables -F && iptables -X
+        iptables -t nat -F && iptables -t nat -X
+        iptables -t mangle -F && iptables -t mangle -X
+        iptables -P FORWARD ACCEPT
+      ignore_errors: true
+      # Dọn iptables
+
+    - name: Restart containerd service
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+      # Khởi động lại containerd
+
+    - name: Confirm reset completed
+      debug:
+        msg:
+          - "Node {{ inventory_hostname }} đã được reset sạch (chỉ xóa dữ liệu)."
+      # Xác nhận reset hoàn tất`,
+
+    'deploy-full-cluster': `---
+- name: Step 0 - Reset Kubernetes cluster
+  hosts: all
+  become: yes
+  gather_facts: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  tasks:
+    - name: Reset old cluster if exists
+      shell: kubeadm reset -f || true
+      ignore_errors: true
+      # Reset cụm Kubernetes cũ nếu tồn tại
+
+    - name: Remove old Kubernetes configuration
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /etc/cni/net.d
+        - /root/.kube
+        - "/home/{{ ansible_user }}/.kube"
+      ignore_errors: true
+      # Xóa các thư mục cấu hình Kubernetes cũ
+
+    - name: Restart containerd service
+      shell: systemctl restart containerd || true
+      ignore_errors: true
+      # Khởi động lại containerd để đảm bảo sạch sẽ
+
+- name: Step 1 - Update /etc/hosts and hostname
+  hosts: all
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Update /etc/hosts file for all nodes
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ hostvars[item].ansible_host }} {{ item }}"
+        state: present
+        create: yes
+        insertafter: EOF
+      loop: "{{ groups['all'] }}"
+      when: hostvars[item].ansible_host is defined
+      # Thêm danh sách các node vào /etc/hosts để cluster nhận diện nhau
+
+    - name: Set hostname according to inventory
+      hostname:
+        name: "{{ inventory_hostname }}"
+      when: ansible_hostname != inventory_hostname
+      # Đặt hostname theo tên trong inventory
+
+    - name: Verify hostname
+      shell: hostnamectl
+      register: host_info
+      # Kiểm tra hostname đã được đặt đúng
+
+    - name: Display hostname info
+      debug:
+        msg: "{{ host_info.stdout_lines }}"
+      # Hiển thị thông tin hostname
+
+- name: Step 2 - Configure kernel and containerd
+  hosts: all
+  become: yes
+  gather_facts: no
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  tasks:
+    - name: Disable swap
+      shell: swapoff -a && sed -i '/swap/d' /etc/fstab || true
+      # Tắt swap vì Kubernetes không hỗ trợ
+
+    - name: Load kernel modules for containerd
+      copy:
+        dest: /etc/modules-load.d/containerd.conf
+        content: |
+          overlay
+          br_netfilter
+      # Tải các kernel module cần thiết cho containerd
+
+    - name: Activate kernel modules
+      shell: |
+        modprobe overlay || true
+        modprobe br_netfilter || true
+      # Kích hoạt module overlay và br_netfilter
+
+    - name: Configure sysctl parameters for Kubernetes
+      copy:
+        dest: /etc/sysctl.d/99-kubernetes-cri.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward                 = 1
+      # Cấu hình sysctl cho networking Kubernetes
+
+    - name: Apply sysctl configuration
+      command: sysctl --system
+      # Áp dụng cấu hình sysctl
+
+    - name: Install containerd runtime
+      apt:
+        name: containerd
+        state: present
+        update_cache: yes
+      # Cài đặt containerd container runtime
+
+    - name: Generate default containerd config
+      shell: |
+        mkdir -p /etc/containerd
+        containerd config default > /etc/containerd/config.toml
+      # Tạo file cấu hình mặc định cho containerd
+
+    - name: Enable SystemdCgroup
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+      # Bật SystemdCgroup trong containerd
+
+    - name: Restart and enable containerd
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+      # Khởi động lại và bật containerd để áp dụng cấu hình
+
+- name: Step 3 - Install Kubernetes core components
+  hosts: all
+  become: yes
+  gather_facts: no
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  tasks:
+    - name: Add Kubernetes GPG key
+      shell: |
+        mkdir -p /usr/share/keyrings
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \
+        gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
+      changed_when: false
+      ignore_errors: true
+      # Thêm GPG key chính thức của Kubernetes
+
+    - name: Add Kubernetes repository
+      copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: |
+          deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
+      # Thêm repository APT của Kubernetes
+
+    - name: Install kubelet, kubeadm, kubectl
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: yes
+      # Cài đặt các thành phần core của Kubernetes
+
+    - name: Hold package version
+      command: apt-mark hold kubelet kubeadm kubectl
+      # Giữ phiên bản các package để tránh cập nhật tự động
+
+- name: Step 4 - Initialize Master node
   hosts: master
   become: yes
   gather_facts: yes
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Lấy địa chỉ master động
+    - name: Get master IP address
       set_fact:
         master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
+      # Lấy địa chỉ IP của master node
 
-    - name: Hiển thị địa chỉ master
-      debug:
-        msg: "📡 Sử dụng địa chỉ master: {{ master_ip }}"
+    - name: Reset old control plane (if any)
+      shell: kubeadm reset -f || true
+      # Reset control plane cũ nếu có
 
-    - name: Reset cluster cũ và dọn sạch dữ liệu
-      shell: |
-        kubeadm reset -f || true
-        rm -rf /etc/kubernetes /var/lib/etcd /var/lib/kubelet /etc/cni/net.d
-        systemctl restart containerd || true
-      ignore_errors: yes
-
-    - name: Khởi tạo Control Plane (Master)
+    - name: Initialize Kubernetes control plane
       command: >
         kubeadm init
         --control-plane-endpoint "{{ master_ip }}:6443"
@@ -1362,35 +1601,41 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: kubeadm_init
       failed_when: "'error' in kubeadm_init.stderr"
       changed_when: "'Your Kubernetes control-plane has initialized successfully' in kubeadm_init.stdout"
+      # Khởi tạo control plane Kubernetes với Calico CNI
 
-    - name: Cấu hình kubeconfig cho root
+    - name: Copy kubeconfig for root
       shell: |
-        mkdir -p $HOME/.kube
-        cp /etc/kubernetes/admin.conf $HOME/.kube/config
-        chown $(id -u):$(id -g) $HOME/.kube/config
+        mkdir -p /root/.kube
+        cp -i /etc/kubernetes/admin.conf /root/.kube/config
+        chown root:root /root/.kube/config
       args:
         executable: /bin/bash
+      # Sao chép kubeconfig cho user root
 
-    - name: Cấu hình kubeconfig cho người dùng thường ({{ ansible_user }})
+    - name: Copy kubeconfig for normal user
       when: ansible_user != "root"
       block:
-        - name: Tạo thư mục kubeconfig cho user
+        - name: Create ~/.kube directory
           file:
             path: "/home/{{ ansible_user }}/.kube"
             state: directory
+            owner: "{{ ansible_user }}"
+            group: "{{ ansible_user }}"
             mode: '0755'
+          # Tạo thư mục kubeconfig cho user thường
 
-        - name: Sao chép kubeconfig cho user
+        - name: Copy kubeconfig file
           copy:
             src: /etc/kubernetes/admin.conf
             dest: "/home/{{ ansible_user }}/.kube/config"
+            remote_src: yes
             owner: "{{ ansible_user }}"
             group: "{{ ansible_user }}"
             mode: '0600'
-            remote_src: yes
+          # Sao chép kubeconfig cho user thường
+      # Sao chép kubeconfig cho user thường (nếu không phải root)
 
----
-- name: 🌐 Bước 5 – Cài đặt Calico CNI
+- name: Step 5 - Install Calico CNI
   hosts: master
   become: yes
   gather_facts: false
@@ -1401,32 +1646,36 @@ async function generateK8sPlaybookFromTemplate(template) {
     calico_version: "v3.27.3"
     calico_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml"
   tasks:
-    - name: Kiểm tra Calico CNI có tồn tại không
+    - name: Check if Calico CNI exists
       command: kubectl get daemonset calico-node -n kube-system
       register: calico_check
       ignore_errors: true
+      # Kiểm tra Calico đã được cài đặt trước đó
 
-    - name: Áp dụng Calico manifest (cài mới hoặc cập nhật)
-      shell: |
-        kubectl apply -f {{ calico_url }}
-      args:
-        executable: /bin/bash
+    - name: Apply Calico manifest (install or update)
+      command: kubectl apply -f {{ calico_url }}
       register: calico_apply
       retries: 3
       delay: 10
       until: calico_apply.rc == 0
+      # Áp dụng manifest Calico CNI
 
-    - name: Chờ Calico node pod chạy
+    - name: Wait for Calico node pods to be Running
       shell: |
         kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers 2>/dev/null | grep -c 'Running' || true
       register: calico_running
       retries: 10
       delay: 15
       until: calico_running.stdout | int > 0
+      # Chờ các pod Calico khởi động và ở trạng thái Running
 
----
-- name: 🔗 Bước 6 – Join Worker nodes
-  hosts: worker
+    - name: Confirm Calico pods are active
+      debug:
+        msg: "Calico is running ({{ calico_running.stdout }} pods Running)."
+      # Xác nhận Calico đang hoạt động
+
+- name: Step 6 - Join worker nodes
+  hosts: workers
   become: yes
   gather_facts: false
   environment:
@@ -1434,38 +1683,58 @@ async function generateK8sPlaybookFromTemplate(template) {
   vars:
     join_script: /tmp/kube_join.sh
   tasks:
-    - name: Lấy lệnh join từ master
+    - name: Test SSH connectivity to worker node
+      ping:
+      register: ping_result
+      ignore_errors: yes
+      # Kiểm tra kết nối SSH đến worker node
+
+    - name: Mark worker online status
+      set_fact:
+        worker_online: "{{ ping_result is succeeded }}"
+      # Đánh dấu worker nào online/offline
+
+    - name: Display worker online status
+      debug:
+        msg: "Worker {{ inventory_hostname }} is {{ 'ONLINE' if worker_online else 'OFFLINE' }}"
+      # Hiển thị trạng thái online/offline
+
+    - name: Retrieve join command from master
       delegate_to: "{{ groups['master'][0] }}"
       run_once: true
       shell: kubeadm token create --print-join-command
       register: join_cmd
+      when: worker_online
+      # Lấy lệnh join từ master node (chỉ chạy 1 lần)
 
-    - name: Ghi lệnh join ra file
+    - name: Save join command to script file
       copy:
         content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
         dest: "{{ join_script }}"
         mode: '0755'
-
-    - name: Reset node (nếu có cụm cũ)
-      shell: |
-        kubeadm reset -f || true
-        rm -rf /etc/kubernetes /var/lib/kubelet /etc/cni/net.d
-        systemctl restart containerd || true
+      when: worker_online
       ignore_errors: yes
+      # Lưu lệnh join vào file script
 
-    - name: Join vào cụm Kubernetes
+    - name: Reset old worker node
+      shell: kubeadm reset -f || true
+      ignore_errors: yes
+      when: worker_online
+      # Reset worker node cũ (nếu có)
+
+    - name: Execute join command
       shell: "{{ join_script }}"
       register: join_output
       ignore_errors: yes
+      when: worker_online
+      # Thực thi lệnh join để worker tham gia cluster
 
-    - name: Khởi động lại kubelet
-      systemd:
-        name: kubelet
-        state: restarted
-        enabled: yes
+    - name: Display join result summary
+      debug:
+        msg: "{{ 'Node ' + inventory_hostname + ' đã tham gia cụm thành công!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Bỏ qua join' }}"
+      # Báo cáo kết quả cuối cùng
 
----
-- name: 🧩 Bước 7 – Kiểm tra trạng thái cụm Kubernetes
+- name: Step 7 - Verify Kubernetes cluster status
   hosts: master
   become: yes
   gather_facts: false
@@ -1473,95 +1742,105 @@ async function generateK8sPlaybookFromTemplate(template) {
     KUBECONFIG: /etc/kubernetes/admin.conf
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Kiểm tra kubectl có sẵn không
+    - name: Check kubectl binary
       command: which kubectl
       register: kubectl_check
       failed_when: kubectl_check.rc != 0
       changed_when: false
+      # Kiểm tra kubectl đã được cài đặt
 
-    - name: Liệt kê danh sách node
+    - name: List all nodes
       command: kubectl get nodes -o wide
       register: nodes_info
       changed_when: false
+      # Liệt kê tất cả các node trong cluster
 
-    - name: Liệt kê pods hệ thống
+    - name: List system pods
       command: kubectl get pods -n kube-system -o wide
       register: pods_info
       changed_when: false
+      # Liệt kê các pod trong namespace kube-system
 
-    - name: ✅ Hiển thị thông tin cụm
+    - name: Display cluster info
       debug:
         msg:
-          - "📦 Danh sách Node:"
+          - "Node list:"
           - "{{ nodes_info.stdout_lines }}"
-          - "📦 Pods trong namespace kube-system:"
+          - "Pods in kube-system namespace:"
           - "{{ pods_info.stdout_lines }}"
+      # Hiển thị thông tin chi tiết về cluster
 
-    - name: 🧠 Kiểm tra trạng thái node
+    - name: Check node readiness
       shell: kubectl get nodes --no-headers | awk '{print $1, $2}' | column -t
       register: node_status
       changed_when: false
+      # Kiểm tra trạng thái Ready của các node
 
-    - name: 📊 Báo cáo tình trạng node
+    - name: Node status summary
       debug:
         msg: |
           {% if 'NotReady' in node_status.stdout %}
-          ⚠️ Một số node chưa sẵn sàng:
+          Some nodes are not ready:
           {{ node_status.stdout }}
-          ➡️ Hãy kiểm tra lại kubelet hoặc CNI (Flannel/Calico) trên các node này.
+          Please check kubelet or CNI (Calico) on those nodes.
           {% else %}
-          ✅ 🎯 Tất cả node đều ở trạng thái Ready!
+          All nodes are in Ready state!
           {{ node_status.stdout }}
           {% endif %}
+      # Tổng kết trạng thái node
 
-    - name: 🔍 Kiểm tra pod lỗi trong kube-system
+    - name: Detect problematic pods
       shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
       register: bad_pods
       changed_when: false
+      # Phát hiện các pod có vấn đề
 
-    - name: 📋 Báo cáo pod lỗi
+    - name: Report problematic pods
       debug:
         msg: |
           {% if bad_pods.stdout %}
-          ⚠️ Một số pod trong kube-system chưa ổn định hoặc đang lỗi:
+          Some pods in kube-system are not stable:
           {{ bad_pods.stdout }}
-          ➡️ Hãy kiểm tra log pod để xác định nguyên nhân.
           {% else %}
-          ✅ 🟢 Tất cả pod trong kube-system đều Running hoặc Completed!
+          All kube-system pods are Running or Completed!
           {% endif %}
+      # Báo cáo các pod có vấn đề
 
-    - name: 🧾 Lấy log của pod lỗi (nếu có)
+    - name: Collect logs from problematic pods
       when: bad_pods.stdout != ""
       shell: |
-        echo "====== 🧠 LOG POD LỖI ======"
+        echo "==== Problematic Pod Logs ===="
         for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
           echo "---------------------------------------------"
-          echo "📄 Pod: $pod"
-          kubectl logs -n kube-system $pod --tail=30 || echo "❌ Không thể lấy log cho $pod"
+          echo "Pod: $pod"
+          kubectl logs -n kube-system $pod --tail=30 || echo "Cannot get logs for $pod"
           echo
         done
       register: bad_pods_logs
       ignore_errors: yes
+      # Thu thập log của các pod có vấn đề
 
-    - name: 🧠 Log chi tiết pod lỗi
+    - name: Display detailed logs
       when: bad_pods.stdout != ""
       debug:
-        msg: "{{ bad_pods_logs.stdout_lines | default(['⚠️ Không có log lỗi hoặc pod đã khởi động lại.']) }}"`
-  ,
+        msg: "{{ bad_pods_logs.stdout_lines | default(['No error logs or pods restarted.']) }}"
+      # Hiển thị log chi tiết của các pod có vấn đề`
+    ,
 
     'deploy-full-cluster-flannel': `---
-- name: 🧹 Bước 0 – Reset cụm Kubernetes
+- name: Step 0 - Reset Kubernetes cluster
   hosts: all
   become: yes
   gather_facts: yes
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: 🧽 Gỡ cụm Kubernetes
+    - name: Reset old cluster if exists
       shell: kubeadm reset -f || true
       ignore_errors: true
+      # Reset cụm Kubernetes cũ nếu tồn tại
 
-    - name: 🧹 Xóa cấu hình Kubernetes
+    - name: Remove old Kubernetes configuration
       file:
         path: "{{ item }}"
         state: absent
@@ -1571,112 +1850,130 @@ async function generateK8sPlaybookFromTemplate(template) {
         - /root/.kube
         - "/home/{{ ansible_user }}/.kube"
       ignore_errors: true
+      # Xóa các thư mục cấu hình Kubernetes cũ
 
-    - name: 🔄 Khởi động lại containerd
+    - name: Restart containerd service
       shell: systemctl restart containerd || true
       ignore_errors: true
+      # Khởi động lại containerd để đảm bảo sạch sẽ
 
-
-# ------------------------------------------------------------------------------
-
-- name: 📝 Bước 1 – Cập nhật hosts & hostname
+- name: Step 1 - Update /etc/hosts and hostname
   hosts: all
   become: yes
   gather_facts: yes
   tasks:
-    - name: Thêm tất cả node vào /etc/hosts
+    - name: Update /etc/hosts file for all nodes
       lineinfile:
         path: /etc/hosts
-        line: "{{ hostvars[item].ansible_host | default(item) }} {{ hostvars[item].ansible_user }}"
+        line: "{{ hostvars[item].ansible_host }} {{ item }}"
         state: present
         create: yes
         insertafter: EOF
       loop: "{{ groups['all'] }}"
-      when: hostvars[item].ansible_user is defined
+      when: hostvars[item].ansible_host is defined
+      # Thêm danh sách các node vào /etc/hosts để cluster nhận diện nhau
 
-    - name: Đặt hostname theo inventory
+    - name: Set hostname according to inventory
       hostname:
-        name: "{{ hostvars[inventory_hostname].ansible_user }}"
-      when: ansible_hostname != hostvars[inventory_hostname].ansible_user
+        name: "{{ inventory_hostname }}"
+      when: ansible_hostname != inventory_hostname
+      # Đặt hostname theo tên trong inventory
 
----
-- name: ⚙️ Bước 2 – Cấu hình kernel & containerd
+    - name: Verify hostname
+      shell: hostnamectl
+      register: host_info
+      # Kiểm tra hostname đã được đặt đúng
+
+    - name: Display hostname info
+      debug:
+        msg: "{{ host_info.stdout_lines }}"
+      # Hiển thị thông tin hostname
+
+- name: Step 2 - Configure kernel and containerd
   hosts: all
   become: yes
   gather_facts: no
   tasks:
-    - name: 🚫 Tắt swap
+    - name: Disable swap
       shell: swapoff -a && sed -i '/swap/d' /etc/fstab || true
+      # Tắt swap vì Kubernetes không hỗ trợ
 
-    - name: 🧩 Tải module kernel
+    - name: Load kernel modules for containerd
       copy:
         dest: /etc/modules-load.d/containerd.conf
         content: |
           overlay
           br_netfilter
+      # Tải các kernel module cần thiết cho containerd
 
-    - name: 📡 Kích hoạt module
+    - name: Activate kernel modules
       shell: |
         modprobe overlay || true
         modprobe br_netfilter || true
+      # Kích hoạt module overlay và br_netfilter
 
-    - name: 🧠 Thiết lập sysctl
+    - name: Configure sysctl parameters for Kubernetes
       copy:
         dest: /etc/sysctl.d/99-kubernetes-cri.conf
         content: |
           net.bridge.bridge-nf-call-iptables  = 1
           net.bridge.bridge-nf-call-ip6tables = 1
           net.ipv4.ip_forward                 = 1
+      # Cấu hình sysctl cho networking Kubernetes
 
-    - name: 🧾 Áp dụng sysctl
+    - name: Apply sysctl configuration
       command: sysctl --system
+      # Áp dụng cấu hình sysctl
 
-    - name: 📦 Cài containerd
+    - name: Install containerd runtime
       apt:
         name: containerd
         state: present
         update_cache: yes
+      # Cài đặt containerd container runtime
 
-    - name: ⚙️ Sinh file config containerd
+    - name: Generate default containerd config
       shell: |
         mkdir -p /etc/containerd
         containerd config default > /etc/containerd/config.toml
+      # Tạo file cấu hình mặc định cho containerd
 
-    - name: 🔧 Bật SystemdCgroup
+    - name: Enable SystemdCgroup
       replace:
         path: /etc/containerd/config.toml
         regexp: 'SystemdCgroup = false'
         replace: 'SystemdCgroup = true'
+      # Bật SystemdCgroup trong containerd
 
-    - name: 🔁 Khởi động containerd
+    - name: Restart and enable containerd
       systemd:
         name: containerd
         state: restarted
         enabled: yes
+      # Khởi động lại và bật containerd để áp dụng cấu hình
 
-
-# ------------------------------------------------------------------------------
-
-- name: ☸️ Bước 3 – Cài đặt Kubernetes core
+- name: Step 3 - Install Kubernetes core components
   hosts: all
   become: yes
   gather_facts: no
   tasks:
-    - name: 🔑 Thêm GPG key Kubernetes
+    - name: Add Kubernetes GPG key
       shell: |
         mkdir -p /usr/share/keyrings
         curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \
         gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
       changed_when: false
       ignore_errors: true
+      # Thêm GPG key chính thức của Kubernetes
 
-    - name: 📦 Thêm repo Kubernetes
+    - name: Add Kubernetes repository
       copy:
         dest: /etc/apt/sources.list.d/kubernetes.list
         content: |
           deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
+      # Thêm repository APT của Kubernetes
 
-    - name: ⚙️ Cài gói Kubernetes
+    - name: Install kubelet, kubeadm, kubectl
       apt:
         name:
           - kubelet
@@ -1684,26 +1981,27 @@ async function generateK8sPlaybookFromTemplate(template) {
           - kubectl
         state: present
         update_cache: yes
+      # Cài đặt các thành phần core của Kubernetes
 
-    - name: 🔒 Giữ phiên bản
+    - name: Hold package version
       command: apt-mark hold kubelet kubeadm kubectl
+      # Giữ phiên bản các package để tránh cập nhật tự động
 
-
-# ------------------------------------------------------------------------------
-
-- name: 🚀 Bước 4 – Khởi tạo Master node
+- name: Step 4 - Initialize Master node
   hosts: master
   become: yes
   gather_facts: yes
   tasks:
-    - name: 📡 Xác định IP Master
+    - name: Get master IP address
       set_fact:
         master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
+      # Lấy địa chỉ IP của master node
 
-    - name: 🧹 Reset trước khi init
+    - name: Reset old control plane (if any)
       shell: kubeadm reset -f || true
+      # Reset control plane cũ nếu có
 
-    - name: ☸️ Khởi tạo Control Plane
+    - name: Initialize Kubernetes control plane
       command: >
         kubeadm init
         --control-plane-endpoint "{{ master_ip }}:6443"
@@ -1714,27 +2012,30 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: kubeadm_init
       failed_when: "'error' in kubeadm_init.stderr"
       changed_when: "'Your Kubernetes control-plane has initialized successfully' in kubeadm_init.stdout"
+      # Khởi tạo control plane Kubernetes với Flannel CNI
 
-    - name: ⚙️ Sao chép kubeconfig cho root
+    - name: Copy kubeconfig for root
       shell: |
         mkdir -p /root/.kube
         cp -i /etc/kubernetes/admin.conf /root/.kube/config
         chown root:root /root/.kube/config
       args:
         executable: /bin/bash
+      # Sao chép kubeconfig cho user root
 
-    - name: 👤 Sao chép kubeconfig cho người dùng thường
+    - name: Copy kubeconfig for normal user
       when: ansible_user != "root"
       block:
-        - name: 📁 Tạo thư mục ~/.kube cho user thường
+        - name: Create ~/.kube directory
           file:
             path: "/home/{{ ansible_user }}/.kube"
             state: directory
             owner: "{{ ansible_user }}"
             group: "{{ ansible_user }}"
             mode: '0755'
+          # Tạo thư mục kubeconfig cho user thường
 
-        - name: 📄 Sao chép file kubeconfig
+        - name: Copy kubeconfig file
           copy:
             src: /etc/kubernetes/admin.conf
             dest: "/home/{{ ansible_user }}/.kube/config"
@@ -1742,157 +2043,188 @@ async function generateK8sPlaybookFromTemplate(template) {
             owner: "{{ ansible_user }}"
             group: "{{ ansible_user }}"
             mode: '0600'
+          # Sao chép kubeconfig cho user thường
+      # Sao chép kubeconfig cho user thường (nếu không phải root)
 
-        - name: 🔁 Kiểm tra quyền truy cập kubectl
-          shell: runuser -l {{ ansible_user }} -c 'kubectl get nodes || true'
-          register: user_kubectl_check
-          ignore_errors: yes
-
-        - name: 📋 Kết quả kiểm tra user
-          debug:
-            msg: "{{ user_kubectl_check.stdout_lines | default(['⚠️ Không thể xác thực bằng user thường.']) }}"
-
-
-# ------------------------------------------------------------------------------
-
-- name: 🌐 Bước 5 – Cài đặt Flannel CNI
+- name: Step 5 - Install Flannel CNI
   hosts: master
   become: yes
   gather_facts: false
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
+    DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: 🌐 Áp dụng Flannel
+    - name: Apply Flannel CNI manifest
       command: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
       register: flannel_apply
       changed_when: "'created' in flannel_apply.stdout or 'configured' in flannel_apply.stdout"
+      # Áp dụng manifest Flannel CNI
 
-    - name: ⏳ Chờ Flannel pod Running
+    - name: Wait for Flannel pods to be Running
       shell: |
         kubectl get pods -n kube-flannel --no-headers 2>/dev/null | grep -c 'Running' || true
       register: flannel_running
       retries: 10
       delay: 15
       until: flannel_running.stdout | int > 0
+      # Chờ các pod Flannel khởi động và ở trạng thái Running
 
+    - name: Confirm Flannel pods are active
+      debug:
+        msg: "Flannel is running ({{ flannel_running.stdout }} pods Running)."
+      # Xác nhận Flannel đang hoạt động
 
-# ------------------------------------------------------------------------------
-
-- name: 🔗 Bước 6 – Join Worker nodes
-  hosts: worker
+- name: Step 6 - Join worker nodes
+  hosts: workers
   become: yes
   gather_facts: false
   vars:
     join_script: /tmp/kube_join.sh
   tasks:
-    - name: 🔁 Lấy token join từ master
+    - name: Test SSH connectivity to worker node
+      ping:
+      register: ping_result
+      ignore_errors: yes
+      # Kiểm tra kết nối SSH đến worker node
+
+    - name: Mark worker online status
+      set_fact:
+        worker_online: "{{ ping_result is succeeded }}"
+      # Đánh dấu worker nào online/offline
+
+    - name: Display worker online status
+      debug:
+        msg: "Worker {{ inventory_hostname }} is {{ 'ONLINE' if worker_online else 'OFFLINE' }}"
+      # Hiển thị trạng thái online/offline
+
+    - name: Retrieve join command from master
       delegate_to: "{{ groups['master'][0] }}"
       run_once: true
       shell: kubeadm token create --print-join-command
       register: join_cmd
+      when: worker_online
+      # Lấy lệnh join từ master node (chỉ chạy 1 lần)
 
-    - name: 💾 Ghi lệnh join ra file
+    - name: Save join command to script file
       copy:
         content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
         dest: "{{ join_script }}"
         mode: '0755'
+      when: worker_online
+      ignore_errors: yes
+      # Lưu lệnh join vào file script
 
-    - name: 🧹 Reset node cũ
+    - name: Reset old worker node
       shell: kubeadm reset -f || true
-      ignore_errors: true
+      ignore_errors: yes
+      when: worker_online
+      # Reset worker node cũ (nếu có)
 
-    - name: 🔗 Thực thi join
+    - name: Execute join command
       shell: "{{ join_script }}"
       register: join_output
-      ignore_errors: true
+      ignore_errors: yes
+      when: worker_online
+      # Thực thi lệnh join để worker tham gia cluster
 
+    - name: Display join result summary
+      debug:
+        msg: "{{ 'Node ' + inventory_hostname + ' đã tham gia cụm thành công!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Bỏ qua join' }}"
+      # Báo cáo kết quả cuối cùng
 
-# ------------------------------------------------------------------------------
-
-- name: ✅ Bước 7 – Xác minh cụm Kubernetes
+- name: Step 7 - Verify Kubernetes cluster status
   hosts: master
   become: yes
   gather_facts: false
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   tasks:
-    - name: ⚙️ Kiểm tra kubectl có sẵn không
+    - name: Check kubectl binary
       command: which kubectl
       register: kubectl_check
       failed_when: kubectl_check.rc != 0
       changed_when: false
+      # Kiểm tra kubectl đã được cài đặt
 
-    - name: 📋 Liệt kê danh sách node
+    - name: List all nodes
       command: kubectl get nodes -o wide
       register: nodes_info
       changed_when: false
+      # Liệt kê tất cả các node trong cluster
 
-    - name: 📦 Liệt kê pods hệ thống
+    - name: List system pods
       command: kubectl get pods -n kube-system -o wide
       register: pods_info
       changed_when: false
+      # Liệt kê các pod trong namespace kube-system
 
-    - name: ✅ Hiển thị thông tin cụm
+    - name: Display cluster info
       debug:
         msg:
-          - "📦 Danh sách Node:"
+          - "Node list:"
           - "{{ nodes_info.stdout_lines }}"
-          - "📦 Pods trong namespace kube-system:"
+          - "Pods in kube-system namespace:"
           - "{{ pods_info.stdout_lines }}"
+      # Hiển thị thông tin chi tiết về cluster
 
-    - name: 🧠 Kiểm tra trạng thái node
+    - name: Check node readiness
       shell: kubectl get nodes --no-headers | awk '{print $1, $2}' | column -t
       register: node_status
       changed_when: false
+      # Kiểm tra trạng thái Ready của các node
 
-    - name: 📊 Báo cáo tình trạng node
+    - name: Node status summary
       debug:
         msg: |
           {% if 'NotReady' in node_status.stdout %}
-          ⚠️ Một số node chưa sẵn sàng:
+          Some nodes are not ready:
           {{ node_status.stdout }}
-          ➡️ Hãy kiểm tra lại kubelet hoặc CNI (Flannel/Calico) trên các node này.
+          Please check kubelet or CNI (Flannel) on those nodes.
           {% else %}
-          ✅ 🎯 Tất cả node đều ở trạng thái Ready!
+          All nodes are in Ready state!
           {{ node_status.stdout }}
           {% endif %}
+      # Tổng kết trạng thái node
 
-    - name: 🔍 Kiểm tra pod lỗi trong kube-system
+    - name: Detect problematic pods
       shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
       register: bad_pods
       changed_when: false
+      # Phát hiện các pod có vấn đề
 
-    - name: 📋 Báo cáo pod lỗi
+    - name: Report problematic pods
       debug:
         msg: |
           {% if bad_pods.stdout %}
-          ⚠️ Một số pod trong kube-system chưa ổn định hoặc đang lỗi:
+          Some pods in kube-system are not stable:
           {{ bad_pods.stdout }}
-          ➡️ Hãy kiểm tra log pod để xác định nguyên nhân.
           {% else %}
-          ✅ 🟢 Tất cả pod trong kube-system đều Running hoặc Completed!
+          All kube-system pods are Running or Completed!
           {% endif %}
+      # Báo cáo các pod có vấn đề
 
-    - name: 🧾 Lấy log của pod lỗi (nếu có)
+    - name: Collect logs from problematic pods
       when: bad_pods.stdout != ""
       shell: |
-        echo "====== 🧠 LOG POD LỖI ======"
+        echo "==== Problematic Pod Logs ===="
         for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
           echo "---------------------------------------------"
-          echo "📄 Pod: $pod"
-          kubectl logs -n kube-system $pod --tail=30 || echo "❌ Không thể lấy log cho $pod"
+          echo "Pod: $pod"
+          kubectl logs -n kube-system $pod --tail=30 || echo "Cannot get logs for $pod"
           echo
         done
       register: bad_pods_logs
       ignore_errors: yes
+      # Thu thập log của các pod có vấn đề
 
-    - name: 🧠 Log chi tiết pod lỗi
+    - name: Display detailed logs
       when: bad_pods.stdout != ""
       debug:
-        msg: "{{ bad_pods_logs.stdout_lines | default(['⚠️ Không có log lỗi hoặc pod đã khởi động lại.']) }}"
+        msg: "{{ bad_pods_logs.stdout_lines | default(['No error logs or pods restarted.']) }}"
+      # Hiển thị log chi tiết của các pod có vấn đề
 `
   };
-  
+
   // Map template value (without numbers) to template key (with numbers)
   const templateMapping = {
     'update-hosts-hostname': '01-update-hosts-hostname',
@@ -1907,63 +2239,65 @@ async function generateK8sPlaybookFromTemplate(template) {
     'install-ingress': '09-install-ingress',
     'install-helm': '10-install-helm',
     'setup-storage': '11-setup-storage',
+    'prepare-and-join-worker': '12-prepare-and-join-worker',
     'deploy-full-cluster': 'deploy-full-cluster',
     'deploy-full-cluster-flannel': 'deploy-full-cluster-flannel',
     'reset-cluster': '00-reset-cluster'
   };
-  
+
   // Get the actual template key
   const actualTemplate = templateMapping[template] || template;
-  
+
   const playbookContent = templates[actualTemplate];
   if (!playbookContent) {
     throw new Error('Template không tồn tại');
   }
-  
+
   const filename = actualTemplate + '.yml';
-  
+
   // Check if playbook already exists
   const exists = await checkPlaybookExists(filename);
   console.log(`Checking if ${filename} exists:`, exists);
-  
+
   if (exists) {
     const templateNames = {
-      '00-reset-cluster': '🧹 Reset toàn bộ cluster',
-      '01-update-hosts-hostname': '📝 Cập nhật hosts & hostname',
-      '02-kernel-sysctl': '⚙️ Cấu hình kernel & sysctl',
-      '03-install-containerd': '🐳 Cài đặt Containerd',
-      '04-install-kubernetes': '☸️ Cài đặt Kubernetes',
-      '05-init-master': '🚀 Khởi tạo Master',
-      '06-install-cni': '🌐 Cài CNI (Calico)',
-      '06-install-flannel': '🌐 Cài CNI (Flannel)',
-      '07-join-workers': '🔗 Join Workers',
-      '08-verify-cluster': '🧩 Xác minh trạng thái cụm',
-      '09-install-ingress': '🌐 Cài Ingress Controller',
-      '10-install-helm': '⚓ Cài Helm',
-      '11-setup-storage': '💾 Setup Storage',
-      'deploy-full-cluster': '🚀 Triển khai toàn bộ cluster (Calico)',
-      'deploy-full-cluster-flannel': '🚀 Triển khai toàn bộ cluster (Flannel)'
+      '00-reset-cluster': 'Reset toàn bộ cluster',
+      '01-update-hosts-hostname': 'Cập nhật hosts & hostname',
+      '02-kernel-sysctl': 'Cấu hình kernel & sysctl',
+      '03-install-containerd': 'Cài đặt Containerd',
+      '04-install-kubernetes': 'Cài đặt Kubernetes',
+      '05-init-master': 'Khởi tạo Master',
+      '06-install-cni': 'Cài CNI (Calico)',
+      '06-install-flannel': 'Cài CNI (Flannel)',
+      '07-join-workers': 'Join Workers',
+      '08-verify-cluster': 'Xác minh trạng thái cụm',
+      '09-install-ingress': 'Cài Ingress Controller',
+      '10-install-helm': 'Cài Helm',
+      '11-setup-storage': 'Setup Storage',
+      '12-prepare-and-join-worker': 'Chuẩn bị & Join Worker (02→03→04→07)',
+      'deploy-full-cluster': 'Triển khai toàn bộ cluster (Calico)',
+      'deploy-full-cluster-flannel': 'Triển khai toàn bộ cluster (Flannel)'
     };
-    
+
     const templateName = templateNames[actualTemplate] || actualTemplate;
     const confirmMessage = `Playbook "${filename}" (${templateName}) đã tồn tại. Bạn có muốn ghi đè lên file cũ?`;
-    
+
     console.log('Showing confirm dialog for:', confirmMessage);
-    
+
     if (!confirm(confirmMessage)) {
       console.log('User cancelled overwrite');
       throw new Error('Đã hủy tạo playbook từ template');
     }
-    
+
     console.log('User confirmed overwrite');
   }
-  
-  // Thay thế cluster_id trong playbook content nếu có
+
+  // Thay thế cluster_id trong nội dung playbook nếu có
   let finalPlaybookContent = playbookContent;
   if (getClusterId() && playbookContent.includes('{{ cluster_id | default(1) }}')) {
     finalPlaybookContent = playbookContent.replace('{{ cluster_id | default(1) }}', getClusterId());
   }
-  
+
   try {
     const result = await fetch(`/api/ansible-playbook/save/${getClusterId()}`, {
       method: 'POST',
@@ -1972,46 +2306,46 @@ async function generateK8sPlaybookFromTemplate(template) {
       },
       body: `filename=${encodeURIComponent(filename)}&content=${encodeURIComponent(finalPlaybookContent)}`
     });
-    
+
     if (!result.ok) {
       const errorData = await result.json();
       throw new Error(errorData.error || 'Lỗi tạo playbook');
     }
-    
+
     return await result.json();
   } catch (error) {
-    console.error('Error generating K8s playbook:', error);
+    console.error('Lỗi tạo playbook K8s:', error);
     throw error;
   }
 }
 
-// Show playbook content view
+// Hiển thị nội dung playbook
 function showPlaybookContentView() {
   const contentArea = document.getElementById('playbook-content-area');
   const executionArea = document.getElementById('playbook-execution-status');
-  
+
   if (contentArea) contentArea.style.display = 'block';
   if (executionArea) executionArea.style.display = 'none';
 }
 
-// Show playbook execution view
+// Hiển thị thực thi playbook
 function showPlaybookExecutionView() {
   const contentArea = document.getElementById('playbook-content-area');
   const executionArea = document.getElementById('playbook-execution-status');
-  
+
   if (contentArea) contentArea.style.display = 'none';
   if (executionArea) executionArea.style.display = 'block';
 }
 
-// Search playbooks
+// Tìm kiếm playbook
 function searchPlaybooks(query) {
   const items = document.querySelectorAll('#playbook-list .playbook-item');
   const searchTerm = query.toLowerCase().trim();
-  
+
   items.forEach(item => {
     const playbookName = item.textContent.toLowerCase();
     const shouldShow = playbookName.includes(searchTerm);
-    
+
     const listItem = item.closest('.list-group-item');
     if (listItem) {
       listItem.style.display = shouldShow ? 'flex' : 'none';
@@ -2019,14 +2353,14 @@ function searchPlaybooks(query) {
   });
 }
 
-// Refresh playbooks
-window.refreshPlaybooks = async function() {
+// Cập nhật danh sách playbook
+window.refreshPlaybooks = async function () {
   const refreshBtn = document.getElementById('refresh-playbooks-btn');
   if (refreshBtn) {
     refreshBtn.disabled = true;
     refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải...';
   }
-  
+
   try {
     await loadPlaybooks();
   } catch (error) {
@@ -2035,17 +2369,17 @@ window.refreshPlaybooks = async function() {
   } finally {
     if (refreshBtn) {
       refreshBtn.disabled = false;
-      refreshBtn.innerHTML = '🔄 Làm mới';
+      refreshBtn.innerHTML = 'Làm mới';
     }
   }
 };
 
-// Set current cluster ID
+// Đặt ID cluster hiện tại
 function setCurrentClusterId(clusterId) {
   currentClusterId = clusterId;
 }
 
-// Export functions for global access
+// Xuất các hàm cho truy cập toàn cục
 window.loadPlaybook = loadPlaybook;
 window.savePlaybook = savePlaybook;
 window.deletePlaybook = deletePlaybook;
@@ -2058,8 +2392,8 @@ window.showPlaybookExecutionView = showPlaybookExecutionView;
 window.setCurrentClusterId = setCurrentClusterId;
 window.generateK8sPlaybookFromTemplate = generateK8sPlaybookFromTemplate;
 
-// Reset Playbook Manager UI when leaving cluster detail
-window.resetPlaybookUI = function() {
+// Reset giao diện Playbook Manager khi rời khỏi trang chi tiết cluster
+window.resetPlaybookUI = function () {
   try {
     const list = document.getElementById('playbook-list');
     if (list) list.innerHTML = '';
@@ -2077,5 +2411,5 @@ window.resetPlaybookUI = function() {
     if (alertBox) alertBox.innerHTML = '';
     const search = document.getElementById('playbook-search');
     if (search) search.value = '';
-  } catch (_) {}
+  } catch (_) { }
 }

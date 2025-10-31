@@ -19,7 +19,8 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final ServerService serverService;
     private final AnsibleInstallationService ansibleInstallationService;
 
-    public WebSocketConfig(ServerService serverService, AnsibleInstallationService ansibleInstallationService) {
+    public WebSocketConfig(ServerService serverService,
+            AnsibleInstallationService ansibleInstallationService) {
         this.serverService = serverService;
         this.ansibleInstallationService = ansibleInstallationService;
     }

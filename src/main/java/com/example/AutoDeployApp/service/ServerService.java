@@ -16,9 +16,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
-import java.net.InetAddress;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.util.ArrayList;
 
 @Service
 public class ServerService {
@@ -498,16 +504,38 @@ public class ServerService {
     @Transactional
     public List<Server> checkAllStatuses(int timeoutMs) {
         List<Server> servers = serverRepository.findAll();
+        final int POOL_SIZE = Math.min(servers.size(), 16);
+
+        ExecutorService executor = Executors.newFixedThreadPool(POOL_SIZE);
+        long start = System.currentTimeMillis();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (Server s : servers) {
-            boolean online = false;
-            try {
-                InetAddress addr = InetAddress.getByName(s.getHost());
-                online = addr.isReachable(timeoutMs);
-            } catch (Exception ignored) {
-            }
-            s.setStatus(online ? Server.ServerStatus.ONLINE : Server.ServerStatus.OFFLINE);
+            futures.add(CompletableFuture.runAsync(() -> {
+                boolean online = false;
+                try (Socket socket = new Socket()) {
+                    InetSocketAddress addr = new InetSocketAddress(
+                            s.getHost(), s.getPort() != null ? s.getPort() : 22);
+                    socket.connect(addr, timeoutMs);
+                    online = true;
+                } catch (Exception ignored) {
+                } finally {
+                    s.setStatus(online ? Server.ServerStatus.ONLINE : Server.ServerStatus.OFFLINE);
+                }
+            }, executor));
         }
-        return serverRepository.saveAll(servers);
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        executor.shutdown();
+        try {
+            executor.awaitTermination(2, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {
+        }
+
+        serverRepository.saveAll(servers);
+
+        long elapsed = System.currentTimeMillis() - start;
+        System.out.printf("[checkAllStatuses] Checked %d servers in %d ms%n", servers.size(), elapsed);
+
+        return servers;
     }
 
     @Transactional
