@@ -1,6 +1,6 @@
 // Ensure global showAlert exists early
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
-  window.showAlert = function(type, message) {
+  window.showAlert = function (type, message) {
     try {
       const alertDiv = document.createElement('div');
       alertDiv.className = `alert alert-${type === 'error' ? 'danger' : type === 'warning' ? 'warning' : type === 'success' ? 'success' : 'info'} alert-dismissible fade show`;
@@ -384,6 +384,9 @@ async function showClusterDetail(clusterId) {
   // BƯỚC 2: Load K8s Resources sau khi có chi tiết cluster
   showK8sResources();
 
+  // BƯỚC 3: Load Networking resources (Services & Ingress)
+  refreshNetworking(clusterId);
+
   // Tự động kiểm tra trạng thái Ansible và load playbooks sau khi có dữ liệu cluster
   // Chỉ gọi API nếu cluster có nodes
   try {
@@ -618,6 +621,26 @@ async function showClusterDetail(clusterId) {
     });
   }
 
+  // Refresh Networking resources button
+  const refreshNetworkingBtn = document.getElementById('refresh-networking-resources');
+  if (refreshNetworkingBtn && !refreshNetworkingBtn.dataset.bound) {
+    refreshNetworkingBtn.dataset.bound = '1';
+    refreshNetworkingBtn.addEventListener('click', async () => {
+      // Show inline refreshing state
+      const originalHtml = refreshNetworkingBtn.innerHTML;
+      refreshNetworkingBtn.disabled = true;
+      refreshNetworkingBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Đang làm mới...';
+      try {
+        if (currentClusterId) {
+          await loadNetworkingResources(currentClusterId);
+        }
+      } finally {
+        refreshNetworkingBtn.disabled = false;
+        refreshNetworkingBtn.innerHTML = originalHtml;
+      }
+    });
+  }
+
   // Thêm event listeners cho các nút retry
   document.querySelectorAll('.cd-retry-node').forEach(btn => {
     if (!btn.dataset.bound) {
@@ -683,7 +706,7 @@ async function showClusterDetail(clusterId) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({})
             });
-          } catch(_) {}
+          } catch (_) { }
 
           // Hiển thị thông báo thành công
           const msgElement = document.getElementById('cd-msg');
@@ -1409,7 +1432,7 @@ async function removeSingleServerFromCluster(serverId) {
           body: JSON.stringify({})
         });
       }
-    } catch (_) {}
+    } catch (_) { }
 
     if (msg) {
       msg.textContent = `Đã bỏ server ${serverId} khỏi cluster`;
@@ -1735,7 +1758,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadClustersAndServers();
       }
     } catch (err) {
-      
+
     } finally {
       if (indicator) indicator.style.display = 'none';
       if (isServerVisible && serverStatusLoading) {
@@ -1746,7 +1769,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   await autoConnectServers();
-  
+
   // Tự động kết nối định kỳ sau 45 giây
   setInterval(autoConnectServers, 45000);
 
@@ -1799,7 +1822,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
           }, 100);
           document.querySelector('.navbar-collapse')?.classList.remove('show');
-        
+
         } else if (['server-monitor', 'performance', 'resource-usage', 'alerts', 'notifications', 'charts', 'export'].includes(key)) {
           e.preventDefault();
           showSection('monitor');
@@ -3158,7 +3181,7 @@ document.addEventListener('DOMContentLoaded', function () {
     createPbBtn.dataset.bound = '1';
     createPbBtn.addEventListener('click', () => {
       // Hiển thị khu vực nội dung và ẩn khu vực thực thi khi tạo mới
-      try { if (window.showPlaybookContentView) window.showPlaybookContentView(); } catch (_) {}
+      try { if (window.showPlaybookContentView) window.showPlaybookContentView(); } catch (_) { }
 
       document.getElementById('playbook-editor').value = '---\n- name: New playbook\n  hosts: all\n  tasks:\n    - debug: msg:"hello"\n';
       // Gợi ý tên file trống để người dùng nhập
@@ -3824,7 +3847,7 @@ document.addEventListener('DOMContentLoaded', function () {
       }
 
       // Luôn ẩn khung thực thi và hiển thị khu vực nội dung khi tạo playbook
-      try { if (window.showPlaybookContentView) window.showPlaybookContentView(); } catch (_) {}
+      try { if (window.showPlaybookContentView) window.showPlaybookContentView(); } catch (_) { }
 
       try {
         // Generate and save playbook from template
@@ -3853,7 +3876,7 @@ document.addEventListener('DOMContentLoaded', function () {
         showAlert('error', 'Lỗi tạo playbook từ template: ' + error.message);
       } finally {
         // Đảm bảo khung thực thi bị ẩn và nội dung playbook được hiển thị
-        try { if (window.showPlaybookContentView) window.showPlaybookContentView(); } catch (_) {}
+        try { if (window.showPlaybookContentView) window.showPlaybookContentView(); } catch (_) { }
       }
     });
   }
@@ -4374,7 +4397,9 @@ let k8sResourcesData = {
     deployments: [],
     statefulSets: [],
     daemonSets: []
-  }
+  },
+  services: [],
+  ingress: []
 };
 
 // Validation helpers for K8s resource actions
@@ -4396,7 +4421,12 @@ const k8sFilters = {
   podsNamespace: '',
   namespacesSearch: '',
   workloadsSearch: '',
-  workloadsType: ''
+  workloadsType: '',
+  servicesSearch: '',
+  servicesNamespace: '',
+  servicesType: '',
+  ingressSearch: '',
+  ingressNamespace: ''
 };
 
 // Token để vô hiệu hóa kết quả fetch cũ khi chuyển cụm
@@ -4405,6 +4435,7 @@ let k8sRequestToken = 0;
 // Show K8s resources section
 function showK8sResources() {
   document.getElementById('k8s-resources-detail').classList.remove('d-none');
+  document.getElementById('networking-resources-detail').classList.remove('d-none');
   bindK8sResourceFilters();
   loadK8sResources();
 }
@@ -4443,6 +4474,7 @@ function showK8sOutput(title, content) {
 // Hide K8s resources section
 function hideK8sResources() {
   document.getElementById('k8s-resources-detail').classList.add('d-none');
+  document.getElementById('networking-resources-detail').classList.add('d-none');
 }
 
 // Load all K8s resources
@@ -4521,6 +4553,229 @@ async function loadWorkloads(token) {
   } catch (error) {
     showWorkloadsError('Lỗi kết nối: ' + error.message);
   }
+}
+
+// Load networking resources (Services & Ingress)
+async function loadNetworkingResources(clusterId) {
+  try {
+    const response1 = await fetch(`/admin/clusters/${clusterId}/k8s/services`);
+    const data1 = await response1.json();
+
+    const response2 = await fetch(`/admin/clusters/${clusterId}/k8s/ingress`);
+    const data2 = await response2.json();
+
+    if (response1.ok) {
+      k8sResourcesData.services = data1.services || [];
+      renderServices();
+      updateServicesCount();
+    } else {
+      showServicesError(data1.error || 'Lỗi tải services');
+    }
+
+    if (response2.ok) {
+      k8sResourcesData.ingress = data2.ingress || [];
+      renderIngress();
+      updateIngressCount();
+    } else {
+      showIngressError(data2.error || 'Lỗi tải ingress');
+    }
+  } catch (error) {
+    console.error('Error loading networking resources:', error);
+  }
+}
+
+// Refresh networking data
+function refreshNetworking(clusterId) {
+  if (!clusterId) return;
+  loadNetworkingResources(clusterId);
+}
+
+// Render services table
+function renderServices() {
+  const tbody = document.getElementById('services-tbody');
+  let services = k8sResourcesData.services || [];
+
+  // Apply filters
+  const q = (k8sFilters.servicesSearch || '').toLowerCase();
+  const nsFilter = k8sFilters.servicesNamespace || '';
+  const typeFilter = k8sFilters.servicesType || '';
+
+  if (nsFilter) services = services.filter(s => (s.namespace || '') === nsFilter);
+  if (typeFilter) services = services.filter(s => (s.type || '') === typeFilter);
+  if (q) services = services.filter(s =>
+    (s.name || '').toLowerCase().includes(q) ||
+    (s.namespace || '').toLowerCase().includes(q) ||
+    (s.clusterIP || '').toLowerCase().includes(q)
+  );
+
+  if (!services || services.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="text-center text-muted py-3">
+          <i class="bi bi-inbox"></i> Không có services nào
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = services.map(svc => `
+    <tr>
+      <td><span class="badge bg-secondary">${svc.namespace}</span></td>
+      <td><code>${svc.name}</code></td>
+      <td><span class="badge bg-info">${svc.type || 'ClusterIP'}</span></td>
+      <td><code>${svc.clusterIP || '-'}</code></td>
+      <td><small>${svc.externalIP || '-'}</small></td>
+      <td><small>${svc.ports || '-'}</small></td>
+      <td><small>${svc.age || '-'}</small></td>
+      <td>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-info btn-sm" onclick="describeService('${svc.namespace}', '${svc.name}')" title="Chi tiết">
+            <i class="bi bi-info-circle"></i> Chi tiết
+          </button>
+          <button class="btn btn-outline-danger btn-sm" onclick="deleteService('${svc.namespace}', '${svc.name}')" title="Xóa">
+            <i class="bi bi-trash"></i> Xóa
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Render ingress table
+function renderIngress() {
+  const tbody = document.getElementById('ingress-tbody');
+  let ingress = k8sResourcesData.ingress || [];
+
+  // Apply filters
+  const q = (k8sFilters.ingressSearch || '').toLowerCase();
+  const nsFilter = k8sFilters.ingressNamespace || '';
+
+  if (nsFilter) ingress = ingress.filter(i => (i.namespace || '') === nsFilter);
+  if (q) ingress = ingress.filter(i =>
+    (i.name || '').toLowerCase().includes(q) ||
+    (i.namespace || '').toLowerCase().includes(q) ||
+    (i.host || '').toLowerCase().includes(q)
+  );
+
+  if (!ingress || ingress.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="text-center text-muted py-3">
+          <i class="bi bi-inbox"></i> Không có ingress nào
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = ingress.map(ing => `
+    <tr>
+      <td><span class="badge bg-secondary">${ing.namespace}</span></td>
+      <td><code>${ing.name}</code></td>
+      <td><small>${ing.class || '-'}</small></td>
+      <td><small>${ing.host || '*'}</small></td>
+      <td><small>${ing.address || '-'}</small></td>
+      <td><small>${ing.ports || '80'}</small></td>
+      <td><small>${ing.age || '-'}</small></td>
+      <td>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-info btn-sm" onclick="describeIngress('${ing.namespace}', '${ing.name}')" title="Chi tiết">
+            <i class="bi bi-info-circle"></i> Chi tiết
+          </button>
+          <button class="btn btn-outline-danger btn-sm" onclick="deleteIngress('${ing.namespace}', '${ing.name}')" title="Xóa">
+            <i class="bi bi-trash"></i> Xóa
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Update counts
+function updateServicesCount() {
+  const count = k8sResourcesData.services ? k8sResourcesData.services.length : 0;
+  document.getElementById('services-count').textContent = count;
+}
+
+function updateIngressCount() {
+  const count = k8sResourcesData.ingress ? k8sResourcesData.ingress.length : 0;
+  document.getElementById('ingress-count').textContent = count;
+}
+
+function showServicesError(msg) {
+  const tbody = document.getElementById('services-tbody');
+  tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-3">${msg}</td></tr>`;
+}
+
+function showIngressError(msg) {
+  const tbody = document.getElementById('ingress-tbody');
+  tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-3">${msg}</td></tr>`;
+}
+
+// Placeholder functions for actions
+function describeService(namespace, name) {
+  if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
+  fetch(`/admin/clusters/${currentClusterId}/k8s/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`)
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { alert(res.error); return; }
+      showK8sOutput(`Service ${namespace}/${name}`, res.output || '');
+    })
+    .catch(e => alert(e.message || 'Lỗi'));
+}
+
+function deleteService(namespace, name) {
+  if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
+  const nsLower = (namespace || '').toLowerCase();
+  if (nsLower === 'kube-system' || nsLower === 'kube-public' || nsLower === 'kube-node-lease') {
+    alert('Không cho phép xóa Service trong namespace hệ thống');
+    return;
+  }
+  if (!confirm(`Xóa Service ${namespace}/${name}?`)) return;
+  fetch(`/admin/clusters/${currentClusterId}/k8s/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`, {
+    method: 'DELETE'
+  })
+    .then(r => r.json())
+    .then(async res => {
+      if (res.error) { showAlert('danger', res.error); return; }
+      const out = res.output || '';
+      showAlert('success', `Đã xóa Service ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
+      try { await loadNetworkingResources(currentClusterId); } catch (_) { }
+    })
+    .catch(e => alert(e.message || 'Lỗi'));
+}
+
+function describeIngress(namespace, name) {
+  if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
+  fetch(`/admin/clusters/${currentClusterId}/k8s/ingress/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`)
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { alert(res.error); return; }
+      showK8sOutput(`Ingress ${namespace}/${name}`, res.output || '');
+    })
+    .catch(e => alert(e.message || 'Lỗi'));
+}
+
+function deleteIngress(namespace, name) {
+  if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
+  const nsLower = (namespace || '').toLowerCase();
+  if (nsLower === 'kube-system' || nsLower === 'kube-public' || nsLower === 'kube-node-lease') {
+    alert('Không cho phép xóa Ingress trong namespace hệ thống');
+    return;
+  }
+  if (!confirm(`Xóa Ingress ${namespace}/${name}?`)) return;
+  fetch(`/admin/clusters/${currentClusterId}/k8s/ingress/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`, {
+    method: 'DELETE'
+  })
+    .then(r => r.json())
+    .then(async res => {
+      if (res.error) { showAlert('danger', res.error); return; }
+      const out = res.output || '';
+      showAlert('success', `Đã xóa Ingress ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
+      try { await loadNetworkingResources(currentClusterId); } catch (_) { }
+    })
+    .catch(e => alert(e.message || 'Lỗi'));
 }
 
 // Render pods table
@@ -4676,6 +4931,11 @@ function bindK8sResourceFilters() {
   const nsSearch = document.getElementById('namespaces-search');
   const wlSearch = document.getElementById('workloads-search');
   const wlType = document.getElementById('workloads-type-filter');
+  const svcSearch = document.getElementById('services-search');
+  const svcNs = document.getElementById('services-namespace-filter');
+  const svcType = document.getElementById('services-type-filter');
+  const ingSearch = document.getElementById('ingress-search');
+  const ingNs = document.getElementById('ingress-namespace-filter');
 
   const debounce = (fn, delay = 300) => {
     let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
@@ -4686,6 +4946,11 @@ function bindK8sResourceFilters() {
   if (nsSearch && !nsSearch.dataset.bound) { nsSearch.dataset.bound = '1'; nsSearch.addEventListener('input', debounce(e => { k8sFilters.namespacesSearch = e.target.value || ''; renderNamespaces(); })); }
   if (wlSearch && !wlSearch.dataset.bound) { wlSearch.dataset.bound = '1'; wlSearch.addEventListener('input', debounce(e => { k8sFilters.workloadsSearch = e.target.value || ''; renderWorkloads(); })); }
   if (wlType && !wlType.dataset.bound) { wlType.dataset.bound = '1'; wlType.addEventListener('change', e => { k8sFilters.workloadsType = e.target.value || ''; renderWorkloads(); }); }
+  if (svcSearch && !svcSearch.dataset.bound) { svcSearch.dataset.bound = '1'; svcSearch.addEventListener('input', debounce(e => { k8sFilters.servicesSearch = e.target.value || ''; renderServices(); })); }
+  if (svcNs && !svcNs.dataset.bound) { svcNs.dataset.bound = '1'; svcNs.addEventListener('change', e => { k8sFilters.servicesNamespace = e.target.value || ''; renderServices(); }); }
+  if (svcType && !svcType.dataset.bound) { svcType.dataset.bound = '1'; svcType.addEventListener('change', e => { k8sFilters.servicesType = e.target.value || ''; renderServices(); }); }
+  if (ingSearch && !ingSearch.dataset.bound) { ingSearch.dataset.bound = '1'; ingSearch.addEventListener('input', debounce(e => { k8sFilters.ingressSearch = e.target.value || ''; renderIngress(); })); }
+  if (ingNs && !ingNs.dataset.bound) { ingNs.dataset.bound = '1'; ingNs.addEventListener('change', e => { k8sFilters.ingressNamespace = e.target.value || ''; renderIngress(); }); }
 }
 
 // Helper functions for badge classes
@@ -4799,7 +5064,7 @@ function deletePod(namespace, name) {
         if (res.error) { showAlert('danger', res.error); return; }
         const out = res.output || '';
         showAlert('success', `Đã xóa pod ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
-        try { await loadK8sResources(); } catch (_) {}
+        try { await loadK8sResources(); } catch (_) { }
       })
       .catch(e => alert(e.message || 'Lỗi'));
   }
@@ -4846,7 +5111,7 @@ function scaleWorkload(type, namespace, name) {
         if (res.error) { showAlert('danger', res.error); return; }
         const out = res.output || '';
         showAlert('success', `Đã scale ${type} ${namespace}/${name} → ${body.replicas}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
-        try { await loadK8sResources(); } catch (_) {}
+        try { await loadK8sResources(); } catch (_) { }
       })
       .catch(e => alert(e.message || 'Lỗi'));
   }
@@ -4864,7 +5129,7 @@ function deleteWorkload(type, namespace, name) {
       if (res.error) { showAlert('danger', res.error); return; }
       const out = res.output || '';
       showAlert('success', `Đã xóa ${type} ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
-      try { await loadK8sResources(); } catch (_) {}
+      try { await loadK8sResources(); } catch (_) { }
     })
     .catch(e => alert(e.message || 'Lỗi'));
 }
@@ -4878,7 +5143,9 @@ function resetK8sResourcesData() {
       deployments: [],
       statefulSets: [],
       daemonSets: []
-    }
+    },
+    services: [],
+    ingress: []
   };
   hideK8sResources();
 }

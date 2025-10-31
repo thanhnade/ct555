@@ -529,8 +529,224 @@ public class ClusterAdminController {
         }
     }
 
-    // ===================== K8s Resource Actions (Describe/Delete/Scale)
-    // =====================
+    /**
+     * Liệt kê services (tất cả namespaces)
+     */
+    @GetMapping("/{id}/k8s/services")
+    public ResponseEntity<?> listServices(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+
+            // Kiểm tra master online trước
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.ok(Map.of("services", new java.util.ArrayList<>(),
+                        "error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var clusterServers = serverService.findByClusterId(id);
+            if (clusterServers == null || clusterServers.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
+            }
+            com.example.AutoDeployApp.entity.Server master = clusterServers.stream()
+                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                    .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl get svc -A -o json";
+            String output = null;
+            try {
+                if (pem != null && !pem.isBlank()) {
+                    output = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
+                } else {
+                    String pw = pwCache.get(master.getId());
+                    output = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+                }
+            } catch (Exception e) {
+                return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            }
+
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+            try {
+                var root = mapper.readTree(output);
+                var items = root.path("items");
+                if (items.isArray()) {
+                    for (var svc : items) {
+                        String namespace = svc.path("metadata").path("namespace").asText("");
+                        String name = svc.path("metadata").path("name").asText("");
+                        String type = svc.path("spec").path("type").asText("");
+                        String clusterIP = svc.path("spec").path("clusterIP").asText("");
+                        String age = calculateAge(svc.path("metadata").path("creationTimestamp").asText(""));
+
+                        // External-IP
+                        String externalIP = "";
+                        var status = svc.path("status").path("loadBalancer").path("ingress");
+                        if (status.isArray() && status.size() > 0) {
+                            var ingress = status.get(0);
+                            externalIP = ingress.path("hostname").asText("");
+                            if (externalIP.isBlank()) {
+                                externalIP = ingress.path("ip").asText("");
+                            }
+                        }
+                        if (externalIP.isBlank() && "ExternalName".equals(type)) {
+                            externalIP = svc.path("spec").path("externalName").asText("");
+                        }
+                        if (externalIP.isBlank() && "LoadBalancer".equals(type)) {
+                            externalIP = "<pending>";
+                        }
+
+                        // Ports
+                        String ports = "";
+                        var portsArray = svc.path("spec").path("ports");
+                        if (portsArray.isArray()) {
+                            java.util.List<String> portStrs = new java.util.ArrayList<>();
+                            for (var p : portsArray) {
+                                int targetPort = p.path("targetPort").asInt(0);
+                                int svcPort = p.path("port").asInt(0);
+                                String protocol = p.path("protocol").asText("TCP");
+                                if (targetPort > 0 && svcPort > 0) {
+                                    portStrs.add(svcPort + ":" + targetPort + "/" + protocol);
+                                } else if (svcPort > 0) {
+                                    portStrs.add(svcPort + "/" + protocol);
+                                }
+                            }
+                            ports = String.join(", ", portStrs);
+                        }
+
+                        result.add(Map.of(
+                                "namespace", namespace,
+                                "name", name,
+                                "type", type,
+                                "clusterIP", clusterIP,
+                                "externalIP", externalIP,
+                                "ports", ports,
+                                "age", age));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+
+            return ResponseEntity.ok(Map.of("services", result));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Liệt kê ingress (tất cả namespaces)
+     */
+    @GetMapping("/{id}/k8s/ingress")
+    public ResponseEntity<?> listIngress(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+
+            // Kiểm tra master online trước
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.ok(Map.of("ingress", new java.util.ArrayList<>(),
+                        "error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var clusterServers = serverService.findByClusterId(id);
+            if (clusterServers == null || clusterServers.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
+            }
+            com.example.AutoDeployApp.entity.Server master = clusterServers.stream()
+                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                    .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl get ingress -A -o json";
+            String output = null;
+            try {
+                if (pem != null && !pem.isBlank()) {
+                    output = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
+                } else {
+                    String pw = pwCache.get(master.getId());
+                    output = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+                }
+            } catch (Exception e) {
+                return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            }
+
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+            try {
+                var root = mapper.readTree(output);
+                var items = root.path("items");
+                if (items.isArray()) {
+                    for (var ing : items) {
+                        String namespace = ing.path("metadata").path("namespace").asText("");
+                        String name = ing.path("metadata").path("name").asText("");
+                        String ingressClass = ing.path("spec").path("ingressClassName").asText("");
+                        String age = calculateAge(ing.path("metadata").path("creationTimestamp").asText(""));
+
+                        // Address
+                        String address = "";
+                        var statusIngress = ing.path("status").path("loadBalancer").path("ingress");
+                        if (statusIngress.isArray() && statusIngress.size() > 0) {
+                            var in = statusIngress.get(0);
+                            address = in.path("hostname").asText("");
+                            if (address.isBlank()) {
+                                address = in.path("ip").asText("");
+                            }
+                        }
+
+                        // Hosts & Ports
+                        String hosts = "";
+                        String ports = "";
+                        var rules = ing.path("spec").path("rules");
+                        if (rules.isArray()) {
+                            java.util.List<String> hostList = new java.util.ArrayList<>();
+                            for (var rule : rules) {
+                                String host = rule.path("host").asText("");
+                                if (!host.isBlank()) {
+                                    hostList.add(host);
+                                }
+                                // Ports from TLS
+                                var tls = ing.path("spec").path("tls");
+                                if (tls.isArray() && tls.size() > 0) {
+                                    ports = "80, 443";
+                                } else if (ports.isBlank()) {
+                                    ports = "80";
+                                }
+                            }
+                            hosts = String.join(", ", hostList);
+                        }
+                        if (hosts.isBlank()) {
+                            hosts = "*";
+                        }
+
+                        result.add(Map.of(
+                                "namespace", namespace,
+                                "name", name,
+                                "class", ingressClass,
+                                "host", hosts,
+                                "address", address,
+                                "ports", ports,
+                                "age", age));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+
+            return ResponseEntity.ok(Map.of("ingress", result));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ===================== K8s Resource Actions
+    // (Describe/Delete/Scale)=====================
 
     @GetMapping("/{id}/k8s/pods/{namespace}/{name}")
     public ResponseEntity<?> describePod(@PathVariable Long id,
@@ -563,6 +779,190 @@ public class ClusterAdminController {
             } else {
                 String pw = pwCache.get(master.getId());
                 out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Describe Service
+     */
+    @GetMapping("/{id}/k8s/services/{namespace}/{name}")
+    public ResponseEntity<?> describeService(@PathVariable Long id,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " get svc " + name + " -o yaml";
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete Service (cấm namespace hệ thống)
+     */
+    @DeleteMapping("/{id}/k8s/services/{namespace}/{name}")
+    public ResponseEntity<?> deleteService(@PathVariable Long id,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            String nsLower = namespace == null ? "" : namespace.toLowerCase();
+            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Không cho phép xóa Service trong namespace hệ thống"));
+            }
+
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " delete svc " + name;
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Describe Ingress
+     */
+    @GetMapping("/{id}/k8s/ingress/{namespace}/{name}")
+    public ResponseEntity<?> describeIngress(@PathVariable Long id,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " get ingress " + name + " -o yaml";
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete Ingress (cấm namespace hệ thống)
+     */
+    @DeleteMapping("/{id}/k8s/ingress/{namespace}/{name}")
+    public ResponseEntity<?> deleteIngress(@PathVariable Long id,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            String nsLower = namespace == null ? "" : namespace.toLowerCase();
+            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Không cho phép xóa Ingress trong namespace hệ thống"));
+            }
+
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl -n " + namespace + " delete ingress " + name;
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
             }
             if (out == null)
                 out = "";
@@ -746,7 +1146,8 @@ public class ClusterAdminController {
 
             String t = type == null ? "" : type.toLowerCase();
             if (!(t.equals("deployment") || t.equals("statefulset") || t.equals("daemonset"))) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Chỉ cho phép xóa Deployment/StatefulSet/DaemonSet"));
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Chỉ cho phép xóa Deployment/StatefulSet/DaemonSet"));
             }
             String nsLower = namespace == null ? "" : namespace.toLowerCase();
             if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
@@ -1639,6 +2040,36 @@ public class ClusterAdminController {
         } catch (Exception e) {
             return ResponseEntity.status(500)
                     .body(Map.of("error", "Lỗi bắt đầu cài đặt Ansible: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Calculate age from creation timestamp
+     */
+    private String calculateAge(String creationTimestamp) {
+        if (creationTimestamp == null || creationTimestamp.isBlank()) {
+            return "";
+        }
+        try {
+            var instant = java.time.Instant.parse(creationTimestamp);
+            var now = java.time.Instant.now();
+            var duration = java.time.Duration.between(instant, now);
+
+            long days = duration.toDays();
+            long hours = duration.toHours() % 24;
+            long minutes = duration.toMinutes() % 60;
+
+            if (days > 0) {
+                return days + "d";
+            } else if (hours > 0) {
+                return hours + "h";
+            } else if (minutes > 0) {
+                return minutes + "m";
+            } else {
+                return "<1m";
+            }
+        } catch (Exception e) {
+            return "";
         }
     }
 }

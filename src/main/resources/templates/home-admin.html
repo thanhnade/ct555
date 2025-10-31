@@ -26,16 +26,25 @@
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#user" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">👤User Management</a>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="#user">👥 Quản lý người dùng</a></li>
+            </ul>
           </li>
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#server" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">🖥️Server Management</a>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="#server">🖥️ Quản lý Server</a></li>
+            </ul>
           </li>
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#k8s" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">☸️Kubernetes Cluster</a>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="#k8s">☸️ Quản lý Cluster</a></li>
+            </ul>
           </li>
-          
+
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#monitor" role="button" data-bs-toggle="dropdown"
               aria-expanded="false">📊Monitoring & Logs</a>
@@ -137,9 +146,6 @@
           </form>
         </div>
       </div>
-
-
-
 
       <!-- Activity Modal -->
       <div class="modal fade" id="activityModal" tabindex="-1" aria-hidden="true">
@@ -646,6 +652,128 @@
                     <tbody id="workloads-tbody">
                       <tr>
                         <td colspan="5" class="text-center text-muted py-3">
+                          <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Networking Section -->
+      <div class="card mb-3 d-none" id="networking-resources-detail">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h3 class="h6 m-0">
+              <i class="bi bi-router text-primary"></i> Networking
+            </h3>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" id="refresh-networking-resources">
+                <i class="bi bi-arrow-clockwise"></i> Làm mới
+              </button>
+            </div>
+          </div>
+
+          <!-- Networking Tabs -->
+          <ul class="nav nav-tabs mb-3" id="networking-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="services-tab" data-bs-toggle="tab" data-bs-target="#services-content"
+                type="button" role="tab" aria-controls="services-content" aria-selected="true">
+                <i class="bi bi-plug"></i> Services
+                <span class="badge bg-secondary ms-1" id="services-count">0</span>
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="ingress-tab" data-bs-toggle="tab" data-bs-target="#ingress-content"
+                type="button" role="tab" aria-controls="ingress-content" aria-selected="false">
+                <i class="bi bi-door-open"></i> Ingress
+                <span class="badge bg-secondary ms-1" id="ingress-count">0</span>
+              </button>
+            </li>
+          </ul>
+
+          <!-- Tab Content -->
+          <div class="tab-content" id="networking-tab-content">
+            <!-- Services Tab -->
+            <div class="tab-pane fade show active" id="services-content" role="tabpanel" aria-labelledby="services-tab">
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">Danh sách Services</h6>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" id="services-search"
+                      placeholder="Tìm kiếm service..." style="width: 200px;">
+                    <select class="form-select form-select-sm" id="services-namespace-filter" style="width: 150px;">
+                      <option value="">Tất cả namespace</option>
+                    </select>
+                    <select class="form-select form-select-sm" id="services-type-filter" style="width: 150px;">
+                      <option value="">Tất cả loại</option>
+                      <option value="ClusterIP">ClusterIP</option>
+                      <option value="NodePort">NodePort</option>
+                      <option value="LoadBalancer">LoadBalancer</option>
+                      <option value="ExternalName">ExternalName</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table table-sm table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Namespace</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Cluster-IP</th>
+                        <th>External-IP</th>
+                        <th>Port(s)</th>
+                        <th>Age</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="services-tbody">
+                      <tr>
+                        <td colspan="8" class="text-center text-muted py-3">
+                          <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ingress Tab -->
+            <div class="tab-pane fade" id="ingress-content" role="tabpanel" aria-labelledby="ingress-tab">
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">Danh sách Ingress</h6>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" id="ingress-search"
+                      placeholder="Tìm kiếm ingress..." style="width: 200px;">
+                    <select class="form-select form-select-sm" id="ingress-namespace-filter" style="width: 150px;">
+                      <option value="">Tất cả namespace</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table table-sm table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Namespace</th>
+                        <th>Name</th>
+                        <th>Class</th>
+                        <th>Host</th>
+                        <th>Address</th>
+                        <th>Ports</th>
+                        <th>Age</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="ingress-tbody">
+                      <tr>
+                        <td colspan="8" class="text-center text-muted py-3">
                           <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
                         </td>
                       </tr>
@@ -1516,8 +1644,7 @@
               <h6 class="text-primary">Alert Types:</h6>
               <ul class="small">
                 <li>High CPU usage (>80%)</li>
-                <li>Low disk space (<10%)< /li>
-                <li>Pod failures</li>
+                <li>Low disk space (<10%)< /li> <li>Pod failures</li>
                 <li>Service downtime</li>
               </ul>
             </div>
@@ -1762,8 +1889,8 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-    crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous">
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="/playbook-manager.js?v=1"></script>
   <script src="/admin.js?v=10"></script>
