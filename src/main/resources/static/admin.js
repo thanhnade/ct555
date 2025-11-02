@@ -1774,7 +1774,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(autoConnectServers, 45000);
 
   // Section toggling
-  const sectionIds = ['user', 'server', 'k8s', 'app', 'monitor'];
+  const sectionIds = ['user', 'server', 'k8s', 'app'];
   async function showSection(key) {
     sectionIds.forEach(id => {
       const el = document.getElementById('section-' + id);
@@ -1783,7 +1783,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (key === 'user') { await loadUsers(); }
     if (key === 'server') { await loadServers(); }
     if (key === 'k8s') { await Promise.all([loadClusterList(), loadClustersAndServers()]); }
-    // Có thể mở rộng cho 'app', 'monitor' nếu cần
+    // Có thể mở rộng cho 'app' nếu cần
   }
 
   // Xác định section nào đang active dựa vào hash URL hoặc mặc định là 'server'
@@ -1796,7 +1796,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const href = a.getAttribute('href') || '';
       if (href.startsWith('#')) {
         const key = href.replace('#', '');
-        if (['user', 'server', 'k8s', 'app', 'monitor'].includes(key)) {
+        if (['user', 'server', 'k8s', 'app'].includes(key)) {
           e.preventDefault();
           showSection(key);
           document.querySelector('.navbar-collapse')?.classList.remove('show');
@@ -1823,17 +1823,6 @@ document.addEventListener('DOMContentLoaded', async () => {
           }, 100);
           document.querySelector('.navbar-collapse')?.classList.remove('show');
 
-        } else if (['server-monitor', 'performance', 'resource-usage', 'alerts', 'notifications', 'charts', 'export'].includes(key)) {
-          e.preventDefault();
-          showSection('monitor');
-          // Scroll to specific monitor section
-          setTimeout(() => {
-            const targetElement = document.getElementById(key);
-            if (targetElement) {
-              targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-          }, 100);
-          document.querySelector('.navbar-collapse')?.classList.remove('show');
         }
       }
     });

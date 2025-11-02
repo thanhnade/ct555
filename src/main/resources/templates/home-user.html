@@ -3,21 +3,350 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Trang người dùng</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
-  <link href="/login.css" rel="stylesheet">
+  <title>Triển khai Ứng dụng</title>
+  <link href="/home-user.css" rel="stylesheet">
 </head>
-<body class="p-4">
-  <div class="container">
-    <div class="d-flex align-items-center justify-content-between mb-3">
-      <h1 class="m-0">Home - CLIENT</h1>
-      <div class="text-end">Hi, <strong th:text="${username}">User</strong></div>
+<body class="dashboard-container">
+  <!-- Header -->
+  <div class="dashboard-header">
+    <div class="header-content">
+      <h1 class="logo">DeployHub</h1>
+      <div class="header-right">
+        <div class="user-info">
+          <span class="user-name" th:text="${username}">User</span>
+          <span class="user-role">user</span>
+        </div>
+        <a href="/auth/logout" class="logout-btn">Đăng xuất</a>
+      </div>
     </div>
-    <div class="banner banner-user mb-3">Bạn đã đăng nhập với vai trò CLIENT.</div>
-    <p><a href="/auth/logout" class="btn btn-link p-0">Đăng xuất</a></p>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+
+  <!-- Main Content -->
+  <div class="dashboard-main">
+    <!-- Tabs -->
+    <div class="dashboard-tabs">
+      <button class="tab-btn active" id="tabProjects" onclick="switchTab('projects')">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="2" fill="none"/>
+          <polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        Dự án
+      </button>
+      <button class="tab-btn" id="tabNew" onclick="switchTab('new')">
+        <svg viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+          <line x1="12" y1="8" x2="12" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="8" y1="12" x2="16" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        Tạo mới
+      </button>
+    </div>
+
+    <!-- Dashboard Content -->
+    <div class="dashboard-content">
+      <!-- Projects List Section -->
+      <div id="projectsSection" class="dashboard-card">
+        <!-- Projects List Content - will be populated by JS -->
+      </div>
+
+      <!-- New Deployment Section -->
+      <div id="newSection" class="dashboard-card" style="display: none;">
+        <div class="card-header">
+          <h2>Triển khai ứng dụng mới</h2>
+          <p>Nhập tên dự án và Docker Hub image để gửi yêu cầu triển khai</p>
+        </div>
+
+        <form id="uploadForm" class="deployment-form">
+          <div id="successMessage" class="success-message" style="display: none;">
+            <svg class="success-icon" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+              <path d="M8 12l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div>
+              <strong>Đã gửi yêu cầu thành công!</strong>
+              <p>Yêu cầu của bạn đã được gửi và đang chờ admin xử lý. Bạn sẽ nhận được thông báo khi hoàn tất.</p>
+            </div>
+          </div>
+
+          <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+          <!-- Project Name -->
+          <div class="form-group">
+            <label for="projectName">Tên dự án *</label>
+            <input
+              type="text"
+              id="projectName"
+              placeholder="Nhập tên dự án"
+              required
+            />
+          </div>
+
+          <!-- Framework Preset - Hidden: không cần cho Docker image deployment -->
+          <div class="form-group" style="display: none;">
+            <label for="frameworkPreset">Framework Preset</label>
+            <div class="framework-select-wrapper" id="frameworkWrapper">
+              <button
+                type="button"
+                class="framework-select-button"
+                id="frameworkSelectButton"
+              >
+                <span class="framework-select-label" id="frameworkLabel">Other / Custom</span>
+                <svg 
+                  class="select-arrow" 
+                  viewBox="0 0 24 24" 
+                  fill="none"
+                >
+                  <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              
+              <div class="framework-dropdown" id="frameworkDropdown" style="display: none;">
+                <div class="framework-dropdown-content" id="frameworkOptions">
+                  <!-- Options will be populated by JS -->
+                </div>
+              </div>
+            </div>
+            <small class="form-hint">
+              Chọn framework để tự động cấu hình build settings
+            </small>
+          </div>
+
+          <!-- Deployment Type - Temporarily hidden, only Docker Image -->
+          <div class="form-group" style="display: none;">
+            <label>Phương thức triển khai *</label>
+            <div class="deployment-options">
+              <label class="option-radio">
+                <input
+                  type="radio"
+                  name="deploymentType"
+                  value="docker"
+                  id="deploymentDocker"
+                  checked
+                />
+                <div class="option-content">
+                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M13.984 6.016v12.469c0 .563-.281.984-.656 1.219-.375.281-.75.375-1.219.375-.516 0-.891-.188-1.266-.516l-2.484-2.156c-.188-.141-.469-.141-.656 0l-2.484 2.156c-.375.328-.75.516-1.266.516-.469 0-.844-.094-1.219-.375C2.298 19.469 2 19.048 2 18.516V5.531c0-.563.298-.984.656-1.219C3.031 4.031 3.406 3.938 3.875 3.938c.516 0 .891.188 1.266.516l2.484 2.156c.188.141.469.141.656 0L10.75 4.453c.375-.328.75-.516 1.266-.516.469 0 .844.094 1.219.375C13.594 4.547 13.984 4.969 13.984 5.531v.485z" fill="currentColor"/>
+                  </svg>
+                  <span>Docker Hub Image</span>
+                  <p>Nhập đường dẫn image từ Docker Hub</p>
+                </div>
+              </label>
+
+              <label class="option-radio">
+                <input
+                  type="radio"
+                  name="deploymentType"
+                  value="file"
+                  id="deploymentFile"
+                />
+                <div class="option-content">
+                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" fill="currentColor"/>
+                  </svg>
+                  <span>Upload File</span>
+                  <p>Upload file dự án của bạn</p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Docker Image Input -->
+          <div class="form-group" id="dockerGroup">
+            <label for="dockerImage">Docker Hub Image *</label>
+            <input
+              type="text"
+              id="dockerImage"
+              placeholder="nginx:latest hoặc username/image:tag"
+              required
+            />
+            <small class="form-hint">
+              Ví dụ: nginx:latest, node:18-alpine, username/my-app:v1.0
+            </small>
+          </div>
+
+          <!-- File Upload -->
+          <div class="form-group" id="fileGroup" style="display: none;">
+            <label for="fileUpload">Chọn file *</label>
+            <div class="file-upload-area">
+              <input
+                type="file"
+                id="fileUpload"
+                accept=".zip,.tar,.gz"
+              />
+              <div class="file-upload-display" id="fileUploadDisplay">
+                <div class="file-placeholder" id="filePlaceholder">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor"/>
+                  </svg>
+                  <p>Kéo thả file vào đây hoặc click để chọn</p>
+                  <small>Hỗ trợ: ZIP, TAR, GZ (tối đa 100MB)</small>
+                </div>
+                <div class="file-selected" id="fileSelected" style="display: none;">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" fill="currentColor"/>
+                  </svg>
+                  <span id="fileNameDisplay"></span>
+                  <span class="file-size" id="fileSizeDisplay"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Server Selection - Hidden, auto-select server -->
+          <div class="form-group" style="display: none;">
+            <label for="serverId">Server (để trống để tự động chọn)</label>
+            <select id="serverId" style="padding: 14px 16px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 15px; background: #f8fafc; width: 100%;">
+              <option value="">Tự động chọn server</option>
+            </select>
+          </div>
+
+          <!-- Build and Output Settings - Hidden for Docker Image deployment -->
+          <div class="settings-section" style="display: none;">
+            <div class="settings-header" onclick="toggleSettings('buildSettings')">
+              <h3>Build and Output Settings</h3>
+              <button type="button" class="toggle-section-btn" aria-label="Toggle">
+                <svg 
+                  class="toggle-icon expanded" 
+                  viewBox="0 0 24 24" 
+                  fill="none"
+                >
+                  <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+            
+            <div class="settings-content" id="buildSettings">
+              <div class="setting-field">
+                <label for="buildCommand">
+                  Build Command
+                  <svg class="info-icon" viewBox="0 0 24 24" fill="none" title="Command to build your project">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M12 16v-4M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </label>
+                <div class="input-with-edit">
+                  <input
+                    type="text"
+                    id="buildCommand"
+                    value="npm run build"
+                    placeholder="npm run build"
+                  />
+                  <button type="button" class="edit-btn" title="Edit">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="setting-field">
+                <label for="outputDirectory">
+                  Output Directory
+                  <svg class="info-icon" viewBox="0 0 24 24" fill="none" title="Directory containing build output">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M12 16v-4M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </label>
+                <div class="input-with-edit">
+                  <input
+                    type="text"
+                    id="outputDirectory"
+                    value="build"
+                    placeholder="build"
+                  />
+                  <button type="button" class="edit-btn" title="Edit">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="setting-field">
+                <label for="installCommand">
+                  Install Command
+                  <svg class="info-icon" viewBox="0 0 24 24" fill="none" title="Command to install dependencies">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M12 16v-4M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </label>
+                <div class="input-with-edit">
+                  <input
+                    type="text"
+                    id="installCommand"
+                    value="npm install"
+                    placeholder="npm install"
+                  />
+                  <button type="button" class="edit-btn" title="Edit">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Environment Variables - Hidden: không cần cho form đơn giản -->
+          <div class="settings-section" style="display: none;">
+            <div class="settings-header" onclick="toggleSettings('envVars')">
+              <h3>Environment Variables</h3>
+              <button type="button" class="toggle-section-btn" aria-label="Toggle">
+                <svg 
+                  class="toggle-icon expanded" 
+                  viewBox="0 0 24 24" 
+                  fill="none"
+                >
+                  <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+            
+            <div class="settings-content" id="envVars" style="display: none;">
+              <div class="env-table">
+                <div class="env-table-header">
+                  <div class="env-col-key">Key</div>
+                  <div class="env-col-value">Value</div>
+                  <div class="env-col-action"></div>
+                </div>
+                
+                <div id="envVariablesList">
+                  <!-- Will be populated by JS -->
+                </div>
+              </div>
+
+              <div class="env-actions">
+                <button type="button" class="add-env-btn" onclick="addEnvVariable()">
+                  + Add More
+                </button>
+                <label class="import-env-btn" for="envFileInput">
+                  Import .env
+                  <input
+                    type="file"
+                    id="envFileInput"
+                    accept=".env,.env.*"
+                    style="display: none;"
+                    onchange="handleImportEnv(event)"
+                  />
+                </label>
+              </div>
+              <p class="env-hint">
+                or paste the .env contents above. <a href="#" onclick="return false;">Learn more</a>
+              </p>
+            </div>
+          </div>
+
+          <button type="submit" class="deploy-button" id="uploadBtn">
+            Triển khai ngay
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/user.js"></script>
 </body>
 </html>
-
-

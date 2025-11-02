@@ -21,7 +21,7 @@ async function loadPlaybooks(clusterIdOverride) {
     console.error('No cluster selected');
     return;
   }
-
+  
   try {
     // Lưu lại override nếu có
     if (clusterIdOverride) {
@@ -31,10 +31,10 @@ async function loadPlaybooks(clusterIdOverride) {
     if (!response.ok) {
       throw new Error('Failed to load playbooks');
     }
-
+    
     const playbooks = await response.json();
     const playbookList = document.getElementById('playbook-list');
-
+    
     if (playbooks.length === 0) {
       playbookList.innerHTML = '<div class="list-group-item text-center text-muted">Chưa có playbook nào</div>';
     } else {
@@ -81,20 +81,20 @@ async function loadPlaybooks(clusterIdOverride) {
 window.loadPlaybook = async function (filename) {
   const cid = getClusterId();
   if (!cid || !filename) return;
-
+  
   try {
     const response = await fetch(`/api/ansible-playbook/read/${cid}/${filename}`);
     if (!response.ok) {
       throw new Error('Failed to load playbook');
     }
-
+    
     const data = await response.json();
     document.getElementById('playbook-filename').value = filename.replace('.yml', '');
     document.getElementById('playbook-editor').value = data.content;
-
+    
     // Hiển thị view nội dung và ẩn view thực thi
     showPlaybookContentView();
-
+    
   } catch (error) {
     console.error('Error loading playbook:', error);
     showAlert('error', 'Lỗi tải playbook: ' + error.message);
@@ -105,15 +105,15 @@ window.loadPlaybook = async function (filename) {
 window.savePlaybook = async function () {
   const cid = getClusterId();
   if (!cid) return;
-
+  
   const filename = document.getElementById('playbook-filename')?.value;
   const content = document.getElementById('playbook-editor')?.value;
-
+  
   if (!filename || !content) {
     showAlert('error', 'Vui lòng nhập tên file và nội dung');
     return;
   }
-
+  
   try {
     const response = await fetch(`/api/ansible-playbook/save/${cid}`, {
       method: 'POST',
@@ -122,15 +122,15 @@ window.savePlaybook = async function () {
       },
       body: `filename=${encodeURIComponent(filename)}&content=${encodeURIComponent(content)}`
     });
-
+    
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi lưu playbook');
     }
-
+    
     showAlert('success', 'Đã lưu playbook thành công');
     await loadPlaybooks(); // Cập nhật danh sách
-
+    
   } catch (error) {
     console.error('Error saving playbook:', error);
     showAlert('error', 'Lỗi lưu playbook: ' + error.message);
@@ -141,22 +141,22 @@ window.savePlaybook = async function () {
 window.deletePlaybook = async function (filename) {
   const cid = getClusterId();
   if (!cid || !filename) return;
-
+  
   if (!confirm(`Xóa playbook "${filename}"?`)) return;
-
+  
   try {
     const response = await fetch(`/api/ansible-playbook/delete/${cid}/${filename}`, {
       method: 'DELETE'
     });
-
+    
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi xóa playbook');
     }
-
+    
     showAlert('success', `Đã xóa playbook "${filename}" thành công `);
     await loadPlaybooks(); // Cập nhật danh sách
-
+    
   } catch (error) {
     console.error('Error deleting playbook:', error);
     showAlert('error', 'Lỗi xóa playbook: ' + error.message);
@@ -167,11 +167,11 @@ window.deletePlaybook = async function (filename) {
 window.executePlaybook = async function (filename, extraVars = '') {
   const cid = getClusterId();
   if (!cid || !filename) return;
-
+  
   try {
     // Hiển thị thực thi và ẩn nội dung
     showPlaybookExecutionView();
-
+    
     const response = await fetch(`/api/ansible-playbook/execute/${cid}`, {
       method: 'POST',
       headers: {
@@ -179,20 +179,20 @@ window.executePlaybook = async function (filename, extraVars = '') {
       },
       body: `filename=${encodeURIComponent(filename)}&extraVars=${encodeURIComponent(extraVars)}`
     });
-
+    
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi thực thi playbook');
     }
-
+    
     const result = await response.json();
     showAlert('success', `Đã bắt đầu thực thi playbook: ${filename}`);
-
+    
     // Bắt đầu theo dõi trạng thái thực thi
     if (result.taskId) {
       monitorPlaybookExecution(result.taskId);
     }
-
+    
     return result;
   } catch (error) {
     console.error('Error executing playbook:', error);
@@ -207,42 +207,42 @@ async function monitorPlaybookExecution(taskId) {
   const outputElement = document.getElementById('ansible-output');
   const progressElement = document.getElementById('execution-progress');
   const spinnerElement = document.getElementById('execution-spinner');
-
+  
   if (!outputElement || !progressElement || !spinnerElement) {
     console.error('Execution elements not found');
     return;
   }
-
+  
   // Xóa output trước
   outputElement.innerHTML = '';
-
+  
   // Hiển thị progress và spinner
   progressElement.style.display = 'block';
   spinnerElement.style.display = 'inline-block';
-
+  
   const checkStatus = async () => {
     try {
       const response = await fetch(`/api/ansible-playbook/status/${getClusterId()}/${taskId}`);
       if (!response.ok) {
         throw new Error('Failed to check status');
       }
-
+      
       const status = await response.json();
-
+      
       // Cập nhật progress bar
       const progressBar = progressElement.querySelector('.progress-bar');
       if (progressBar) {
         progressBar.style.width = `${status.progress || 0}%`;
         progressBar.setAttribute('aria-valuenow', status.progress || 0);
       }
-
+      
       // Cập nhật output
       if (status.output && status.output.length > 0) {
         const newOutput = status.output.slice(outputElement.children.length);
         newOutput.forEach(line => {
           const lineElement = document.createElement('div');
           lineElement.className = 'output-line';
-
+          
           // Mã hóa màu cho các loại output khác nhau
           if (line.includes('TASK') || line.includes('PLAY')) {
             lineElement.className += ' task-header';
@@ -253,54 +253,54 @@ async function monitorPlaybookExecution(taskId) {
           } else if (line.includes('skipping:')) {
             lineElement.className += ' warning';
           }
-
+          
           lineElement.textContent = line;
           outputElement.appendChild(lineElement);
         });
-
+        
         // Cuộn xuống cuối
         outputElement.scrollTop = outputElement.scrollHeight;
       }
-
+      
       if (status.status === 'running') {
         setTimeout(checkStatus, 1000);
       } else {
         // Ẩn spinner
         spinnerElement.style.display = 'none';
-
+        
         // Hiển thị thông báo hoàn thành
-        const summaryElement = document.createElement('div');
-        summaryElement.className = 'text-success mt-3 border-top pt-2';
-
-        const titleElement = document.createElement('div');
-        titleElement.className = 'fw-bold';
+         const summaryElement = document.createElement('div');
+         summaryElement.className = 'text-success mt-3 border-top pt-2';
+         
+         const titleElement = document.createElement('div');
+         titleElement.className = 'fw-bold';
         titleElement.textContent = 'Hoàn thành thực thi playbook!';
-
-        const timeElement = document.createElement('div');
-        timeElement.className = 'small text-white';
-        timeElement.textContent = `Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s`;
-
-        summaryElement.appendChild(titleElement);
-        summaryElement.appendChild(timeElement);
-        outputElement.appendChild(summaryElement);
+         
+         const timeElement = document.createElement('div');
+         timeElement.className = 'small text-white';
+         timeElement.textContent = `Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s`;
+         
+         summaryElement.appendChild(titleElement);
+         summaryElement.appendChild(timeElement);
+         outputElement.appendChild(summaryElement);
       }
-
+      
     } catch (error) {
       console.error('Lỗi theo dõi thực thi:', error);
       spinnerElement.style.display = 'none';
-
-      const errorElement = document.createElement('div');
-      errorElement.className = 'text-danger mt-3';
-
-      const errorTitle = document.createElement('div');
-      errorTitle.className = 'fw-bold';
+      
+       const errorElement = document.createElement('div');
+       errorElement.className = 'text-danger mt-3';
+       
+       const errorTitle = document.createElement('div');
+       errorTitle.className = 'fw-bold';
       errorTitle.textContent = 'Lỗi kiểm tra trạng thái thực thi';
-
-      errorElement.appendChild(errorTitle);
-      outputElement.appendChild(errorElement);
+       
+       errorElement.appendChild(errorTitle);
+       outputElement.appendChild(errorElement);
     }
   };
-
+  
   checkStatus();
 }
 
@@ -336,7 +336,7 @@ async function checkPlaybookExists(filename) {
 window.uploadPlaybook = async function (file) {
   const cid = getClusterId();
   if (!cid || !file) return;
-
+  
   try {
     // Kiểm tra xem file đã tồn tại chưa
     const originalFilename = file.name;
@@ -356,24 +356,24 @@ window.uploadPlaybook = async function (file) {
 
     const formData = new FormData();
     formData.append('file', file);
-
+    
     const response = await fetch(`/api/ansible-playbook/upload/${cid}`, {
       method: 'POST',
       body: formData
     });
-
+    
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi tải lên playbook');
     }
-
+    
     const result = await response.json();
     showAlert('success', `Đã tải lên playbook: ${result.filename}`);
     await loadPlaybooks(); // Cập nhật danh sách
-
+    
     // Tải nội dung playbook đã tải lên
     await loadPlaybook(result.filename);
-
+    
   } catch (error) {
     console.error('Lỗi tải lên playbook:', error);
     showAlert('error', 'Lỗi tải lên playbook: ' + error.message);
@@ -386,7 +386,7 @@ async function generateK8sPlaybookFromTemplate(template) {
   if (!getClusterId()) {
     throw new Error('Vui lòng chọn cluster trước');
   }
-
+  
   const templates = {
     '01-update-hosts-hostname': `---
 - name: Update /etc/hosts and hostname for entire cluster
@@ -541,7 +541,7 @@ async function generateK8sPlaybookFromTemplate(template) {
           echo "GPG key đã tồn tại, bỏ qua bước này."
         fi
       changed_when: false
-      register: gpg_status
+      register: gpg_status  
       # Thêm GPG key chính thức của Kubernetes
 
     - name: Add Kubernetes repository
@@ -667,7 +667,7 @@ async function generateK8sPlaybookFromTemplate(template) {
       # Hoàn tất khởi tạo master`,
 
     '06-install-cni': `---
-- name: Install or update Calico CNI (automatic)
+- name: Cài đặt hoặc cập nhật Calico CNI (tự động)
   hosts: master
   become: yes
   gather_facts: false
@@ -680,12 +680,12 @@ async function generateK8sPlaybookFromTemplate(template) {
     calico_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml"
 
   tasks:
-    - name: Check if Calico CNI exists
+    - name: Kiểm tra Calico CNI có tồn tại không
       command: kubectl get daemonset calico-node -n kube-system
       register: calico_check
       ignore_errors: true
 
-    - name: Display current status
+    - name: Hiển thị trạng thái hiện tại
       debug:
         msg: >
           {% if calico_check.rc == 0 %}
@@ -694,7 +694,7 @@ async function generateK8sPlaybookFromTemplate(template) {
             Chưa có Calico, sẽ tiến hành cài đặt mới.
           {% endif %}
 
-    - name: Verify kernel modules overlay and br_netfilter
+    - name: Kiểm tra kernel modules overlay & br_netfilter
       shell: |
         modprobe overlay || true
         modprobe br_netfilter || true
@@ -702,11 +702,11 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: kernel_status
       ignore_errors: true
 
-    - name: Display kernel module check result
+    - name: Kết quả kiểm tra module kernel
       debug:
         var: kernel_status.stdout_lines
 
-    - name: Verify sysctl configuration
+    - name: Kiểm tra cấu hình sysctl
       shell: |
         echo "net.bridge.bridge-nf-call-iptables = 1" | tee /etc/sysctl.d/k8s.conf >/dev/null
         echo "net.ipv4.ip_forward = 1" | tee -a /etc/sysctl.d/k8s.conf >/dev/null
@@ -714,11 +714,11 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: sysctl_status
       ignore_errors: true
 
-    - name: Display sysctl result
+    - name: Kết quả sysctl
       debug:
         var: sysctl_status.stdout_lines
 
-    - name: Apply Calico manifest (install or update)
+    - name: Áp dụng Calico manifest (cài mới hoặc cập nhật)
       shell: |
         kubectl apply -f {{ calico_url }}
       args:
@@ -728,16 +728,16 @@ async function generateK8sPlaybookFromTemplate(template) {
       delay: 10
       until: calico_apply.rc == 0
 
-    - name: Display installation result
+    - name: Hiển thị kết quả cài đặt
       debug:
         var: calico_apply.stdout_lines
 
-    - name: Check Calico node pods running
+    - name: Kiểm tra Calico node pod đang khởi động
       shell: |
         kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers 2>/dev/null | grep -c 'Running' || true
       register: calico_running
 
-    - name: Wait for pods to start (max 10 attempts)
+    - name: Chờ pod khởi động (tối đa 10 lần)
       until: calico_running.stdout | int > 0
       retries: 10
       delay: 15
@@ -746,33 +746,33 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: calico_running
       ignore_errors: true
 
-    - name: Confirm Calico pods are running
+    - name: Xác nhận Calico pods đang chạy
       when: calico_running.stdout | int > 0
       debug:
         msg: "Calico đang hoạt động ({{ calico_running.stdout }} pods Running)."
 
-    - name: Log Calico pods if failed
+    - name: Log pod Calico nếu lỗi
       when: calico_running.stdout | int == 0
       shell: kubectl logs -n kube-system -l k8s-app=calico-node --tail=50 || true
       register: calico_logs
       ignore_errors: true
 
-    - name: Display Calico pod logs
+    - name: Hiển thị log pod Calico
       when: calico_running.stdout | int == 0
       debug:
         msg: "{{ calico_logs.stdout_lines | default(['Pod Calico chưa sẵn sàng hoặc không có log.']) }}"
 
-    - name: Check node status
+    - name: Kiểm tra trạng thái node
       command: kubectl get nodes -o wide
       register: nodes_status
       ignore_errors: true
 
-    - name: Display cluster result
+    - name: Hiển thị kết quả cluster
       debug:
         var: nodes_status.stdout_lines`,
 
     '06-install-flannel': `---
-- name: Install or update Flannel CNI (WSL2 compatible)
+- name: Cài đặt hoặc cập nhật Flannel CNI (tương thích WSL2)
   hosts: master
   become: yes
   gather_facts: false
@@ -784,12 +784,12 @@ async function generateK8sPlaybookFromTemplate(template) {
     flannel_manifest: "https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml"
 
   tasks:
-    - name: Check if Flannel CNI exists
+    - name: Kiểm tra Flannel CNI có tồn tại không
       command: kubectl get daemonset kube-flannel-ds -n kube-flannel
       register: flannel_check
       ignore_errors: true
 
-    - name: Display current status
+    - name: Hiển thị trạng thái hiện tại
       debug:
         msg: >
           {% if flannel_check.rc == 0 %}
@@ -798,33 +798,33 @@ async function generateK8sPlaybookFromTemplate(template) {
             Chưa có Flannel, sẽ tiến hành cài đặt mới.
           {% endif %}
 
-    - name: Enable IP forwarding
+    - name: Bật IP forwarding
       shell: |
         echo "net.ipv4.ip_forward = 1" | tee /etc/sysctl.d/k8s.conf >/dev/null
         sysctl --system | grep net.ipv4.ip_forward
       register: sysctl_status
       ignore_errors: true
 
-    - name: Display sysctl result
+    - name: Kết quả sysctl
       debug:
         var: sysctl_status.stdout_lines
 
-    - name: Apply Flannel manifest (auto latest)
+    - name: Áp dụng Flannel manifest (tự động tải bản mới nhất)
       command: kubectl apply -f {{ flannel_manifest }}
       register: flannel_apply
       changed_when: "'created' in flannel_apply.stdout or 'configured' in flannel_apply.stdout"
       failed_when: flannel_apply.rc != 0
 
-    - name: Display apply result
+    - name: Hiển thị kết quả áp dụng
       debug:
         var: flannel_apply.stdout_lines
 
-    - name: Check number of running Flannel pods
+    - name: Kiểm tra số pod Flannel đang chạy
       shell: |
         kubectl get pods -n kube-flannel --no-headers 2>/dev/null | grep -c 'Running' || true
       register: flannel_running
 
-    - name: Wait for Flannel pods to be running (max 10 attempts)
+    - name: Chờ pod Flannel hoạt động (tối đa 10 lần)
       until: flannel_running.stdout | int > 0
       retries: 10
       delay: 15
@@ -833,28 +833,28 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: flannel_running
       ignore_errors: true
 
-    - name: Confirm Flannel pods are running
+    - name: Xác nhận Flannel pod đã hoạt động
       when: flannel_running.stdout | int > 0
       debug:
         msg: "Flannel đang hoạt động ({{ flannel_running.stdout }} pods Running)."
 
-    - name: Log Flannel if pods not running
+    - name: Log Flannel nếu pod chưa chạy
       when: flannel_running.stdout | int == 0
       shell: kubectl logs -n kube-flannel -l app=flannel --tail=50 || true
       register: flannel_logs
       ignore_errors: true
 
-    - name: Display Flannel logs
+    - name: Hiển thị log Flannel
       when: flannel_running.stdout | int == 0
       debug:
         msg: "{{ flannel_logs.stdout_lines | default(['Pod Flannel chưa sẵn sàng hoặc không có log.']) }}"
 
-    - name: Check node status
+    - name: Kiểm tra trạng thái node
       command: kubectl get nodes -o wide
       register: nodes_status
       ignore_errors: true
 
-    - name: Display cluster result
+    - name: Hiển thị kết quả cluster
       debug:
         var: nodes_status.stdout_lines`,
 
@@ -943,13 +943,13 @@ async function generateK8sPlaybookFromTemplate(template) {
     DEBIAN_FRONTEND: noninteractive
 
   tasks:
-    - name: Get dynamic master IP address
+    - name: Lấy địa chỉ master động
       set_fact:
         master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
     - debug:
         msg: "Cài đặt Ingress trên master: {{ master_ip }}"
 
-    - name: Install Ingress Controller (NGINX)
+    - name: Cài đặt Ingress Controller (nginx)
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
@@ -958,25 +958,25 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: ingress_install
       ignore_errors: yes
 
-    - name: Display Ingress installation result
+    - name: Kết quả cài Ingress
       debug:
         msg: "{{ ingress_install.stdout_lines | default(['Ingress Controller applied']) }}"
 
-    - name: Check ingress-nginx pod status
+    - name: Kiểm tra trạng thái pod ingress-nginx
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl get pods -n ingress-nginx -o wide
       register: ingress_pods
 
-    - name: Display ingress-nginx pods
+    - name: Hiển thị pod ingress-nginx
       debug:
         msg: "{{ ingress_pods.stdout_lines }}"
 
-    - name: Complete
+    - name: Hoàn tất
       debug:
         msg: "Ingress Controller (NGINX) đã được cài đặt thành công!"`,
 
-    '10-install-helm': `---
+    '11-install-helm': `---
 - hosts: master
   become: yes
   gather_facts: yes
@@ -984,7 +984,7 @@ async function generateK8sPlaybookFromTemplate(template) {
     DEBIAN_FRONTEND: noninteractive
 
   tasks:
-    - name: Install Helm if missing
+    - name: Cài đặt Helm nếu chưa có
       shell: |
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
       args:
@@ -992,23 +992,127 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: helm_install
       ignore_errors: yes
 
-    - name: Display Helm installation result
+    - name: Kết quả cài đặt Helm
       debug:
         msg: "{{ helm_install.stdout_lines | default(['Helm installed']) }}"
 
-    - name: Check Helm version
+    - name: Kiểm tra phiên bản Helm
       shell: helm version --short
       register: helm_version
 
-    - name: Display Helm info
+    - name: Hiển thị thông tin Helm
       debug:
         msg: "Phiên bản Helm hiện tại: {{ helm_version.stdout | default('Không xác định') }}"
 
-    - name: Complete
+    - name: Hoàn tất
       debug:
         msg: "Helm đã được cài đặt thành công trên master!"`,
 
-    '11-setup-storage': `---
+    '10-install-metallb': `---
+- name: Install and configure MetalLB on Kubernetes
+  hosts: master
+  become: yes
+  gather_facts: no
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+    DEBIAN_FRONTEND: noninteractive
+  vars:
+    metallb_version: "v0.14.8"
+    metallb_namespace: "metallb-system"
+    metallb_url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
+    ip_range_start: "192.168.56.240"
+    ip_range_end: "192.168.56.250"
+  tasks:
+    - name: Check if MetalLB namespace exists
+      command: kubectl get namespace {{ metallb_namespace }}
+      register: ns_check
+      failed_when: false
+      changed_when: false
+      # Kiểm tra namespace MetalLB đã tồn tại
+
+    - name: Create MetalLB namespace if missing
+      command: kubectl create namespace {{ metallb_namespace }}
+      when: ns_check.rc != 0
+      changed_when: true
+      # Tạo namespace cho MetalLB (nếu chưa có)
+
+    - name: Apply MetalLB official manifest
+      command: kubectl apply -f {{ metallb_url }}
+      register: metallb_apply
+      changed_when: "'created' in metallb_apply.stdout or 'configured' in metallb_apply.stdout"
+      # Áp dụng manifest chính thức của MetalLB
+
+    - name: Wait for MetalLB controller pods to start
+      shell: |
+        kubectl get pods -n {{ metallb_namespace }} -l component=controller --no-headers | grep -c 'Running' || true
+      register: metallb_running
+      until: metallb_running.stdout | int > 0
+      retries: 10
+      delay: 10
+      ignore_errors: true
+      # Chờ controller pods của MetalLB khởi động
+
+    - name: Create MetalLB IPAddressPool manifest
+      copy:
+        dest: /tmp/metallb-ip-pool.yaml
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: default-address-pool
+            namespace: {{ metallb_namespace }}
+          spec:
+            addresses:
+              - {{ ip_range_start }}-{{ ip_range_end }}
+      # Tạo manifest IPAddressPool cho MetalLB
+
+    - name: Apply IPAddressPool manifest
+      command: kubectl apply -f /tmp/metallb-ip-pool.yaml
+      register: ip_pool_apply
+      changed_when: "'created' in ip_pool_apply.stdout or 'configured' in ip_pool_apply.stdout"
+      # Áp dụng cấu hình IPAddressPool
+
+    - name: Create L2Advertisement manifest
+      copy:
+        dest: /tmp/metallb-l2advertisement.yaml
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: default-advertisement
+            namespace: {{ metallb_namespace }}
+          spec:
+            ipAddressPools:
+              - default-address-pool
+      # Tạo manifest L2Advertisement cho MetalLB
+
+    - name: Apply L2Advertisement manifest
+      command: kubectl apply -f /tmp/metallb-l2advertisement.yaml
+      register: l2_apply
+      changed_when: "'created' in l2_apply.stdout or 'configured' in l2_apply.stdout"
+      # Áp dụng cấu hình L2Advertisement
+
+    - name: Show MetalLB pods and IP configuration
+      shell: |
+        echo "=== MetalLB Pods ==="
+        kubectl get pods -n {{ metallb_namespace }}
+        echo ""
+        echo "=== IPAddressPools ==="
+        kubectl get ipaddresspools -n {{ metallb_namespace }}
+      register: metallb_status
+      changed_when: false
+      # Hiển thị pods và cấu hình IP của MetalLB
+
+    - name: Display summary
+      debug:
+        msg:
+          - "MetalLB installed successfully."
+          - "Namespace: {{ metallb_namespace }}"
+          - "IP Pool: {{ ip_range_start }} - {{ ip_range_end }}"
+          - "{{ metallb_status.stdout_lines }}"
+      # Hoàn tất cài đặt MetalLB LoadBalancer`,
+
+    '12-setup-storage': `---
 - hosts: master
   become: yes
   gather_facts: no
@@ -1019,13 +1123,13 @@ async function generateK8sPlaybookFromTemplate(template) {
     nfs_manifest_dir: /etc/kubernetes/storage
 
   tasks:
-    - name: Create NFS manifest directory
+    - name: Tạo thư mục manifest NFS
       file:
         path: "{{ nfs_manifest_dir }}"
         state: directory
         mode: '0755'
 
-    - name: Download and apply NFS Provisioner (example)
+    - name: Tải và áp dụng NFS Provisioner (example)
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/nfs-subdir-external-provisioner/master/deploy/rbac.yaml
@@ -1036,22 +1140,22 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: nfs_apply
       ignore_errors: yes
 
-    - name: Display NFS deployment result
+    - name: Kết quả triển khai NFS
       debug:
         msg: "{{ nfs_apply.stdout_lines | default(['NFS Provisioner applied']) }}"
 
-    - name: Set default StorageClass
+    - name: Đặt StorageClass mặc định
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf \
         kubectl patch storageclass nfs-client -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}' || true
       args:
         executable: /bin/bash
 
-    - name: Complete
+    - name: Hoàn tất
       debug:
         msg: "Cấu hình StorageClass (NFS) mặc định đã hoàn tất!"`,
 
-    '12-prepare-and-join-worker': `---
+    '13-prepare-and-join-worker': `---
 # All-in-one: Chuẩn bị node và join vào cụm (02 → 03 → 04 → 07)
 
 # Precheck: Chỉ định nhóm target_workers gồm các worker chưa Ready hoặc chưa có trong kubectl
@@ -1091,37 +1195,37 @@ async function generateK8sPlaybookFromTemplate(template) {
             item not in (node_names | default([])) or
             item in (not_ready_names | default([]))
 
-- name: 02 - Configure kernel and sysctl
+- name: 02 - Cấu hình kernel và sysctl
   hosts: target_workers
   become: yes
   gather_facts: no
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Disable swap
+    - name: Tắt swap
       shell: swapoff -a || true
       ignore_errors: true
 
-    - name: Comment swap entries in /etc/fstab
+    - name: Comment dòng swap trong /etc/fstab
       replace:
         path: /etc/fstab
         regexp: '(^.*swap.*$)'
         replace: '# \\1'
       ignore_errors: yes
 
-    - name: Create modules-load file for containerd
+    - name: Tạo file modules-load cho containerd
       copy:
         dest: /etc/modules-load.d/containerd.conf
         content: |
           overlay
           br_netfilter
 
-    - name: Enable overlay and br_netfilter modules
+    - name: Kích hoạt module overlay và br_netfilter
       shell: |
         modprobe overlay || true
         modprobe br_netfilter || true
 
-    - name: Configure sysctl for Kubernetes
+    - name: Cấu hình sysctl cho Kubernetes
       copy:
         dest: /etc/sysctl.d/99-kubernetes-cri.conf
         content: |
@@ -1129,11 +1233,11 @@ async function generateK8sPlaybookFromTemplate(template) {
           net.bridge.bridge-nf-call-ip6tables = 1
           net.ipv4.ip_forward                 = 1
 
-    - name: Apply sysctl
+    - name: Áp dụng sysctl
       command: sysctl --system
       ignore_errors: yes
 
-- name: 03 - Install and configure containerd
+- name: 03 - Cài đặt và cấu hình containerd
   hosts: target_workers
   become: yes
   gather_facts: no
@@ -1170,14 +1274,14 @@ async function generateK8sPlaybookFromTemplate(template) {
         enabled: yes
         state: restarted
 
-- name: 04 - Install Kubernetes (kubelet, kubeadm, kubectl)
+- name: 04 - Cài đặt Kubernetes (kubelet, kubeadm, kubectl)
   hosts: target_workers
   become: yes
   gather_facts: no
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Add Kubernetes GPG key (if missing)
+    - name: Thêm GPG key của Kubernetes (nếu chưa có)
       shell: |
         if [ ! -f /usr/share/keyrings/kubernetes-archive-keyring.gpg ]; then
           curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \
@@ -1186,13 +1290,13 @@ async function generateK8sPlaybookFromTemplate(template) {
       changed_when: false
       ignore_errors: true
 
-    - name: Add Kubernetes repository
+    - name: Thêm repository Kubernetes
       copy:
         dest: /etc/apt/sources.list.d/kubernetes.list
         content: |
           deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
 
-    - name: Install kubelet, kubeadm, kubectl
+    - name: Cài kubelet, kubeadm, kubectl
       apt:
         name:
           - kubelet
@@ -1201,10 +1305,10 @@ async function generateK8sPlaybookFromTemplate(template) {
         state: present
         update_cache: yes
 
-    - name: Hold kubelet/kubeadm/kubectl versions
+    - name: Giữ phiên bản kubelet/kubeadm/kubectl
       command: apt-mark hold kubelet kubeadm kubectl
 
-- name: 07 - Join workers to cluster
+- name: 07 - Join worker vào cụm
   hosts: target_workers
   become: yes
   gather_facts: no
@@ -1213,23 +1317,23 @@ async function generateK8sPlaybookFromTemplate(template) {
   vars:
     join_script: /tmp/kube_join.sh
   tasks:
-    - name: Check SSH connectivity to worker
+    - name: Kiểm tra kết nối SSH tới worker
       ping:
       register: ping_result
       ignore_errors: yes
 
-    - name: Mark online status
+    - name: Đánh dấu trạng thái online
       set_fact:
         worker_online: "{{ ping_result is succeeded }}"
 
-    - name: Get join command from master
+    - name: Lấy join command từ master
       delegate_to: "{{ groups['master'][0] }}"
       run_once: true
       shell: kubeadm token create --print-join-command
       register: join_cmd
       when: worker_online
 
-    - name: Write join command to file
+    - name: Ghi join command ra file
       copy:
         content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
         dest: "{{ join_script }}"
@@ -1237,7 +1341,7 @@ async function generateK8sPlaybookFromTemplate(template) {
       when: worker_online
       ignore_errors: yes
 
-    - name: Reset old node (if exists)
+    - name: Reset node cũ (nếu có)
       shell: |
         kubeadm reset -f || true
         rm -rf /etc/kubernetes /var/lib/kubelet /etc/cni/net.d
@@ -1245,13 +1349,13 @@ async function generateK8sPlaybookFromTemplate(template) {
       ignore_errors: yes
       when: worker_online
 
-    - name: Execute join command
+    - name: Thực thi lệnh join
       shell: "{{ join_script }}"
       register: join_output
       ignore_errors: yes
       when: worker_online
 
-    - name: Restart kubelet
+    - name: Khởi động lại kubelet
       systemd:
         name: kubelet
         state: restarted
@@ -1259,14 +1363,14 @@ async function generateK8sPlaybookFromTemplate(template) {
       ignore_errors: yes
       when: worker_online
 
-    - name: Summarize results
+    - name: Tổng kết kết quả
       debug:
         msg: "{{ 'Node ' + inventory_hostname + ' đã tham gia cụm thành công!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Bỏ qua join' }}"`,
 
 
 
     '08-verify-cluster': `---
-- name: Verify Kubernetes cluster status
+- name: Kiểm tra trạng thái cụm Kubernetes
   hosts: master
   become: yes
   gather_facts: no
@@ -1275,23 +1379,23 @@ async function generateK8sPlaybookFromTemplate(template) {
     DEBIAN_FRONTEND: noninteractive
 
   tasks:
-    - name: Check kubectl availability
+    - name: Kiểm tra kubectl có sẵn không
       command: which kubectl
       register: kubectl_check
       failed_when: kubectl_check.rc != 0
       changed_when: false
 
-    - name: List nodes
+    - name: Liệt kê danh sách node
       command: kubectl get nodes
       register: nodes_info
       changed_when: false
 
-    - name: List system pods
+    - name: Liệt kê pods hệ thống
       command: kubectl get pods -n kube-system
       register: pods_info
       changed_when: false
 
-    - name: Display cluster information
+    - name: Hiển thị thông tin cụm
       debug:
         msg:
           - "Danh sách Node:"
@@ -1299,12 +1403,12 @@ async function generateK8sPlaybookFromTemplate(template) {
           - "Pods trong namespace kube-system:"
           - "{{ pods_info.stdout_lines }}"
 
-    - name: Check node status
+    - name: Kiểm tra trạng thái node
       shell: kubectl get nodes --no-headers | awk '{print $2}' | sort | uniq -c
       register: node_status
       changed_when: false
 
-    - name: Report node status
+    - name: Báo cáo tình trạng node
       debug:
         msg: |
           {% if 'NotReady' in node_status.stdout %}
@@ -1314,12 +1418,12 @@ async function generateK8sPlaybookFromTemplate(template) {
           Tất cả node đã ở trạng thái Ready!
           {% endif %}
 
-    - name: Check failing pods in kube-system
+    - name: Kiểm tra pod lỗi trong kube-system
       shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
       register: bad_pods
       changed_when: false
 
-    - name: Report problematic pods
+    - name: Báo cáo pod lỗi
       debug:
         msg: |
           {% if bad_pods.stdout %}
@@ -1329,7 +1433,7 @@ async function generateK8sPlaybookFromTemplate(template) {
           Tất cả pod trong kube-system đều đang Running hoặc Completed!
           {% endif %}
 
-    - name: Show logs of problematic pods (if any)
+    - name: Hiển thị log của pod lỗi (nếu có)
       when: bad_pods.stdout != ""
       shell: |
         for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
@@ -1338,7 +1442,7 @@ async function generateK8sPlaybookFromTemplate(template) {
       register: bad_pods_logs
       ignore_errors: yes
 
-    - name: Detailed logs
+    - name: Log chi tiết
       when: bad_pods.stdout != ""
       debug:
         msg: "{{ bad_pods_logs.stdout_lines | default(['Không có log lỗi']) }}"`,
@@ -1961,7 +2065,7 @@ async function generateK8sPlaybookFromTemplate(template) {
       shell: |
         mkdir -p /usr/share/keyrings
         curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \
-        gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
+          gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
       changed_when: false
       ignore_errors: true
       # Thêm GPG key chính thức của Kubernetes
@@ -2237,9 +2341,10 @@ async function generateK8sPlaybookFromTemplate(template) {
     'join-workers': '07-join-workers',
     'verify-cluster': '08-verify-cluster',
     'install-ingress': '09-install-ingress',
-    'install-helm': '10-install-helm',
-    'setup-storage': '11-setup-storage',
-    'prepare-and-join-worker': '12-prepare-and-join-worker',
+    'install-metallb': '10-install-metallb',
+    'install-helm': '11-install-helm',
+    'setup-storage': '12-setup-storage',
+    'prepare-and-join-worker': '13-prepare-and-join-worker',
     'deploy-full-cluster': 'deploy-full-cluster',
     'deploy-full-cluster-flannel': 'deploy-full-cluster-flannel',
     'reset-cluster': '00-reset-cluster'
@@ -2252,7 +2357,7 @@ async function generateK8sPlaybookFromTemplate(template) {
   if (!playbookContent) {
     throw new Error('Template không tồn tại');
   }
-
+  
   const filename = actualTemplate + '.yml';
 
   // Check if playbook already exists
@@ -2272,9 +2377,10 @@ async function generateK8sPlaybookFromTemplate(template) {
       '07-join-workers': 'Join Workers',
       '08-verify-cluster': 'Xác minh trạng thái cụm',
       '09-install-ingress': 'Cài Ingress Controller',
-      '10-install-helm': 'Cài Helm',
-      '11-setup-storage': 'Setup Storage',
-      '12-prepare-and-join-worker': 'Chuẩn bị & Join Worker (02→03→04→07)',
+      '10-install-metallb': 'Cài MetalLB LoadBalancer',
+      '11-install-helm': 'Cài Helm',
+      '12-setup-storage': 'Setup Storage',
+      '13-prepare-and-join-worker': 'Chuẩn bị & Join Worker (02→03→04→07)',
       'deploy-full-cluster': 'Triển khai toàn bộ cluster (Calico)',
       'deploy-full-cluster-flannel': 'Triển khai toàn bộ cluster (Flannel)'
     };
@@ -2297,7 +2403,7 @@ async function generateK8sPlaybookFromTemplate(template) {
   if (getClusterId() && playbookContent.includes('{{ cluster_id | default(1) }}')) {
     finalPlaybookContent = playbookContent.replace('{{ cluster_id | default(1) }}', getClusterId());
   }
-
+  
   try {
     const result = await fetch(`/api/ansible-playbook/save/${getClusterId()}`, {
       method: 'POST',
@@ -2306,12 +2412,12 @@ async function generateK8sPlaybookFromTemplate(template) {
       },
       body: `filename=${encodeURIComponent(filename)}&content=${encodeURIComponent(finalPlaybookContent)}`
     });
-
+    
     if (!result.ok) {
       const errorData = await result.json();
       throw new Error(errorData.error || 'Lỗi tạo playbook');
     }
-
+    
     return await result.json();
   } catch (error) {
     console.error('Lỗi tạo playbook K8s:', error);
@@ -2323,7 +2429,7 @@ async function generateK8sPlaybookFromTemplate(template) {
 function showPlaybookContentView() {
   const contentArea = document.getElementById('playbook-content-area');
   const executionArea = document.getElementById('playbook-execution-status');
-
+  
   if (contentArea) contentArea.style.display = 'block';
   if (executionArea) executionArea.style.display = 'none';
 }
@@ -2332,7 +2438,7 @@ function showPlaybookContentView() {
 function showPlaybookExecutionView() {
   const contentArea = document.getElementById('playbook-content-area');
   const executionArea = document.getElementById('playbook-execution-status');
-
+  
   if (contentArea) contentArea.style.display = 'none';
   if (executionArea) executionArea.style.display = 'block';
 }
@@ -2341,11 +2447,11 @@ function showPlaybookExecutionView() {
 function searchPlaybooks(query) {
   const items = document.querySelectorAll('#playbook-list .playbook-item');
   const searchTerm = query.toLowerCase().trim();
-
+  
   items.forEach(item => {
     const playbookName = item.textContent.toLowerCase();
     const shouldShow = playbookName.includes(searchTerm);
-
+    
     const listItem = item.closest('.list-group-item');
     if (listItem) {
       listItem.style.display = shouldShow ? 'flex' : 'none';
@@ -2360,7 +2466,7 @@ window.refreshPlaybooks = async function () {
     refreshBtn.disabled = true;
     refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải...';
   }
-
+  
   try {
     await loadPlaybooks();
   } catch (error) {

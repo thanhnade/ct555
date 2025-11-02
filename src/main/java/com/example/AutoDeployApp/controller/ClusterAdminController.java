@@ -364,6 +364,60 @@ public class ClusterAdminController {
     }
 
     /**
+     * Delete Namespace (cấm namespace hệ thống)
+     */
+    @DeleteMapping("/{id}/k8s/namespaces/{name}")
+    public ResponseEntity<?> deleteNamespace(@PathVariable Long id,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            // Chặn xóa namespace hệ thống
+            String nsLower = name == null ? "" : name.toLowerCase();
+            if (nsLower.equals("kube-system") || nsLower.equals("kube-public")
+                    || nsLower.equals("kube-node-lease") || nsLower.equals("default")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Không cho phép xóa namespace hệ thống"));
+            }
+
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            // Xóa namespace có thể mất nhiều thời gian vì phải xóa tất cả tài nguyên bên
+            // trong
+            // Sử dụng --wait=true (mặc định) để đợi đến khi xóa hoàn toàn
+            // Timeout 120 giây để đảm bảo có đủ thời gian cho namespace có nhiều tài nguyên
+            String cmd = "kubectl delete namespace " + name + " --wait=true --timeout=120s";
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 130000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 130000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
      * Liệt kê pods (tất cả namespaces)
      */
     @GetMapping("/{id}/k8s/pods")

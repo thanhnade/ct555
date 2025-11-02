@@ -26,11 +26,13 @@ public class WebSocketConfig implements WebSocketConfigurer {
     }
 
     @Bean
+    @NonNull
     public TerminalWebSocketHandler terminalWebSocketHandler() {
         return new TerminalWebSocketHandler(serverService);
     }
 
     @Bean
+    @NonNull
     public AnsibleWebSocketHandler ansibleWebSocketHandler() {
         return new AnsibleWebSocketHandler(ansibleInstallationService, serverService);
     }
