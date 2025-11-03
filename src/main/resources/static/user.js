@@ -410,14 +410,17 @@ function initializeUploadForm() {
           if (successDiv) successDiv.style.display = 'none';
         }, 5000);
       } else {
+        // Error response from server
+        const errorMessage = data.message || data.error || 'Upload thất bại';
         if (errorDiv) {
-          errorDiv.textContent = '❌ Lỗi: ' + (data.error || 'Upload thất bại');
+          errorDiv.textContent = '❌ Lỗi: ' + errorMessage;
           errorDiv.style.display = 'block';
         }
         if (uploadBtn) {
           uploadBtn.disabled = false;
           uploadBtn.innerHTML = 'Triển khai ngay';
         }
+        showNotification('❌ ' + errorMessage, 'danger');
       }
     } catch (error) {
       if (errorDiv) {
@@ -457,7 +460,8 @@ function loadProjects() {
           name: app.appName || app.name || 'Unnamed',
           status: mapStatus(app.status),
           url: app.accessUrl || '',
-          framework: app.frameworkPreset || 'Unknown',
+          dockerImage: app.dockerImage || '',
+          framework: 'Docker Image', // Vì form chỉ hỗ trợ Docker image
           createdAt: app.createdAt || new Date().toISOString(),
           updatedAt: app.updatedAt || app.createdAt || new Date().toISOString(),
           type: 'application'
@@ -617,7 +621,7 @@ function renderProjectsList(projects) {
                   <svg viewBox="0 0 24 24" fill="none">
                     <path d="M13.984 6.016v12.469c0 .563-.281.984-.656 1.219-.375.281-.75.375-1.219.375-.516 0-.891-.188-1.266-.516l-2.484-2.156c-.188-.141-.469-.141-.656 0l-2.484 2.156c-.375.328-.75.516-1.266.516-.469 0-.844-.094-1.219-.375C2.298 19.469 2 19.048 2 18.516V5.531c0-.563.298-.984.656-1.219C3.031 4.031 3.406 3.938 3.875 3.938c.516 0 .891.188 1.266.516l2.484 2.156c.188.141.469.141.656 0L10.75 4.453c.375-.328.75-.516 1.266-.516.469 0 .844.094 1.219.375C13.594 4.547 13.984 4.969 13.984 5.531v.485z" fill="currentColor"/>
                   </svg>
-                  <span>${escapeHtml(project.framework)}</span>
+                  <span>${escapeHtml(project.dockerImage || project.framework)}</span>
                 </div>
                 <div class="meta-item">
                   <svg viewBox="0 0 24 24" fill="none">
@@ -749,25 +753,25 @@ async function handleStartProject(projectId) {
 }
 
 async function handleDeleteProject(projectId) {
-  if (!confirm('Bạn có chắc chắn muốn xóa dự án này không?')) return;
+  if (!confirm('Bạn có chắc chắn muốn xóa dự án này không?\n\nLưu ý: Ứng dụng sẽ được đánh dấu xóa và admin sẽ xóa hoàn toàn trong thời gian sớm nhất.')) return;
   
   try {
-    // TODO: API sẽ được triển khai trong backend mới
     const response = await fetch(`/api/applications/${projectId}`, {
       method: 'DELETE'
     });
     
     if (response.ok) {
-      showNotification('✅ Đã xóa dự án thành công', 'success');
-      loadProjects();
+      const data = await response.json().catch(() => ({}));
+      const message = data.message || '✅ Đã đánh dấu xóa dự án thành công. Admin sẽ xóa hoàn toàn trong thời gian sớm nhất.';
+      showNotification(message, 'success');
+      loadProjects(); // Reload để ẩn ứng dụng đã xóa khỏi danh sách
     } else {
       const data = await response.json().catch(() => ({}));
-      showNotification('❌ Lỗi: ' + (data.error || 'Xóa thất bại'), 'danger');
+      showNotification('❌ Lỗi: ' + (data.message || data.error || 'Xóa thất bại'), 'danger');
     }
   } catch (error) {
-    // API chưa tồn tại, hiển thị thông báo
-    console.error('Delete API not available yet:', error);
-    showNotification('⚠️ API xóa chưa sẵn sàng. Đang chờ backend mới...', 'danger');
+    console.error('Delete error:', error);
+    showNotification('❌ Lỗi kết nối: ' + error.message, 'danger');
   }
 }
 

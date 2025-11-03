@@ -170,6 +170,25 @@ public class AnsibleInstallationService {
             return result;
         }
 
+        // Kiểm tra MASTER server có online không
+        if (masterServer.getStatus() != Server.ServerStatus.ONLINE) {
+            Map<String, Object> result = new java.util.HashMap<>();
+            result.put("clusterId", clusterId);
+            result.put("allInstalled", false);
+            result.put("someInstalled", false);
+            result.put("totalServers", 1);
+            result.put("installedCount", 0);
+            result.put("notInstalledCount", 1);
+            result.put("installationPercentage", 0);
+            result.put("ansibleStatus", new java.util.HashMap<>());
+            result.put("roleSummary", new java.util.HashMap<>());
+            result.put("recommendation", "❌ MASTER server (" + masterServer.getHost()
+                    + ") đang offline. Vui lòng kiểm tra kết nối máy chủ.");
+            result.put("masterOffline", true);
+            result.put("masterHost", masterServer.getHost());
+            return result;
+        }
+
         Map<String, Object> detailedResults = new java.util.HashMap<>();
         String serverInfo = String.format("%s (%s)", masterServer.getHost(), masterServer.getRole().name());
 

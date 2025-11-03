@@ -364,6 +364,48 @@ public class ClusterAdminController {
     }
 
     /**
+     * Describe Namespace
+     */
+    @GetMapping("/{id}/k8s/namespaces/{name}")
+    public ResponseEntity<?> describeNamespace(@PathVariable Long id,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (!isMasterOnline(id, session)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            }
+
+            java.util.Map<Long, String> pwCache = getPasswordCache(session);
+            var masters = serverService.findByClusterId(id);
+            var master = masters == null ? null
+                    : masters.stream()
+                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .findFirst().orElse(null);
+            if (master == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String user = master.getUsername();
+            String cmd = "kubectl get namespace " + name + " -o yaml";
+
+            String out;
+            if (pem != null && !pem.isBlank()) {
+                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
+            } else {
+                String pw = pwCache.get(master.getId());
+                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            }
+            if (out == null)
+                out = "";
+            return ResponseEntity.ok(Map.of("output", out));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
      * Delete Namespace (cấm namespace hệ thống)
      */
     @DeleteMapping("/{id}/k8s/namespaces/{name}")
@@ -1830,9 +1872,11 @@ public class ClusterAdminController {
         // tin cơ bản
         List<CompletableFuture<Map<String, Object>>> futures = serverData.stream()
                 .map(serverDataItem -> {
-                    // Nếu node offline, trả về ngay thông tin cơ bản (không gọi SSH để giảm thời
-                    // gian load)
-                    if (!serverDataItem.isConnected) {
+                    // Nếu node offline (check cả isConnected và status từ DB), trả về ngay thông
+                    // tin cơ bản
+                    // (không gọi SSH để giảm thời gian load và tránh timeout)
+                    if (!serverDataItem.isConnected ||
+                            serverDataItem.status == com.example.AutoDeployApp.entity.Server.ServerStatus.OFFLINE) {
                         return CompletableFuture.<Map<String, Object>>completedFuture(
                                 java.util.Map.of(
                                         "id", serverDataItem.id,
@@ -1876,12 +1920,24 @@ public class ClusterAdminController {
         String version = "";
 
         // Xử lý futures với cách ly lỗi
+        // Tối ưu: xử lý offline nodes trước (đã completed ngay), sau đó xử lý online nodes
         for (int i = 0; i < futures.size(); i++) {
             var future = futures.get(i);
             var serverDataItem = serverData.get(i);
 
             try {
-                Map<String, Object> nodeData = future.get(20, TimeUnit.SECONDS);
+                // Với offline nodes (đã completed ngay), sẽ return ngay lập tức
+                // Với online nodes, đợi tối đa 15 giây (giảm từ 20 để nhanh hơn)
+                Map<String, Object> nodeData;
+                if (!serverDataItem.isConnected || 
+                    serverDataItem.status == com.example.AutoDeployApp.entity.Server.ServerStatus.OFFLINE) {
+                    // Offline nodes đã completed ngay, lấy ngay không cần timeout
+                    nodeData = future.get();
+                } else {
+                    // Online nodes: timeout 15 giây (đã có orTimeout 15s trong getServerMetricsAsync)
+                    nodeData = future.get(15, TimeUnit.SECONDS);
+                }
+                
                 nodes.add(nodeData);
 
                 // Thu thập phiên bản từ master node
@@ -1889,6 +1945,22 @@ public class ClusterAdminController {
                 if (version.isBlank() && nodeVersion != null && !nodeVersion.isBlank()) {
                     version = nodeVersion;
                 }
+            } catch (java.util.concurrent.TimeoutException e) {
+                // Timeout riêng cho online nodes - fallback nhanh
+                System.err.println("Timeout lấy metrics cho " + serverDataItem.host);
+                var fallbackNode = new java.util.HashMap<String, Object>();
+                fallbackNode.put("id", serverDataItem.id);
+                fallbackNode.put("ip", serverDataItem.host);
+                fallbackNode.put("role", serverDataItem.role.name());
+                fallbackNode.put("status", serverDataItem.status.name());
+                fallbackNode.put("isConnected", false);
+                fallbackNode.put("cpu", "-");
+                fallbackNode.put("ram", "-");
+                fallbackNode.put("ramPercentage", 0);
+                fallbackNode.put("disk", "-");
+                fallbackNode.put("version", "");
+                fallbackNode.put("error", "Timeout khi lấy metrics");
+                nodes.add(fallbackNode);
             } catch (Exception e) {
                 System.err
                         .println("Lỗi xử lý metrics server cho " + serverDataItem.host + ": " + e.getMessage());

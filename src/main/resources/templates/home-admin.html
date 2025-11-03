@@ -32,6 +32,9 @@
           <li class="nav-item">
             <a class="nav-link" href="#k8s">☸️Kubernetes Cluster</a>
           </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#deployments">🚀Deployment Requests</a>
+          </li>
         </ul>
         <div class="d-flex align-items-center gap-2">
           <a href="/auth/logout" class="btn btn-sm btn-outline-light">Đăng xuất</a>
@@ -1526,6 +1529,83 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
           <button type="button" class="btn btn-success" onclick="startDeployWS()">Triển khai</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deployment Requests Section -->
+  <div id="section-deployments" class="d-none">
+    <div class="container">
+      <div class="d-flex align-items-center justify-content-between mb-4">
+        <h1 class="m-0">🚀 Deployment Requests</h1>
+        <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
+      </div>
+
+      <!-- Deployment Requests List -->
+      <div class="card mb-4">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h2 class="h6 m-0">📋 Danh sách yêu cầu triển khai</h2>
+            <div class="d-flex gap-2">
+              <select id="deployment-status-filter" class="form-select form-select-sm" style="width: auto;" onchange="loadDeploymentRequests()">
+                <option value="">Tất cả</option>
+                <option value="PENDING">⏳ Chờ xử lý</option>
+                <option value="RUNNING">✅ Đang chạy</option>
+                <option value="ERROR">❌ Lỗi</option>
+              </select>
+              <button class="btn btn-sm btn-outline-primary" onclick="loadDeploymentRequests()">
+                <i class="bi bi-arrow-clockwise"></i> Làm mới
+              </button>
+            </div>
+          </div>
+
+          <!-- Alert Messages -->
+          <div id="deployment-alert" class="alert alert-dismissible fade" role="alert" style="display: none;">
+            <span id="deployment-message"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+
+          <div class="table-responsive table-fixed" style="max-height: 60vh;">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Tên ứng dụng</th>
+                  <th>Docker Image</th>
+                  <th>Người dùng</th>
+                  <th>Namespace</th>
+                  <th>Trạng thái</th>
+                  <th>Access URL</th>
+                  <th>Ngày tạo</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="deployment-requests-tbody">
+                <tr>
+                  <td colspan="9" class="text-center text-muted">Đang tải...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deployment Logs Card -->
+      <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h2 class="h6 m-0">📋 Logs triển khai</h2>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary" id="clear-deployment-logs-btn" onclick="clearDeploymentLogs()">
+              <i class="bi bi-trash"></i> Xóa log
+            </button>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div id="deployment-logs-console" class="bg-dark text-light p-3"
+            style="height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">
+            <div class="text-muted text-center">Chọn một deployment request để xem logs...</div>
+          </div>
         </div>
       </div>
     </div>

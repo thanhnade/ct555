@@ -382,10 +382,21 @@ async function showClusterDetail(clusterId) {
   })();
 
   // BƯỚC 2: Load K8s Resources sau khi có chi tiết cluster
-  showK8sResources();
-
-  // BƯỚC 3: Load Networking resources (Services & Ingress)
-  refreshNetworking(clusterId);
+  // Chỉ load nếu có MASTER online
+  const hasOnlineMaster = detail.nodes && detail.nodes.some(n => 
+    (n.isConnected || n.status === 'ONLINE') && n.role === 'MASTER'
+  );
+  if (hasOnlineMaster) {
+    showK8sResources();
+    // BƯỚC 3: Load Networking resources (Services & Ingress)
+    refreshNetworking(clusterId);
+  } else {
+    // Nếu không có MASTER online, vẫn hiển thị section nhưng không load data
+    showK8sResources();
+    // Hiển thị message thay vì load data
+    showK8sResourcesOfflineMessage();
+    showNetworkingOfflineMessage();
+  }
 
   // Tự động kiểm tra trạng thái Ansible và load playbooks sau khi có dữ liệu cluster
   // Chỉ gọi API nếu cluster có nodes
@@ -394,14 +405,22 @@ async function showClusterDetail(clusterId) {
       try {
         // Kiểm tra nếu cluster có nodes trước khi gọi API
         if (detail.nodes && detail.nodes.length > 0) {
-          checkAnsibleStatus(clusterId);
+          // Chỉ gọi checkAnsibleStatus nếu có ít nhất 1 MASTER node online
+          const hasOnlineMaster = detail.nodes.some(n => 
+            (n.isConnected || n.status === 'ONLINE') && n.role === 'MASTER'
+          );
+          if (hasOnlineMaster) {
+            checkAnsibleStatus(clusterId);
+          }
           if (window.loadPlaybooks) { window.loadPlaybooks(clusterId); } else { loadPlaybooks(); }
-        } else {
-          console.log('Cluster không có nodes, bỏ qua việc gọi API Ansible và Playbook');
         }
-      } catch (_) { }
-    }, 100); // Tăng delay để đảm bảo UI đã render xong
-  } catch (_) { }
+      } catch (err) {
+        console.error('Error in auto-check Ansible status:', err);
+      }
+    }, 500); // Tăng delay để đảm bảo UI đã render xong và backend sẵn sàng
+  } catch (err) {
+    // Silent error handling
+  }
 
   const tbody = document.getElementById('cd-nodes-tbody');
   tbody.innerHTML = '';
@@ -1774,7 +1793,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(autoConnectServers, 45000);
 
   // Section toggling
-  const sectionIds = ['user', 'server', 'k8s', 'app'];
+  const sectionIds = ['user', 'server', 'k8s', 'app', 'deployments'];
   async function showSection(key) {
     sectionIds.forEach(id => {
       const el = document.getElementById('section-' + id);
@@ -1782,6 +1801,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     if (key === 'user') { await loadUsers(); }
     if (key === 'server') { await loadServers(); }
+    if (key === 'deployments') { await loadDeploymentRequests(); }
     if (key === 'k8s') { await Promise.all([loadClusterList(), loadClustersAndServers()]); }
     // Có thể mở rộng cho 'app' nếu cần
   }
@@ -1791,13 +1811,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   const defaultSection = sectionIds.includes(hash) ? hash : 'server';
   await showSection(defaultSection);
 
+  // Listen for hash changes (when user clicks browser back/forward)
+  window.addEventListener('hashchange', async () => {
+    const newHash = window.location.hash?.replace('#', '') || 'server';
+    if (sectionIds.includes(newHash)) {
+      await showSection(newHash);
+    }
+  });
+
   document.querySelectorAll('.navbar .dropdown-menu a.dropdown-item, .navbar .nav-link').forEach(a => {
     a.addEventListener('click', (e) => {
       const href = a.getAttribute('href') || '';
-      if (href.startsWith('#')) {
+        if (href.startsWith('#')) {
         const key = href.replace('#', '');
-        if (['user', 'server', 'k8s', 'app'].includes(key)) {
+        if (['user', 'server', 'k8s', 'app', 'deployments'].includes(key)) {
           e.preventDefault();
+          // Update URL hash without triggering navigation
+          window.history.pushState(null, '', href);
           showSection(key);
           document.querySelector('.navbar-collapse')?.classList.remove('show');
         } else if (['svc-list', 'svc-actions', 'svc-logs'].includes(key)) {
@@ -1827,8 +1857,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
   });
-  // default
-  showSection('server');
+  // Section đã được show ở trên dựa vào hash URL, không cần show default nữa
 
   // bind server forms
   const newSrv = document.getElementById('create-server-form');
@@ -1993,42 +2022,52 @@ async function checkAnsibleStatus(clusterId) {
   const statusTable = document.getElementById('ansible-status-table');
 
   try {
-    checkBtn.disabled = true;
-    checkBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang kiểm tra...';
+    if (checkBtn) {
+      checkBtn.disabled = true;
+      checkBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang kiểm tra...';
+    }
 
     // Gọi API kiểm tra trạng thái Ansible
     const ansibleStatus = await fetchJSON(`/admin/clusters/${clusterId}/ansible-status`);
-
-    // Hide default message
-    statusDisplay.classList.add('d-none');
-
-    // Show status table
-    statusTable.classList.remove('d-none');
 
     // Update status table
     updateAnsibleStatusTable(ansibleStatus);
 
   } catch (error) {
-    console.error('Lỗi kiểm tra trạng thái Ansible:', error);
-
     // Hiển thị lỗi chi tiết hơn
-    let errorMessage = error.message;
+    let errorMessage = error.message || 'Không thể kiểm tra trạng thái Ansible';
     let alertType = 'danger';
     let iconClass = 'bi-exclamation-triangle';
 
-    if (error.message.includes('Cluster không có servers nào')) {
+    // Kiểm tra nếu error có response data
+    if (error.error) {
+      errorMessage = error.error;
+    }
+
+    if (errorMessage.includes('Cluster không có servers nào')) {
       errorMessage = 'Cluster này chưa có máy chủ nào. Vui lòng thêm máy chủ vào cluster trước khi kiểm tra Ansible.';
       alertType = 'warning';
       iconClass = 'bi-server';
-    } else if (error.message.includes('Yêu cầu không hợp lệ')) {
+    } else if (errorMessage.includes('Yêu cầu không hợp lệ') || errorMessage.includes('xác thực')) {
       errorMessage = 'Không có thông tin xác thực. Vui lòng kết nối lại các server trước khi kiểm tra Ansible.';
-    } else if (error.message.includes('Không có session')) {
+    } else if (errorMessage.includes('Không có session') || errorMessage.includes('đăng nhập')) {
       errorMessage = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+    } else if (errorMessage.includes('Không tìm thấy MASTER') || errorMessage.includes('offline')) {
+      errorMessage = 'MASTER server đang offline. Vui lòng kiểm tra kết nối máy chủ trước khi kiểm tra Ansible.';
+      alertType = 'warning';
+      iconClass = 'bi-server';
     }
+
+    // Escape HTML để tránh XSS
+    const escapeHtml = (text) => {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    };
 
     statusDisplay.innerHTML = `
       <div class="alert alert-${alertType}">
-        <i class="bi ${iconClass}"></i> ${errorMessage}
+        <i class="bi ${iconClass}"></i> ${escapeHtml(errorMessage)}
         <br><small class="text-muted">Vui lòng đảm bảo cluster có máy chủ và các server đã được kết nối.</small>
       </div>
     `;
@@ -2046,17 +2085,96 @@ async function checkAnsibleStatus(clusterId) {
 
 function updateAnsibleStatusTable(ansibleStatus) {
   const tbody = document.getElementById('ansible-status-tbody');
+  const statusDisplay = document.getElementById('ansible-status-display');
+  const statusTable = document.getElementById('ansible-status-table');
+  
+  if (!tbody || !statusDisplay || !statusTable) {
+    return;
+  }
+  
   tbody.innerHTML = '';
 
+  // Escape HTML helper function
+  const escapeHtml = (text) => {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  };
+
+  // Kiểm tra nếu MASTER server offline
+  if (ansibleStatus?.masterOffline === true) {
+    const masterHost = ansibleStatus.masterHost || 'MASTER';
+    statusDisplay.innerHTML = `
+      <div class="alert alert-warning">
+        <i class="bi bi-server"></i> <strong>Không tìm thấy máy chủ</strong><br>
+        <small>MASTER server (${escapeHtml(masterHost)}) đang offline. Vui lòng kiểm tra kết nối máy chủ trước khi kiểm tra Ansible.</small>
+      </div>
+    `;
+    statusDisplay.classList.remove('d-none');
+    statusTable.classList.add('d-none');
+    return;
+  }
+
+  // Kiểm tra ansibleStatus có tồn tại và có dữ liệu không
+  if (!ansibleStatus) {
+    statusDisplay.innerHTML = `
+      <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> Không nhận được phản hồi từ server.
+      </div>
+    `;
+    statusDisplay.classList.remove('d-none');
+    statusTable.classList.add('d-none');
+    return;
+  }
+
+  // Kiểm tra ansibleStatus property
+  const ansibleStatusMap = ansibleStatus.ansibleStatus;
+  if (!ansibleStatusMap || typeof ansibleStatusMap !== 'object') {
+    statusDisplay.innerHTML = `
+      <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> Không tìm thấy thông tin Ansible. 
+        ${ansibleStatus?.recommendation ? escapeHtml(ansibleStatus.recommendation) : 'Vui lòng kiểm tra lại cluster có MASTER server không.'}
+      </div>
+    `;
+    statusDisplay.classList.remove('d-none');
+    statusTable.classList.add('d-none');
+    return;
+  }
+
+  // Kiểm tra nếu Map rỗng
+  const statusKeys = Object.keys(ansibleStatusMap);
+  if (statusKeys.length === 0) {
+    statusDisplay.innerHTML = `
+      <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> Không tìm thấy thông tin Ansible. 
+        ${ansibleStatus?.recommendation ? escapeHtml(ansibleStatus.recommendation) : 'Vui lòng kiểm tra lại cluster có MASTER server không.'}
+      </div>
+    `;
+    statusDisplay.classList.remove('d-none');
+    statusTable.classList.add('d-none');
+    return;
+  }
+
+  // Có dữ liệu, hiển thị table
+  statusDisplay.classList.add('d-none');
+  statusTable.classList.remove('d-none');
+
   Object.entries(ansibleStatus.ansibleStatus).forEach(([host, status]) => {
+    // Kiểm tra status object có hợp lệ không
+    if (!status) {
+      console.warn(`Invalid status for host: ${host}`);
+      return;
+    }
+
     const tr = document.createElement('tr');
     tr.className = status.installed ? 'table-success' : 'table-danger';
 
     tr.innerHTML = `
-      <td><strong>${host}</strong></td>
+      <td><strong>${escapeHtml(host)}</strong></td>
       <td>
         <span class="badge bg-${status.role === 'MASTER' ? 'primary' : 'secondary'}">
-          ${status.role}
+          ${escapeHtml(status.role || 'UNKNOWN')}
         </span>
       </td>
       <td>
@@ -2065,14 +2183,14 @@ function updateAnsibleStatusTable(ansibleStatus) {
           ${status.installed ? 'Đã cài đặt' : 'Chưa cài đặt'}
         </span>
       </td>
-      <td>${status.installed ? `<code>${status.version}</code>` : 'N/A'}</td>
+      <td>${status.installed ? `<code>${escapeHtml(status.version || 'N/A')}</code>` : 'N/A'}</td>
       <td>
         ${status.installed ? `
           <div class="btn-group btn-group-sm" role="group">
-            <button class="btn btn-outline-warning" onclick="reinstallAnsibleOnServer('${host}')">Cài đặt lại</button>
-            <button class="btn btn-outline-danger" onclick="uninstallAnsibleOnServer('${host}')">Gỡ cài đặt</button>
+            <button class="btn btn-outline-warning" onclick="reinstallAnsibleOnServer('${escapeHtml(host)}')">Cài đặt lại</button>
+            <button class="btn btn-outline-danger" onclick="uninstallAnsibleOnServer('${escapeHtml(host)}')">Gỡ cài đặt</button>
           </div>` :
-        `<button class="btn btn-sm btn-outline-primary" onclick="installAnsibleOnServer('${host}')">Cài đặt</button>`
+        `<button class="btn btn-sm btn-outline-primary" onclick="installAnsibleOnServer('${escapeHtml(host)}')">Cài đặt</button>`
       }
       </td>
     `;
@@ -2900,10 +3018,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 statusMessage = `✅ Cấu hình đã lưu - ${checks.join(' ')}`;
               }
 
-              console.log('Ansible Validation Results:');
-              console.log('Config Check:', data.validation.configCheck);
-              console.log('Inventory Check:', data.validation.inventoryCheck);
-              console.log('Ping Check:', data.validation.pingCheck);
             }
 
             // Update status panel
@@ -2943,10 +3057,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 errorMessage = `❌ Lưu thất bại - ${errors.join(' ')}`;
               }
 
-              console.log('Validation Error Details:');
-              console.log('Config Check:', data.details.configCheck);
-              console.log('Inventory Check:', data.details.inventoryCheck);
-              console.log('Ping Check:', data.details.pingCheck);
             }
 
             // Update status panel with error
@@ -4136,7 +4246,6 @@ document.addEventListener('DOMContentLoaded', function () {
             }
           }
           updateConfigStatus('success', statusMessage, now);
-          console.log('Ansible Ping Result:', data.pingResult);
         } else {
           // Tạo thông báo lỗi chi tiết
           let errorMessage = data.message || 'Ansible không hoạt động';
@@ -4148,7 +4257,6 @@ document.addEventListener('DOMContentLoaded', function () {
       })
       .catch(error => {
         const now = new Date().toLocaleTimeString('vi-VN');
-        console.error('Error verifying ansible:', error);
         updateConfigStatus('error', 'Lỗi khi xác minh ansible: ' + (error.message || 'Không xác định'), now);
       });
   }
@@ -4421,6 +4529,9 @@ const k8sFilters = {
 // Token để vô hiệu hóa kết quả fetch cũ khi chuyển cụm
 let k8sRequestToken = 0;
 
+// Track các namespace đang được xóa
+let deletingNamespaces = new Set();
+
 // Show K8s resources section
 function showK8sResources() {
   document.getElementById('k8s-resources-detail').classList.remove('d-none');
@@ -4469,6 +4580,24 @@ function hideK8sResources() {
 // Load all K8s resources
 async function loadK8sResources() {
   if (!currentClusterId) return;
+  
+  // Kiểm tra MASTER online trước khi load
+  try {
+    const detail = await fetchJSON(`/admin/clusters/${currentClusterId}/detail`).catch(() => null);
+    if (detail && detail.nodes) {
+      const hasOnlineMaster = detail.nodes.some(n => 
+        (n.isConnected || n.status === 'ONLINE') && n.role === 'MASTER'
+      );
+      if (!hasOnlineMaster) {
+        // MASTER offline, không load resources
+        showK8sResourcesOfflineMessage();
+        return;
+      }
+    }
+  } catch (error) {
+    // Nếu không kiểm tra được, vẫn thử load (fallback)
+  }
+  
   // Tăng token để vô hiệu hóa mọi request cũ
   const myToken = ++k8sRequestToken;
   try {
@@ -4478,7 +4607,7 @@ async function loadK8sResources() {
       loadWorkloads(myToken)
     ]);
   } catch (error) {
-    console.error('Error loading K8s resources:', error);
+    // Silent error handling
   }
 }
 
@@ -4546,6 +4675,23 @@ async function loadWorkloads(token) {
 
 // Load networking resources (Services & Ingress)
 async function loadNetworkingResources(clusterId) {
+  // Kiểm tra MASTER online trước khi load
+  try {
+    const detail = await fetchJSON(`/admin/clusters/${clusterId}/detail`).catch(() => null);
+    if (detail && detail.nodes) {
+      const hasOnlineMaster = detail.nodes.some(n => 
+        (n.isConnected || n.status === 'ONLINE') && n.role === 'MASTER'
+      );
+      if (!hasOnlineMaster) {
+        // MASTER offline, không load resources
+        showNetworkingOfflineMessage();
+        return;
+      }
+    }
+  } catch (error) {
+    // Nếu không kiểm tra được, vẫn thử load (fallback)
+  }
+  
   try {
     const response1 = await fetch(`/admin/clusters/${clusterId}/k8s/services`);
     const data1 = await response1.json();
@@ -4569,7 +4715,7 @@ async function loadNetworkingResources(clusterId) {
       showIngressError(data2.error || 'Lỗi tải ingress');
     }
   } catch (error) {
-    console.error('Error loading networking resources:', error);
+    // Silent error handling
   }
 }
 
@@ -4702,6 +4848,21 @@ function showIngressError(msg) {
   tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-3">${msg}</td></tr>`;
 }
 
+// Hiển thị message khi MASTER offline cho K8s resources
+function showK8sResourcesOfflineMessage() {
+  const offlineMessage = '⚠️ MASTER server đang offline. Không thể lấy thông tin Kubernetes resources.';
+  showPodsError(offlineMessage);
+  showNamespacesError(offlineMessage);
+  showWorkloadsError(offlineMessage);
+}
+
+// Hiển thị message khi MASTER offline cho Networking resources
+function showNetworkingOfflineMessage() {
+  const offlineMessage = '⚠️ MASTER server đang offline. Không thể lấy thông tin Networking resources.';
+  showServicesError(offlineMessage);
+  showIngressError(offlineMessage);
+}
+
 // Placeholder functions for actions
 function describeService(namespace, name) {
   if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
@@ -4832,24 +4993,32 @@ function renderNamespaces() {
     return;
   }
 
-  tbody.innerHTML = namespaces.map(ns => `
+  tbody.innerHTML = namespaces.map(ns => {
+    const isSystem = isSystemNamespace(ns.name);
+    const isDeleting = deletingNamespaces.has(ns.name);
+    const delAttrs = isSystem || isDeleting ? 'disabled' : '';
+    const delTitle = isSystem ? 'title="Không cho phép xóa namespace hệ thống"' : 
+                     isDeleting ? 'title="Đang xóa namespace..."' : '';
+    const delText = isDeleting ? '<span class="spinner-border spinner-border-sm me-1"></span>Đang xóa...' : '<i class="bi bi-trash me-1"></i> Xóa';
+    return `
     <tr>
-      <td><code>${ns.name}</code></td>
+      <td><code>${escapeHtml(ns.name)}</code></td>
       <td>
-        <span class="badge ${getNamespaceStatusBadgeClass(ns.status)}">${ns.status}</span>
+        <span class="badge ${getNamespaceStatusBadgeClass(ns.status)}">${escapeHtml(ns.status)}</span>
       </td>
       <td>
         <div class="btn-group btn-group-sm">
-          <button class="btn btn-outline-info btn-sm" onclick="describeNamespace('${ns.name}')" title="Chi tiết">
+          <button class="btn btn-outline-info btn-sm" onclick="describeNamespace('${escapeHtml(ns.name)}')" title="Chi tiết">
             <i class="bi bi-info-circle me-1"></i> Chi tiết
           </button>
-          <button class="btn btn-outline-danger btn-sm" onclick="deleteNamespace('${ns.name}')" title="Xóa">
-            <i class="bi bi-trash me-1"></i> Xóa
+          <button class="btn btn-outline-danger btn-sm" ${delAttrs} ${delTitle} onclick="deleteNamespace('${escapeHtml(ns.name)}')">
+            ${delText}
           </button>
         </div>
       </td>
     </tr>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // Render workloads table
@@ -5060,13 +5229,84 @@ function deletePod(namespace, name) {
 }
 
 function describeNamespace(name) {
-  alert(`Describe namespace: ${name}`);
+  if (!currentClusterId) {
+    alert('Chưa chọn cluster');
+    return;
+  }
+
+  // Gọi API để lấy chi tiết namespace
+  fetch(`/admin/clusters/${currentClusterId}/k8s/namespaces/${encodeURIComponent(name)}`)
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) {
+        alert('Lỗi: ' + res.error);
+      } else {
+        showK8sOutput(`Namespace ${name}`, res.output || '');
+      }
+    })
+    .catch(e => alert('Lỗi kết nối: ' + e.message));
 }
 
 function deleteNamespace(name) {
-  if (confirm(`Xóa namespace ${name}?`)) {
-    alert(`Delete namespace: ${name}`);
+  if (!currentClusterId) {
+    alert('Chưa chọn cluster');
+    return;
   }
+
+  // Kiểm tra namespace hệ thống
+  if (isSystemNamespace(name)) {
+    alert('Không cho phép xóa namespace hệ thống');
+    return;
+  }
+
+  // Kiểm tra đang xóa rồi
+  if (deletingNamespaces.has(name)) {
+    return; // Đã đang xóa, không làm gì
+  }
+
+  // Xác nhận xóa
+  if (!confirm(`Xóa namespace "${name}"?\n\nCảnh báo: Tất cả tài nguyên trong namespace này sẽ bị xóa vĩnh viễn!\n\nQuá trình này có thể mất vài phút...`)) {
+    return;
+  }
+
+  // Đánh dấu đang xóa
+  deletingNamespaces.add(name);
+  // Cập nhật UI để disable button và hiển thị "Đang xóa..."
+  renderNamespaces();
+
+  // Hiển thị loading
+  showAlert('info', `Đang xóa namespace "${name}"... Vui lòng đợi (có thể mất vài phút nếu namespace có nhiều tài nguyên).`);
+
+  // Gọi API xóa namespace (backend sẽ chờ đến khi xóa xong)
+  fetch(`/admin/clusters/${currentClusterId}/k8s/namespaces/${encodeURIComponent(name)}`, {
+    method: 'DELETE'
+  })
+    .then(r => r.json())
+    .then(res => {
+      // Xóa khỏi Set đang xóa
+      deletingNamespaces.delete(name);
+      
+      if (res.error) {
+        showAlert('danger', `Lỗi xóa namespace: ${escapeHtml(res.error)}`);
+        // Reload để restore button
+        renderNamespaces();
+      } else {
+        showAlert('success', `Đã xóa namespace "${name}" thành công!<hr><pre class="small mb-0">${escapeHtml(res.output || '')}</pre>`);
+        // Reload namespaces list
+        loadNamespaces(k8sRequestToken);
+        // Reload other resources that might be affected
+        loadPods(k8sRequestToken);
+        loadWorkloads(k8sRequestToken);
+        loadNetworkingResources(currentClusterId);
+      }
+    })
+    .catch(e => {
+      // Xóa khỏi Set đang xóa
+      deletingNamespaces.delete(name);
+      showAlert('danger', `Lỗi kết nối: ${escapeHtml(e.message || 'Không xác định')}`);
+      // Reload để restore button
+      renderNamespaces();
+    });
 }
 
 function describeWorkload(type, namespace, name) {
@@ -5125,6 +5365,7 @@ function deleteWorkload(type, namespace, name) {
 
 // Reset K8s resources data
 function resetK8sResourcesData() {
+  // Reset data object
   k8sResourcesData = {
     pods: [],
     namespaces: [],
@@ -5136,7 +5377,387 @@ function resetK8sResourcesData() {
     services: [],
     ingress: []
   };
+
+  // Clear all K8s resource tables
+  const tablesToClear = [
+    'pods-tbody', 'namespaces-tbody', 'workloads-tbody',
+    'services-tbody', 'ingress-tbody'
+  ];
+  tablesToClear.forEach(id => {
+    const tbody = document.getElementById(id);
+    if (tbody) tbody.innerHTML = '';
+  });
+
+  // Reset count badges
+  const countBadges = [
+    'pods-count', 'namespaces-count', 'workloads-count',
+    'services-count', 'ingress-count'
+  ];
+  countBadges.forEach(id => {
+    const badge = document.getElementById(id);
+    if (badge) badge.textContent = '0';
+  });
+
+  // Reset K8s filters
+  k8sFilters.podsSearch = '';
+  k8sFilters.podsNamespace = '';
+  k8sFilters.namespacesSearch = '';
+  k8sFilters.workloadsSearch = '';
+  k8sFilters.workloadsType = '';
+  k8sFilters.servicesSearch = '';
+  k8sFilters.servicesNamespace = '';
+  k8sFilters.servicesType = '';
+  k8sFilters.ingressSearch = '';
+  k8sFilters.ingressNamespace = '';
+
+  // Clear filter inputs
+  const filterInputs = [
+    'pods-search', 'pods-namespace-filter',
+    'namespaces-search',
+    'workloads-search', 'workloads-type-filter',
+    'services-search', 'services-namespace-filter', 'services-type-filter',
+    'ingress-search', 'ingress-namespace-filter'
+  ];
+  filterInputs.forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
+
+  // Clear deployment logs console (if exists)
+  const deploymentLogsConsole = document.getElementById('deployment-logs-console');
+  if (deploymentLogsConsole) {
+    deploymentLogsConsole.textContent = '';
+  }
+
+  // Reset deleting namespaces set
+  deletingNamespaces.clear();
+
+  // Hide sections
   hideK8sResources();
+}
+
+// ============================================================================
+// Deployment Requests Management
+// ============================================================================
+
+async function loadDeploymentRequests() {
+  const tbody = document.getElementById('deployment-requests-tbody');
+  if (!tbody) return;
+
+  try {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Đang tải...</td></tr>';
+    
+    // Lấy filter status nếu có
+    const statusFilter = document.getElementById('deployment-status-filter');
+    const status = statusFilter ? statusFilter.value : '';
+    
+    // Build URL với query parameter
+    let url = '/admin/deployment-requests';
+    if (status && status.trim() !== '') {
+      url += '?status=' + encodeURIComponent(status);
+    }
+    
+    const data = await fetchJSON(url);
+    
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Không có yêu cầu nào' + (status ? ' với trạng thái này' : '') + '</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = '';
+    data.forEach(req => {
+      const tr = document.createElement('tr');
+      
+      // Format date
+      const createdAt = req.createdAt ? new Date(req.createdAt).toLocaleString('vi-VN') : 'N/A';
+      
+      // Status badge
+      let statusBadge = '';
+      if (req.status === 'PENDING') {
+        statusBadge = '<span class="badge bg-warning">⏳ Chờ xử lý</span>';
+      } else if (req.status === 'RUNNING') {
+        statusBadge = '<span class="badge bg-success">✅ Đang chạy</span>';
+      } else if (req.status === 'ERROR') {
+        statusBadge = '<span class="badge bg-danger">❌ Lỗi</span>';
+      } else if (req.status === 'DELETED') {
+        statusBadge = '<span class="badge bg-secondary">🗑️ Đã đánh dấu xóa</span>';
+      } else {
+        statusBadge = `<span class="badge bg-secondary">${req.status}</span>`;
+      }
+
+      // Action buttons
+      let actionBtn = '';
+      if (req.status === 'DELETED') {
+        // Khi status = DELETED, không hiển thị actionBtn (chỉ cần nút Delete để xóa hoàn toàn)
+        actionBtn = '';
+      } else if (req.status === 'PENDING') {
+        actionBtn = `<button class="btn btn-sm btn-success" onclick="processDeploymentRequest(${req.id})" title="Xử lý yêu cầu này">
+          <i class="bi bi-play-circle"></i> Xử lý
+        </button>`;
+      } else if (req.status === 'RUNNING') {
+        // Cho phép xử lý lại nếu cần
+        actionBtn = `<button class="btn btn-sm btn-warning" onclick="processDeploymentRequest(${req.id})" title="Xử lý lại yêu cầu này">
+          <i class="bi bi-arrow-clockwise"></i> Xử lý lại
+        </button>`;
+      } else if (req.status === 'ERROR') {
+        // Cho phép xử lý lại nếu có lỗi
+        actionBtn = `<button class="btn btn-sm btn-warning" onclick="processDeploymentRequest(${req.id})" title="Xử lý lại yêu cầu này">
+          <i class="bi bi-arrow-clockwise"></i> Xử lý lại
+        </button>`;
+      } else {
+        actionBtn = `<button class="btn btn-sm btn-secondary" disabled>${req.status}</button>`;
+      }
+
+      // Delete button (luôn hiển thị cho tất cả status, đặc biệt quan trọng với DELETED)
+      // Với DELETED status: nút này dùng để xóa hoàn toàn (xóa K8s resources + namespace + DB record)
+      const deleteBtn = `<button class="btn btn-sm btn-outline-danger" onclick="deleteDeploymentRequest(${req.id}, '${escapeHtml(req.appName || '')}', '${escapeHtml(req.k8sNamespace || '')}')" title="Delete deployment request and namespace">
+        <i class="bi bi-trash"></i> Delete
+      </button>`;
+
+      // View logs button (luôn hiển thị, kể cả DELETED)
+      const viewLogsBtn = `<button class="btn btn-sm btn-outline-info" onclick="viewDeploymentLogs(${req.id})" title="Xem logs">
+        <i class="bi bi-file-text"></i> Logs
+      </button>`;
+
+      // Access URL (chỉ hiển thị nếu có)
+      let accessUrlCell = '<td><small class="text-muted">-</small></td>';
+      if (req.accessUrl) {
+        accessUrlCell = `<td><a href="${escapeHtml(req.accessUrl)}" target="_blank" class="text-primary" title="Mở trong tab mới"><code>${escapeHtml(req.accessUrl)}</code> <i class="bi bi-box-arrow-up-right"></i></a></td>`;
+      }
+
+      tr.innerHTML = `
+        <td>${req.id}</td>
+        <td><strong>${escapeHtml(req.appName || 'N/A')}</strong></td>
+        <td><code>${escapeHtml(req.dockerImage || 'N/A')}</code></td>
+        <td>${escapeHtml(req.username || 'Unknown')}</td>
+        <td><code>${escapeHtml(req.k8sNamespace || 'N/A')}</code></td>
+        <td>${statusBadge}</td>
+        ${accessUrlCell}
+        <td><small>${createdAt}</small></td>
+        <td>
+          <div class="d-flex gap-1">
+            ${actionBtn}
+            ${viewLogsBtn}
+            ${deleteBtn}
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+  } catch (error) {
+    console.error('Error loading deployment requests:', error);
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger">
+      Lỗi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}
+    </td></tr>`;
+    showAlert('danger', 'Không thể tải danh sách yêu cầu: ' + (error.message || 'Lỗi không xác định'));
+  }
+}
+
+async function processDeploymentRequest(id) {
+  if (!confirm(`Bạn có chắc chắn muốn xử lý yêu cầu triển khai #${id}?\n\nHệ thống sẽ tạo các K8s resources (Deployment, Service, Ingress) cho ứng dụng này.`)) {
+    return;
+  }
+
+  const alertDiv = document.getElementById('deployment-alert');
+  const messageSpan = document.getElementById('deployment-message');
+
+  try {
+    // Show loading
+    if (alertDiv && messageSpan) {
+      alertDiv.className = 'alert alert-info alert-dismissible fade show';
+      alertDiv.style.display = 'block';
+      messageSpan.textContent = 'Đang xử lý yêu cầu...';
+    }
+
+    // Tự động xem logs cho deployment này
+    viewDeploymentLogs(id);
+    // Bắt đầu polling logs mỗi giây
+    startPollingDeploymentLogs(id);
+
+    const response = await fetch(`/admin/deployment-requests/${id}/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      // Stop polling nếu có lỗi
+      stopPollingDeploymentLogs();
+      throw new Error(data.message || data.error || 'Lỗi xử lý yêu cầu');
+    }
+
+    // Tiếp tục polling để xem logs tiếp theo (nếu đang deploy)
+    // Nếu status là RUNNING, có thể vẫn đang deploy, nên tiếp tục polling thêm một chút
+    if (data.status === 'RUNNING') {
+      // Poll thêm 30 giây nữa để xem logs cuối cùng
+      setTimeout(() => {
+        stopPollingDeploymentLogs();
+        loadDeploymentLogs(id); // Load lần cuối
+      }, 30000);
+    } else {
+      stopPollingDeploymentLogs();
+    }
+
+    // Success
+    if (alertDiv && messageSpan) {
+      alertDiv.className = 'alert alert-success alert-dismissible fade show';
+      alertDiv.style.display = 'block';
+      messageSpan.innerHTML = `
+        <strong>✅ Xử lý thành công!</strong><br>
+        Ứng dụng #${data.applicationId} đã được triển khai.<br>
+        Trạng thái: <strong>${data.status}</strong><br>
+        ${data.message ? `<small>${escapeHtml(data.message)}</small>` : ''}
+      `;
+    }
+
+    showAlert('success', `Đã xử lý yêu cầu #${id} thành công! Trạng thái: ${data.status}`);
+
+    // Reload list
+    await loadDeploymentRequests();
+
+  } catch (error) {
+    console.error('Error processing deployment request:', error);
+    stopPollingDeploymentLogs();
+    if (alertDiv && messageSpan) {
+      alertDiv.className = 'alert alert-danger alert-dismissible fade show';
+      alertDiv.style.display = 'block';
+      messageSpan.textContent = 'Lỗi: ' + (error.message || 'Không thể xử lý yêu cầu');
+    }
+    showAlert('danger', 'Lỗi xử lý yêu cầu: ' + (error.message || 'Unknown error'));
+  }
+}
+
+// Biến để lưu trữ polling interval
+let deploymentLogsPollingInterval = null;
+let currentViewingDeploymentId = null;
+
+// Xem logs của deployment request
+function viewDeploymentLogs(id) {
+  currentViewingDeploymentId = id;
+  loadDeploymentLogs(id);
+}
+
+// Load deployment logs từ API
+async function loadDeploymentLogs(id) {
+  const consoleDiv = document.getElementById('deployment-logs-console');
+  if (!consoleDiv) return;
+
+  try {
+    const response = await fetch(`/admin/deployment-requests/${id}/logs`);
+    const data = await response.json();
+
+    if (response.ok && data.logs) {
+      consoleDiv.textContent = data.logs || 'Chưa có logs...';
+      // Auto scroll to bottom
+      consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    } else {
+      consoleDiv.innerHTML = '<div class="text-muted text-center">Không thể tải logs: ' + (data.message || 'Unknown error') + '</div>';
+    }
+  } catch (error) {
+    console.error('Error loading deployment logs:', error);
+    consoleDiv.innerHTML = '<div class="text-danger text-center">Lỗi tải logs: ' + escapeHtml(error.message || 'Unknown error') + '</div>';
+  }
+}
+
+// Bắt đầu polling logs mỗi giây
+function startPollingDeploymentLogs(id) {
+  // Dừng polling cũ nếu có
+  stopPollingDeploymentLogs();
+  
+  // Bắt đầu polling mới
+  currentViewingDeploymentId = id;
+  deploymentLogsPollingInterval = setInterval(() => {
+    if (currentViewingDeploymentId === id) {
+      loadDeploymentLogs(id);
+    }
+  }, 1000); // Mỗi 1 giây
+}
+
+// Dừng polling logs
+function stopPollingDeploymentLogs() {
+  if (deploymentLogsPollingInterval) {
+    clearInterval(deploymentLogsPollingInterval);
+    deploymentLogsPollingInterval = null;
+  }
+  currentViewingDeploymentId = null;
+}
+
+// Xóa logs trên màn hình
+function clearDeploymentLogs() {
+  const consoleDiv = document.getElementById('deployment-logs-console');
+  if (consoleDiv) {
+    consoleDiv.innerHTML = '<div class="text-muted text-center">Chọn một deployment request để xem logs...</div>';
+  }
+  stopPollingDeploymentLogs();
+  currentViewingDeploymentId = null;
+}
+
+// Delete deployment request (including namespace)
+async function deleteDeploymentRequest(id, appName, namespace) {
+  const namespaceInfo = namespace && namespace.trim() !== '' ? `\n\nNamespace sẽ bị xóa: ${namespace}` : '';
+  const confirmMsg = `Bạn có chắc chắn muốn xóa yêu cầu triển khai #${id}?\n\nỨng dụng: ${appName}${namespaceInfo}\n\nCảnh báo: Tất cả K8s resources (Deployment, Service, Ingress) và namespace sẽ bị xóa vĩnh viễn!\n\nQuá trình này có thể mất vài phút...`;
+  
+  if (!confirm(confirmMsg)) {
+    return;
+  }
+
+  const alertDiv = document.getElementById('deployment-alert');
+  const messageSpan = document.getElementById('deployment-message');
+
+  try {
+    // Show loading
+    if (alertDiv && messageSpan) {
+      alertDiv.className = 'alert alert-info';
+      alertDiv.style.display = 'block';
+      messageSpan.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Đang xóa yêu cầu và namespace...';
+    }
+
+    const response = await fetch(`/admin/deployment-requests/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      // Show success
+      if (alertDiv && messageSpan) {
+        alertDiv.className = 'alert alert-success';
+        messageSpan.textContent = data.message || 'Đã xóa yêu cầu và namespace thành công!';
+      }
+      showAlert('success', data.message || 'Đã xóa yêu cầu và namespace thành công!');
+      
+      // Reload deployment requests list
+      loadDeploymentRequests();
+      
+      // Clear logs console if viewing this deployment
+      if (currentViewingDeploymentId === id) {
+        clearDeploymentLogs();
+      }
+    } else {
+      // Show error
+      const errorMsg = data.message || data.error || 'Lỗi không xác định';
+      if (alertDiv && messageSpan) {
+        alertDiv.className = 'alert alert-danger';
+        messageSpan.textContent = '❌ Lỗi: ' + errorMsg;
+      }
+      showAlert('danger', '❌ Lỗi xóa yêu cầu: ' + escapeHtml(errorMsg));
+    }
+  } catch (error) {
+    console.error('Error deleting deployment request:', error);
+    const errorMsg = error.message || 'Lỗi kết nối';
+    if (alertDiv && messageSpan) {
+      alertDiv.className = 'alert alert-danger';
+      messageSpan.textContent = '❌ Lỗi: ' + errorMsg;
+    }
+    showAlert('danger', '❌ Lỗi xóa yêu cầu: ' + escapeHtml(errorMsg));
+  }
 }
 
 
