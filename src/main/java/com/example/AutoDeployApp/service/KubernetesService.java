@@ -613,6 +613,46 @@ public class KubernetesService {
                     logger.warn("Failed to delete deployment: {}/{}", namespace, deploymentName, e);
                 }
             }
+
+            // Best-effort cleanup of related resources (no namespace deletion here)
+            // ConfigMaps by name and by label app=deploymentName
+            try {
+                client.configMaps().inNamespace(namespace).withName(deploymentName).delete();
+            } catch (Exception ignored) {
+            }
+            try {
+                client.configMaps().inNamespace(namespace).withLabel("app", deploymentName).delete();
+            } catch (Exception ignored) {
+            }
+
+            // Secrets by name and by label app=deploymentName
+            try {
+                client.secrets().inNamespace(namespace).withName(deploymentName).delete();
+            } catch (Exception ignored) {
+            }
+            try {
+                client.secrets().inNamespace(namespace).withLabel("app", deploymentName).delete();
+            } catch (Exception ignored) {
+            }
+
+            // HorizontalPodAutoscaler by label (try v2 then v1 APIs; ignore if not present)
+            try {
+                client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(namespace)
+                        .withLabel("app", deploymentName).delete();
+            } catch (Throwable ignored) {
+                try {
+                    client.autoscaling().v1().horizontalPodAutoscalers().inNamespace(namespace)
+                            .withLabel("app", deploymentName).delete();
+                } catch (Throwable ignored2) {
+                }
+            }
+
+            // PodDisruptionBudget by label app=deploymentName
+            try {
+                client.policy().v1().podDisruptionBudget().inNamespace(namespace)
+                        .withLabel("app", deploymentName).delete();
+            } catch (Throwable ignored) {
+            }
         } catch (Exception e) {
             logger.error("Failed to delete resources", e);
             throw new RuntimeException("Failed to delete Kubernetes resources", e);

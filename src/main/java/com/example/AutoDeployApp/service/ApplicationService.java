@@ -51,9 +51,9 @@ public class ApplicationService {
         application.setDockerImage(dockerImage.trim());
         application.setUserId(userId);
         application.setStatus("PENDING");
-        // Sanitize username và appname để tạo namespace hợp lệ: username-appname
-        String namespace = sanitizeNamespaceName(user.getUsername(), trimmedAppName);
-        application.setK8sNamespace(namespace); // Namespace = sanitized username-appname
+        // Mỗi user chỉ có 1 namespace: dựa theo username đã sanitize
+        String namespace = sanitizeUserNamespace(user.getUsername());
+        application.setK8sNamespace(namespace);
 
         return applicationRepository.save(application);
     }
@@ -123,47 +123,17 @@ public class ApplicationService {
     }
 
     /**
-     * Sanitize username và appname để tạo namespace hợp lệ trong Kubernetes
-     * Format: username-appname
-     * K8s namespace chỉ cho phép: chữ thường, số, dấu gạch ngang (-)
-     * Tối đa 63 ký tự, không được bắt đầu bằng số
-     * 
-     * @param username Username gốc (có thể là email hoặc tên có ký tự đặc biệt)
-     * @param appName  Tên ứng dụng
-     * @return Namespace name đã được sanitize: username-appname
+     * Tạo namespace cho user: chỉ dựa vào username (mỗi user 1 namespace)
      */
-    private String sanitizeNamespaceName(String username, String appName) {
-        // Sanitize username
+    private String sanitizeUserNamespace(String username) {
         String sanitizedUsername = sanitizeStringForK8s(username);
         if (sanitizedUsername.isEmpty()) {
             sanitizedUsername = "default-user";
         }
-
-        // Sanitize appname
-        String sanitizedAppName = sanitizeStringForK8s(appName);
-        if (sanitizedAppName.isEmpty()) {
-            sanitizedAppName = "app";
+        if (sanitizedUsername.length() > 63) {
+            sanitizedUsername = sanitizedUsername.substring(0, 63).replaceAll("-$", "");
         }
-
-        // Kết hợp: username-appname
-        String namespace = sanitizedUsername + "-" + sanitizedAppName;
-
-        // Giới hạn độ dài (K8s namespace max 63 chars)
-        // Ưu tiên giữ username, cắt appname nếu cần
-        if (namespace.length() > 63) {
-            int maxAppNameLength = 63 - sanitizedUsername.length() - 1; // -1 cho dấu gạch ngang
-            if (maxAppNameLength > 0) {
-                namespace = sanitizedUsername + "-" + sanitizedAppName.substring(0, maxAppNameLength);
-                // Đảm bảo không kết thúc bằng dấu gạch ngang
-                namespace = namespace.replaceAll("-$", "");
-            } else {
-                // Nếu username quá dài, chỉ dùng username (đã được giới hạn ở
-                // sanitizeStringForK8s)
-                namespace = sanitizedUsername.substring(0, Math.min(63, sanitizedUsername.length()));
-            }
-        }
-
-        return namespace;
+        return sanitizedUsername;
     }
 
     /**

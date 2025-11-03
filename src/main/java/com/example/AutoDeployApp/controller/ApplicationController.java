@@ -1,6 +1,7 @@
 package com.example.AutoDeployApp.controller;
 
 import com.example.AutoDeployApp.entity.Application;
+import com.example.AutoDeployApp.service.KubernetesService;
 import com.example.AutoDeployApp.service.ApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
@@ -16,9 +17,11 @@ import java.util.stream.Collectors;
 public class ApplicationController {
 
     private final ApplicationService applicationService;
+    private final KubernetesService kubernetesService;
 
-    public ApplicationController(ApplicationService applicationService) {
+    public ApplicationController(ApplicationService applicationService, KubernetesService kubernetesService) {
         this.applicationService = applicationService;
+        this.kubernetesService = kubernetesService;
     }
 
     @PostMapping("/upload")
@@ -173,11 +176,28 @@ public class ApplicationController {
 
             Application deletedApp = applicationService.markAsDeleted(id, userId);
 
+            // Best-effort cleanup K8s resources for this app, but DO NOT delete namespace
+            try {
+                String namespace = deletedApp.getK8sNamespace();
+                Long clusterId = deletedApp.getClusterId();
+                if (clusterId != null && namespace != null && !namespace.isBlank()) {
+                    kubernetesService.deleteApplicationResources(
+                            namespace,
+                            deletedApp.getK8sDeploymentName(),
+                            deletedApp.getK8sServiceName(),
+                            deletedApp.getK8sIngressName(),
+                            clusterId);
+                }
+            } catch (Exception cleanupEx) {
+                // Log only; still return success for delete request marking
+            }
+
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("applicationId", deletedApp.getId());
             response.put("status", deletedApp.getStatus());
-            response.put("message", "Ứng dụng đã được đánh dấu xóa. Admin sẽ xóa hoàn toàn trong thời gian sớm nhất.");
+            response.put("message",
+                    "Đã xóa tài nguyên K8s của ứng dụng (không xóa namespace). Ứng dụng được đánh dấu DELETED.");
 
             return ResponseEntity.ok(response);
 

@@ -1714,7 +1714,7 @@ async function promptReset(id) {
 }
 
 async function deleteUser(id) {
-  if (!confirm('Xoá user này?')) return;
+  if (!confirm('Xóa người dùng này?\n\nCảnh báo: Sẽ xóa luôn namespace của user và toàn bộ tài nguyên còn lại trong namespace đó trên các cluster liên quan.')) return;
   await fetch(`/admin/users/${id}`, { method: 'DELETE' });
   loadUsers();
 }

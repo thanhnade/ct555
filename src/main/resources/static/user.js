@@ -753,7 +753,7 @@ async function handleStartProject(projectId) {
 }
 
 async function handleDeleteProject(projectId) {
-  if (!confirm('Bạn có chắc chắn muốn xóa dự án này không?\n\nLưu ý: Ứng dụng sẽ được đánh dấu xóa và admin sẽ xóa hoàn toàn trong thời gian sớm nhất.')) return;
+  if (!confirm('Bạn có chắc chắn muốn xóa ứng dụng này không?\n\nTài nguyên của ứng dụng sẽ được xóa, KHÔNG xóa namespace của bạn.')) return;
   
   try {
     const response = await fetch(`/api/applications/${projectId}`, {
@@ -762,7 +762,7 @@ async function handleDeleteProject(projectId) {
     
     if (response.ok) {
       const data = await response.json().catch(() => ({}));
-      const message = data.message || '✅ Đã đánh dấu xóa dự án thành công. Admin sẽ xóa hoàn toàn trong thời gian sớm nhất.';
+      const message = data.message || 'Đã xóa tài nguyên của ứng dụng, không xóa namespace.';
       showNotification(message, 'success');
       loadProjects(); // Reload để ẩn ứng dụng đã xóa khỏi danh sách
     } else {

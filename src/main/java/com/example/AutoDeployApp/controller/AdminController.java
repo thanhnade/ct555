@@ -72,6 +72,50 @@ public class AdminController {
 
     @DeleteMapping("/users/{id}")
     public ResponseEntity<?> deleteUser(@PathVariable Long id) {
+        // Cleanup all apps and namespace for this user across clusters, then delete
+        // user
+        User user = userService.findAll().stream().filter(u -> u.getId().equals(id)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        String username = user.getUsername();
+        String userNamespace = sanitizeUserNamespace(username);
+
+        // Find all applications of this user
+        List<Application> userApps = applicationService.getAllApplications().stream()
+                .filter(a -> a.getUserId() != null && a.getUserId().equals(id))
+                .toList();
+
+        // First, delete K8s resources for each app (but not namespace)
+        for (Application app : userApps) {
+            try {
+                Long clusterId = app.getClusterId();
+                if (clusterId != null) {
+                    kubernetesService.deleteApplicationResources(
+                            userNamespace,
+                            app.getK8sDeploymentName(),
+                            app.getK8sServiceName(),
+                            app.getK8sIngressName(),
+                            clusterId);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        // Then, delete namespace on each distinct cluster used by the user
+        userApps.stream().map(Application::getClusterId).filter(cid -> cid != null).distinct().forEach(cid -> {
+            try {
+                kubernetesService.deleteNamespace(userNamespace, cid);
+            } catch (Exception ignored) {
+            }
+        });
+
+        // Finally, delete application records and user
+        for (Application app : userApps) {
+            try {
+                applicationService.deleteApplicationCompletely(app.getId());
+            } catch (Exception ignored) {
+            }
+        }
         userService.deleteUser(id);
         return ResponseEntity.noContent().build();
     }
@@ -227,12 +271,20 @@ public class AdminController {
 
             String username = user.getUsername();
             String appName = application.getAppName();
-            // Namespace đã được sanitize khi tạo application (username-appname), nên dùng
+            // Namespace đã được gán khi tạo application (mỗi user 1 namespace), nên dùng
             // trực tiếp
             String namespace = application.getK8sNamespace();
             if (namespace == null || namespace.trim().isEmpty()) {
-                // Fallback: sanitize username-appname nếu namespace chưa có (cho legacy data)
-                namespace = sanitizeNamespaceNameForK8s(username, appName);
+                // Fallback: tạo theo username nếu namespace chưa có (legacy data)
+                namespace = sanitizeUserNamespace(username);
+            }
+
+            // Enforce: mỗi user chỉ có 1 namespace = sanitized(username)
+            String expectedUserNamespace = sanitizeUserNamespace(username);
+            if (!expectedUserNamespace.equals(namespace)) {
+                namespace = expectedUserNamespace;
+                application.setK8sNamespace(namespace);
+                applicationService.updateApplication(application);
             }
             String dockerImage = application.getDockerImage();
 
@@ -496,21 +548,7 @@ public class AdminController {
                 }
             }
 
-            // Xóa namespace (nếu có namespace và clusterId)
-            if (namespace != null && !namespace.trim().isEmpty() && clusterId != null) {
-                try {
-                    kubernetesService.deleteNamespace(namespace, clusterId);
-                    logger.info("Deleted namespace: {} for application: {}", namespace, id);
-                } catch (IllegalArgumentException e) {
-                    // Namespace là system namespace hoặc không hợp lệ - skip
-                    logger.warn("Cannot delete namespace {}: {}", namespace, e.getMessage());
-                } catch (Exception namespaceException) {
-                    // Log lỗi nhưng vẫn tiếp tục xóa DB record
-                    logger.warn("Failed to delete namespace: {} for application: {}. Will still delete DB record.",
-                            namespace, id,
-                            namespaceException);
-                }
-            }
+            // KHÔNG xóa namespace khi xóa một ứng dụng đơn lẻ (namespace thuộc user)
 
             // Xóa record trong database
             applicationService.deleteApplicationCompletely(id);
@@ -555,34 +593,15 @@ public class AdminController {
      * K8s namespace chỉ cho phép: chữ thường, số, dấu gạch ngang (-)
      * Tối đa 63 ký tự, không được bắt đầu bằng số
      */
-    private String sanitizeNamespaceNameForK8s(String username, String appName) {
-        // Sanitize username
+    private String sanitizeUserNamespace(String username) {
         String sanitizedUsername = sanitizeStringForK8s(username);
         if (sanitizedUsername.isEmpty()) {
             sanitizedUsername = "default-user";
         }
-
-        // Sanitize appname
-        String sanitizedAppName = sanitizeStringForK8s(appName);
-        if (sanitizedAppName.isEmpty()) {
-            sanitizedAppName = "app";
+        if (sanitizedUsername.length() > 63) {
+            sanitizedUsername = sanitizedUsername.substring(0, 63).replaceAll("-$", "");
         }
-
-        // Kết hợp: username-appname
-        String namespace = sanitizedUsername + "-" + sanitizedAppName;
-
-        // Giới hạn độ dài (K8s namespace max 63 chars)
-        if (namespace.length() > 63) {
-            int maxAppNameLength = 63 - sanitizedUsername.length() - 1; // -1 cho dấu gạch ngang
-            if (maxAppNameLength > 0) {
-                namespace = sanitizedUsername + "-" + sanitizedAppName.substring(0, maxAppNameLength);
-                namespace = namespace.replaceAll("-$", "");
-            } else {
-                namespace = sanitizedUsername.substring(0, Math.min(63, sanitizedUsername.length()));
-            }
-        }
-
-        return namespace;
+        return sanitizedUsername;
     }
 
     /**
