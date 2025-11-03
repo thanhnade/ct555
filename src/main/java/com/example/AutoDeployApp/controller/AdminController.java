@@ -312,9 +312,9 @@ public class AdminController {
                 kubernetesService.createIngress(namespace, ingressName, serviceName, 80, clusterId);
                 appendLog.accept("✅ Ingress đã được tạo: " + ingressName);
 
-                // 9. Wait for Deployment ready (timeout: 5 minutes)
-                appendLog.accept("⏳ Đang chờ Deployment sẵn sàng... (timeout: 5 phút)");
-                kubernetesService.waitForDeploymentReady(namespace, deploymentName, 5, clusterId);
+                // 9. Wait for Deployment ready (timeout: 2 minutes)
+                appendLog.accept("⏳ Đang chờ Deployment sẵn sàng... (timeout: 2 phút)");
+                kubernetesService.waitForDeploymentReady(namespace, deploymentName, 2, clusterId);
                 appendLog.accept("✅ Deployment đã sẵn sàng: " + deploymentName);
 
                 // 10. Get Ingress URL from MetalLB

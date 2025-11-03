@@ -500,23 +500,32 @@ public class ClusterAdminController {
                 return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
             }
             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            var root = mapper.readTree(output);
-            var items = root.path("items");
             java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
-            if (items.isArray()) {
-                for (var pod : items) {
-                    String ns = pod.path("metadata").path("namespace").asText("");
-                    String name = pod.path("metadata").path("name").asText("");
-                    String nodeName = pod.path("spec").path("nodeName").asText("");
-                    String phase = pod.path("status").path("phase").asText("");
-                    result.add(Map.of(
-                            "namespace", ns,
-                            "name", name,
-                            "node", nodeName,
-                            "status", phase));
+            try {
+                if (output == null || output.isBlank()) {
+                    return ResponseEntity.ok(Map.of("pods", result, "rawJson", ""));
                 }
+                var root = mapper.readTree(output);
+                var items = root.path("items");
+                if (items.isArray()) {
+                    for (var pod : items) {
+                        String ns = pod.path("metadata").path("namespace").asText("");
+                        String name = pod.path("metadata").path("name").asText("");
+                        String nodeName = pod.path("spec").path("nodeName").asText("");
+                        String phase = pod.path("status").path("phase").asText("");
+                        result.add(Map.of(
+                                "namespace", ns,
+                                "name", name,
+                                "node", nodeName,
+                                "status", phase));
+                    }
+                }
+                return ResponseEntity.ok(Map.of("pods", result));
+            } catch (Exception parseEx) {
+                // Nếu parse lỗi (ví dụ JSON bị cắt khi có pods fail), trả về pods rỗng +
+                // rawJson để UI không vỡ
+                return ResponseEntity.ok(Map.of("pods", result, "rawJson", output));
             }
-            return ResponseEntity.ok(Map.of("pods", result));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -583,11 +592,15 @@ public class ClusterAdminController {
                 var items = mapper.readTree(outDeploy).path("items");
                 if (items.isArray())
                     for (var d : items) {
+                        int ready = d.path("status").path("readyReplicas").asInt(0);
+                        int replicas = d.path("status").path("replicas").asInt(0);
                         deployments.add(Map.of(
                                 "namespace", d.path("metadata").path("namespace").asText(""),
                                 "name", d.path("metadata").path("name").asText(""),
-                                "ready", d.path("status").path("readyReplicas").asInt(0),
-                                "replicas", d.path("status").path("replicas").asInt(0)));
+                                "ready", ready,
+                                // desired: giữ tương thích và cung cấp khóa chuẩn
+                                "desired", replicas,
+                                "replicas", replicas));
                     }
             } catch (Exception ignored) {
             }
@@ -595,11 +608,14 @@ public class ClusterAdminController {
                 var items = mapper.readTree(outSts).path("items");
                 if (items.isArray())
                     for (var s : items) {
+                        int ready = s.path("status").path("readyReplicas").asInt(0);
+                        int replicas = s.path("status").path("replicas").asInt(0);
                         statefulSets.add(Map.of(
                                 "namespace", s.path("metadata").path("namespace").asText(""),
                                 "name", s.path("metadata").path("name").asText(""),
-                                "ready", s.path("status").path("readyReplicas").asInt(0),
-                                "replicas", s.path("status").path("replicas").asInt(0)));
+                                "ready", ready,
+                                "desired", replicas,
+                                "replicas", replicas));
                     }
             } catch (Exception ignored) {
             }
@@ -1920,7 +1936,8 @@ public class ClusterAdminController {
         String version = "";
 
         // Xử lý futures với cách ly lỗi
-        // Tối ưu: xử lý offline nodes trước (đã completed ngay), sau đó xử lý online nodes
+        // Tối ưu: xử lý offline nodes trước (đã completed ngay), sau đó xử lý online
+        // nodes
         for (int i = 0; i < futures.size(); i++) {
             var future = futures.get(i);
             var serverDataItem = serverData.get(i);
@@ -1929,15 +1946,16 @@ public class ClusterAdminController {
                 // Với offline nodes (đã completed ngay), sẽ return ngay lập tức
                 // Với online nodes, đợi tối đa 15 giây (giảm từ 20 để nhanh hơn)
                 Map<String, Object> nodeData;
-                if (!serverDataItem.isConnected || 
-                    serverDataItem.status == com.example.AutoDeployApp.entity.Server.ServerStatus.OFFLINE) {
+                if (!serverDataItem.isConnected ||
+                        serverDataItem.status == com.example.AutoDeployApp.entity.Server.ServerStatus.OFFLINE) {
                     // Offline nodes đã completed ngay, lấy ngay không cần timeout
                     nodeData = future.get();
                 } else {
-                    // Online nodes: timeout 15 giây (đã có orTimeout 15s trong getServerMetricsAsync)
+                    // Online nodes: timeout 15 giây (đã có orTimeout 15s trong
+                    // getServerMetricsAsync)
                     nodeData = future.get(15, TimeUnit.SECONDS);
                 }
-                
+
                 nodes.add(nodeData);
 
                 // Thu thập phiên bản từ master node

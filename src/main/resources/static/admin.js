@@ -5027,9 +5027,24 @@ function renderWorkloads() {
   const { deployments, statefulSets, daemonSets } = k8sResourcesData.workloads;
 
   const allWorkloads = [
-    ...deployments.map(d => ({ ...d, type: 'Deployment' })),
-    ...statefulSets.map(s => ({ ...s, type: 'StatefulSet' })),
-    ...daemonSets.map(ds => ({ ...ds, type: 'DaemonSet', ready: ds.ready, total: ds.desired }))
+    ...deployments.map(d => ({
+      ...d,
+      type: 'Deployment',
+      ready: Number(d.ready) || 0,
+      total: (d.desired ?? d.replicas)
+    })),
+    ...statefulSets.map(s => ({
+      ...s,
+      type: 'StatefulSet',
+      ready: Number(s.ready) || 0,
+      total: (s.desired ?? s.replicas)
+    })),
+    ...daemonSets.map(ds => ({
+      ...ds,
+      type: 'DaemonSet',
+      ready: Number(ds.ready) || 0,
+      total: (ds.desired ?? ds.replicas)
+    }))
   ];
   // Apply filters
   const q = (k8sFilters.workloadsSearch || '').toLowerCase();
@@ -5061,8 +5076,8 @@ function renderWorkloads() {
       <td><span class="badge bg-secondary">${workload.namespace}</span></td>
       <td><code>${workload.name}</code></td>
       <td>
-        <span class="badge ${getWorkloadStatusBadgeClass(workload.ready, workload.total)}">
-          ${workload.ready}/${workload.total}
+        <span class="badge ${getWorkloadStatusBadgeClass(workload.ready, workload.total ?? '—')}">
+          ${workload.ready}/${(workload.total ?? '—')}
         </span>
       </td>
       <td>
