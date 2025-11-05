@@ -11,8 +11,6 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Config;
 import com.example.AutoDeployApp.entity.Cluster;
 import com.example.AutoDeployApp.entity.Server;
-import com.example.AutoDeployApp.service.ClusterService;
-import com.example.AutoDeployApp.service.ServerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -75,11 +73,16 @@ public class KubernetesService {
             Server master = servers.stream()
                     .filter(s -> s.getRole() == Server.ServerRole.MASTER)
                     .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Master node not found in cluster: " + cluster.getName()));
+                    .orElseThrow(() -> new RuntimeException(
+                            "Không tìm thấy MASTER node trong cluster: " + cluster.getName() +
+                                    ". Vui lòng thêm MASTER node vào cluster trước."));
 
-            // Kiểm tra master online
+            // Kiểm tra master online - quan trọng vì cần SSH để lấy kubeconfig
             if (master.getStatus() != Server.ServerStatus.ONLINE) {
-                throw new RuntimeException("Master node is offline: " + master.getHost());
+                throw new RuntimeException(
+                        "MASTER node (" + master.getHost() + ") đang offline. " +
+                                "Không thể kết nối đến Kubernetes cluster. " +
+                                "Vui lòng kiểm tra kết nối máy chủ và đảm bảo MASTER node đang hoạt động.");
             }
 
             // Lấy kubeconfig từ master node qua SSH
@@ -276,22 +279,21 @@ public class KubernetesService {
      * avoid conflicts
      */
     public String createIngress(String namespace, String ingressName, String serviceName, int servicePort,
-            Long clusterId) {
+            Long clusterId, String appName) {
         try (KubernetesClient client = getKubernetesClient(clusterId)) {
             Ingress ingress;
 
-            // Check if domain-based routing is enabled
             if (ingressDomainBase != null && !ingressDomainBase.trim().isEmpty()) {
-                // Domain-based routing: Use subdomain (e.g., namespace.apps.example.com)
-                String host = namespace + "." + ingressDomainBase.trim();
+                String appLabel = sanitizeDnsLabel(appName != null ? appName : "app");
+                String host = namespace + "-" + appLabel + "." + ingressDomainBase.trim();
                 ingress = new IngressBuilder()
                         .withNewMetadata()
                         .withName(ingressName)
                         .withNamespace(namespace)
-                        .addToAnnotations("kubernetes.io/ingress.class", ingressClassName) // Legacy annotation
+                        .addToAnnotations("kubernetes.io/ingress.class", ingressClassName)
                         .endMetadata()
                         .withNewSpec()
-                        .withIngressClassName(ingressClassName) // v1 API: use ingressClassName field
+                        .withIngressClassName(ingressClassName)
                         .addNewRule()
                         .withHost(host)
                         .withNewHttp()
@@ -311,20 +313,18 @@ public class KubernetesService {
                         .endRule()
                         .endSpec()
                         .build();
-                logger.info("Created ingress with domain-based routing: {} -> {}", host, namespace);
+                logger.info("Created ingress with domain-based routing: host={} namespace={}", host, namespace);
             } else {
-                // Path-based routing: Use namespace path to avoid conflicts
-                // Path format: /{namespace}/ (e.g., /user1-nginx/)
                 String ingressPath = "/" + namespace + "/";
                 ingress = new IngressBuilder()
                         .withNewMetadata()
                         .withName(ingressName)
                         .withNamespace(namespace)
-                        .addToAnnotations("kubernetes.io/ingress.class", ingressClassName) // Legacy annotation
+                        .addToAnnotations("kubernetes.io/ingress.class", ingressClassName)
                         .addToAnnotations("nginx.ingress.kubernetes.io/rewrite-target", "/")
                         .endMetadata()
                         .withNewSpec()
-                        .withIngressClassName(ingressClassName) // v1 API: use ingressClassName field
+                        .withIngressClassName(ingressClassName)
                         .addNewRule()
                         .withNewHttp()
                         .addNewPath()
@@ -350,12 +350,26 @@ public class KubernetesService {
             return ingressName;
         } catch (Exception e) {
             logger.error("Failed to create ingress: {}/{}", namespace, ingressName, e);
-            // Log chi tiết lỗi để debug
             if (e.getMessage() != null) {
                 logger.error("Ingress creation error details: {}", e.getMessage());
             }
             throw new RuntimeException("Failed to create ingress: " + ingressName + ". Error: " + e.getMessage(), e);
         }
+    }
+
+    private String sanitizeDnsLabel(String input) {
+        if (input == null)
+            return "app";
+        String s = input.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        s = s.replaceAll("-+", "-");
+        s = s.replaceAll("(^-+|-+$)", "");
+        if (s.isEmpty())
+            s = "app";
+        if (!Character.isLetterOrDigit(s.charAt(0)))
+            s = "a" + s;
+        if (!Character.isLetterOrDigit(s.charAt(s.length() - 1)))
+            s = s + "0";
+        return s;
     }
 
     /**
@@ -465,7 +479,6 @@ public class KubernetesService {
                 throw new RuntimeException("Ingress not found: " + ingressName);
             }
 
-            // Check if domain-based routing is used (check if rule has host)
             boolean isDomainBased = ingress.getSpec() != null &&
                     ingress.getSpec().getRules() != null &&
                     !ingress.getSpec().getRules().isEmpty() &&
@@ -473,14 +486,11 @@ public class KubernetesService {
                     !ingress.getSpec().getRules().get(0).getHost().isEmpty();
 
             if (isDomainBased) {
-                // Domain-based routing: Use host from Ingress spec
                 String host = ingress.getSpec().getRules().get(0).getHost();
                 return "http://" + host;
             }
 
-            // Path-based routing: Use EXTERNAL-IP with namespace path
-
-            // Try to get EXTERNAL-IP from Ingress status (MetalLB) - v1 API
+            // Try to get EXTERNAL-IP from Ingress status
             if (ingress.getStatus() != null && ingress.getStatus().getLoadBalancer() != null) {
                 io.fabric8.kubernetes.api.model.networking.v1.IngressLoadBalancerStatus lbStatus = ingress
                         .getStatus().getLoadBalancer();
@@ -489,25 +499,19 @@ public class KubernetesService {
                             .getIngress().get(0);
                     String ip = lbIngress.getIp();
                     if (ip != null && !ip.isEmpty()) {
-                        // URL format: http://{IP}/{namespace}/
                         return "http://" + ip + "/" + namespace + "/";
                     }
                     String hostname = lbIngress.getHostname();
                     if (hostname != null && !hostname.isEmpty()) {
-                        // URL format: http://{hostname}/{namespace}/
                         return "http://" + hostname + "/" + namespace + "/";
                     }
                 }
             }
 
-            // Fallback: use configured external IP with namespace-based path
             if (ingressExternalIp != null && !ingressExternalIp.trim().isEmpty()) {
-                // URL format: http://{IP}/{namespace}/
                 return "http://" + ingressExternalIp + "/" + namespace + "/";
             }
 
-            // Fallback: try to get from service (NodePort)
-            // This is a simple fallback - in production, you might want to use Ingress host
             throw new RuntimeException(
                     "Cannot determine Ingress URL. Please check MetalLB configuration or set k8s.ingress.external.ip");
         } catch (KubernetesClientException e) {

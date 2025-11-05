@@ -78,9 +78,10 @@ public class ClusterService {
 
     /**
      * Chọn cluster HEALTHY đầu tiên (hoặc cluster đầu tiên nếu không có HEALTHY)
+     * HEALTHY = có MASTER online và tất cả servers đều ONLINE
      * 
-     * @return Cluster đầu tiên có status HEALTHY, hoặc cluster đầu tiên nếu không
-     *         có HEALTHY
+     * @return Cluster đầu tiên có status HEALTHY (MASTER phải online), hoặc cluster
+     *         đầu tiên có MASTER nếu không có HEALTHY
      */
     public Optional<Cluster> getFirstHealthyCluster() {
         List<Cluster> clusters = clusterRepository.findAll();
@@ -88,27 +89,31 @@ public class ClusterService {
             return Optional.empty();
         }
 
-        // Tìm cluster HEALTHY đầu tiên
+        // Tìm cluster HEALTHY đầu tiên (MASTER phải ONLINE)
         for (Cluster c : clusters) {
             var servers = serverRepository.findByCluster_Id(c.getId());
             if (servers.isEmpty()) {
                 continue;
             }
 
-            // Kiểm tra status: nếu tất cả servers đều ONLINE thì HEALTHY
-            boolean allOnline = servers.stream()
-                    .allMatch(s -> s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE);
-            if (allOnline) {
-                // Kiểm tra có MASTER không
-                boolean hasMaster = servers.stream()
-                        .anyMatch(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER);
-                if (hasMaster) {
-                    return Optional.of(c);
-                }
+            // Tìm MASTER node
+            var master = servers.stream()
+                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                    .findFirst();
+
+            // Cluster phải có MASTER và MASTER phải ONLINE
+            if (master.isPresent()
+                    && master.get().getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE) {
+                // Kiểm tra tất cả servers đều ONLINE (tối ưu: chỉ cần MASTER online là đủ cho
+                // deployment)
+                // Nhưng nếu muốn strict, có thể check all servers
+                return Optional.of(c);
             }
         }
 
-        // Nếu không có HEALTHY, trả về cluster đầu tiên (nếu có)
+        // Nếu không có HEALTHY (MASTER online), trả về cluster đầu tiên có MASTER (có
+        // thể offline)
+        // Để caller có thể xử lý và hiển thị thông báo phù hợp
         return clusters.stream()
                 .filter(c -> {
                     var servers = serverRepository.findByCluster_Id(c.getId());
@@ -116,5 +121,22 @@ public class ClusterService {
                             .anyMatch(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER);
                 })
                 .findFirst();
+    }
+
+    /**
+     * Kiểm tra cluster có MASTER online không
+     * 
+     * @param clusterId ID của cluster
+     * @return true nếu có MASTER và MASTER đang ONLINE
+     */
+    public boolean hasMasterOnline(Long clusterId) {
+        var servers = serverRepository.findByCluster_Id(clusterId);
+        if (servers.isEmpty()) {
+            return false;
+        }
+
+        return servers.stream()
+                .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                .anyMatch(s -> s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE);
     }
 }

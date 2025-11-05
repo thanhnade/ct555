@@ -288,13 +288,21 @@ public class AdminController {
             }
             String dockerImage = application.getDockerImage();
 
-            // Tự động chọn cluster HEALTHY đầu tiên
+            // Tự động chọn cluster HEALTHY đầu tiên (có MASTER online)
             Cluster cluster = clusterService.getFirstHealthyCluster()
                     .orElseThrow(() -> new RuntimeException(
-                            "Không tìm thấy cluster K8s nào để triển khai. Vui lòng thêm cluster trước."));
+                            "Không tìm thấy cluster K8s nào để triển khai. Vui lòng thêm cluster và đảm bảo MASTER node đang online."));
             Long clusterId = cluster.getId();
 
-            logger.info("Auto-selected cluster for deployment: {} (ID: {})", cluster.getName(), clusterId);
+            // Kiểm tra lại MASTER online trước khi deploy (double check)
+            if (!clusterService.hasMasterOnline(clusterId)) {
+                throw new RuntimeException(
+                        "MASTER node trong cluster \"" + cluster.getName() + "\" đang offline. " +
+                                "Không thể triển khai ứng dụng. Vui lòng kiểm tra kết nối MASTER node và thử lại.");
+            }
+
+            logger.info("Auto-selected cluster for deployment: {} (ID: {}), MASTER is online", cluster.getName(),
+                    clusterId);
 
             // Lưu clusterId ngay sau khi chọn cluster (trước khi tạo resources)
             // Để có thể cleanup nếu deployment lỗi
@@ -361,7 +369,7 @@ public class AdminController {
 
                 // 8. Create Ingress
                 appendLog.accept("🌐 Đang tạo Ingress: " + ingressName);
-                kubernetesService.createIngress(namespace, ingressName, serviceName, 80, clusterId);
+                kubernetesService.createIngress(namespace, ingressName, serviceName, 80, clusterId, appName);
                 appendLog.accept("✅ Ingress đã được tạo: " + ingressName);
 
                 // 9. Wait for Deployment ready (timeout: 2 minutes)
@@ -568,11 +576,8 @@ public class AdminController {
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            String message = "Đã xóa hoàn toàn ứng dụng và tất cả K8s resources";
-            if (namespace != null && !namespace.trim().isEmpty()) {
-                message += ". Namespace '" + namespace + "' đã được xóa.";
-            }
-            response.put("message", message);
+            response.put("message",
+                    "Đã xóa hoàn toàn ứng dụng và tất cả K8s resources. Namespace của user được giữ lại.");
 
             return ResponseEntity.ok(response);
 

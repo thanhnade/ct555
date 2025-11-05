@@ -290,6 +290,21 @@ function resetClusterData() {
     msgElement.className = 'small mb-2';
   }
 
+  // Xóa banner cảnh báo MASTER offline (nếu có)
+  const clusterDetailSection = document.getElementById('k8s-detail');
+  const cardBody = clusterDetailSection?.querySelector('.card-body');
+  if (cardBody) {
+    // Xóa tất cả các alert warning (có thể là banner MASTER offline)
+    const alerts = cardBody.querySelectorAll('.alert.alert-warning');
+    alerts.forEach(alert => {
+      // Chỉ xóa alert có chứa "MASTER Node đang offline"
+      const alertText = alert.textContent || '';
+      if (alertText.includes('MASTER Node đang offline') || alertText.includes('MASTER node')) {
+        alert.remove();
+      }
+    });
+  }
+
   // Clear Chi tiết server (Ansible status display)
   const ansibleStatusDisplay = document.getElementById('ansible-status-display');
   if (ansibleStatusDisplay) {
@@ -315,7 +330,17 @@ function resetClusterData() {
   // Reset K8s resources data
   resetK8sResourcesData();
 
-  console.log('Cluster data has been reset - Chi tiết Cluster, Nodes, Chi tiết server đã được xóa');
+  // Ẩn K8s resources sections
+  const k8sResourcesSection = document.getElementById('k8s-resources-detail');
+  const networkingResourcesSection = document.getElementById('networking-resources-detail');
+  if (k8sResourcesSection) {
+    k8sResourcesSection.classList.add('d-none');
+  }
+  if (networkingResourcesSection) {
+    networkingResourcesSection.classList.add('d-none');
+  }
+
+  console.log('Cluster data has been reset - Chi tiết Cluster, Nodes, Chi tiết server, K8s resources đã được xóa');
 }
 
 async function showClusterDetail(clusterId) {
@@ -381,11 +406,48 @@ async function showClusterDetail(clusterId) {
     }
   })();
 
-  // BƯỚC 2: Load K8s Resources sau khi có chi tiết cluster
-  // Chỉ load nếu có MASTER online
+  // Kiểm tra MASTER online và hiển thị cảnh báo nếu cần
   const hasOnlineMaster = detail.nodes && detail.nodes.some(n => 
     (n.isConnected || n.status === 'ONLINE') && n.role === 'MASTER'
   );
+  const masterNode = detail.nodes && detail.nodes.find(n => n.role === 'MASTER');
+  
+  // Hiển thị cảnh báo nếu MASTER offline
+  if (!hasOnlineMaster && masterNode) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-warning alert-dismissible fade show mb-3';
+    alertDiv.setAttribute('role', 'alert');
+    alertDiv.innerHTML = `
+      <div class="d-flex align-items-center">
+        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+        <div class="flex-grow-1">
+          <strong>⚠️ MASTER Node đang offline</strong>
+          <p class="mb-0 small">
+            MASTER node (${masterNode.ip || 'N/A'}) đang offline. 
+            Một số tính năng sẽ không hoạt động:
+            <ul class="mb-0 small">
+              <li>Không thể xem/tải Kubernetes resources (Pods, Services, Ingress)</li>
+              <li>Không thể triển khai ứng dụng lên cluster này</li>
+              <li>Không thể kiểm tra trạng thái Ansible</li>
+              <li>Không thể xem Networking resources</li>
+            </ul>
+            <strong>Vui lòng kiểm tra kết nối máy chủ và đảm bảo MASTER node đang hoạt động.</strong>
+          </p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    `;
+    
+    // Chèn cảnh báo vào đầu cluster detail section
+    const clusterDetailSection = document.getElementById('k8s-detail');
+    const firstChild = clusterDetailSection?.querySelector('.card-body');
+    if (firstChild) {
+      firstChild.insertBefore(alertDiv, firstChild.firstChild);
+    }
+  }
+  
+  // BƯỚC 2: Load K8s Resources sau khi có chi tiết cluster
+  // Chỉ load nếu có MASTER online
   if (hasOnlineMaster) {
     showK8sResources();
     // BƯỚC 3: Load Networking resources (Services & Ingress)
@@ -424,22 +486,9 @@ async function showClusterDetail(clusterId) {
 
   const tbody = document.getElementById('cd-nodes-tbody');
   tbody.innerHTML = '';
-  // Hiển thị trạng thái đang tải cho bảng Nodes trong khi chờ script/requests
-  const loadingRow = document.createElement('tr');
-  loadingRow.innerHTML = `
-    <td colspan="7" class="text-center py-3">
-      <div class="d-inline-flex align-items-center text-muted">
-        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-        <span>Đang tải dữ liệu nodes...</span>
-      </div>
-    </td>
-  `;
-  tbody.appendChild(loadingRow);
 
   // Nếu không có nodes, hiển thị thông báo và dừng
   if (!detail.nodes || detail.nodes.length === 0) {
-    // Thay thế loading bằng thông báo không có máy chủ
-    tbody.innerHTML = '';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td colspan="7" class="text-center text-muted py-4">
@@ -448,116 +497,252 @@ async function showClusterDetail(clusterId) {
       </td>
     `;
     tbody.appendChild(tr);
-  } else {
-    // Tải trạng thái K8s từ backend để hiển thị Ready/NotReady cho node online
-    let k8sNodeByIP = new Map();
-    let k8sNodeByName = new Map();
-    try {
-      const k8sResp = await fetchJSON(`/admin/clusters/${clusterId}/k8s/nodes`).catch(() => null);
-      if (k8sResp && Array.isArray(k8sResp.nodes)) {
-        k8sResp.nodes.forEach(nd => {
-          if (nd.internalIP) {
-            k8sNodeByIP.set(String(nd.internalIP), nd);
-          }
-          if (nd.name) {
-            k8sNodeByName.set(String(nd.name), nd);
-          }
-        });
-        try { console.info(`[k8s] nodes loaded: ${k8sResp.nodes.length}`); } catch (_) { }
-      } else if (k8sResp) {
-        // no nodes returned
-      }
-    } catch (e) {
-      // suppress debug logs
+    return;
+  }
+
+  // Hiển thị servers ngay với thông tin cơ bản (không đợi metrics)
+  // Tải trạng thái K8s từ backend để hiển thị Ready/NotReady cho node online
+  let k8sNodeByIP = new Map();
+  let k8sNodeByName = new Map();
+  
+  // Load K8s nodes status song song với việc render servers
+  const k8sNodesPromise = fetchJSON(`/admin/clusters/${clusterId}/k8s/nodes`).catch(() => null);
+  
+  // Render servers ngay với dữ liệu hiện có
+  let readyCount = 0, notReadyCount = 0, offlineCount = 0, unregisteredCount = 0;
+  
+  // Tạo một Map để lưu trữ row elements theo server ID để cập nhật sau
+  const serverRows = new Map();
+  
+  detail.nodes.forEach(n => {
+    // Xác định node có online không (dựa trên isConnected hoặc status từ DB)
+    const isOnline = n.isConnected || (n.status === 'ONLINE');
+    const isOffline = !isOnline || (n.status === 'OFFLINE');
+    const hasMetrics = n.cpu && n.cpu !== '-';
+    
+    // Hiển thị status ban đầu dựa trên thông tin cơ bản
+    // Sẽ cập nhật sau khi có K8s status (nếu master online)
+    let statusLabel = 'OFFLINE';
+    let statusBadge = 'secondary';
+    if (isOnline) {
+      // Node online → hiển thị ONLINE/CONNECTED tạm thời
+      // Sẽ cập nhật thành Ready/NotReady nếu có K8s status
+      statusLabel = n.isConnected ? 'CONNECTED' : 'ONLINE';
+      statusBadge = 'info';
     }
 
-    // Kiểm tra lệch: nodes trong app nhưng không có trong kubectl; và ngược lại
-    // Diff debug suppressed
+    // Color coding cho RAM usage (chỉ áp dụng nếu có metrics)
+    const ramPercentage = n.ramPercentage || 0;
+    let ramColorClass = '';
+    if (isOffline || !hasMetrics) {
+      ramColorClass = 'text-muted'; // Màu xám cho offline hoặc chưa có metrics
+    } else if (ramPercentage >= 90) {
+      ramColorClass = 'text-danger fw-bold';
+    } else if (ramPercentage >= 80) {
+      ramColorClass = 'text-danger';
+    } else if (ramPercentage >= 70) {
+      ramColorClass = 'text-warning';
+    } else if (ramPercentage >= 50) {
+      ramColorClass = 'text-info';
+    } else {
+      ramColorClass = 'text-success';
+    }
 
-    // Đã có dữ liệu, thay thế loading bằng nội dung bảng
-    tbody.innerHTML = '';
-    // Hiển thị danh sách nodes
-    let readyCount = 0, notReadyCount = 0, offlineCount = 0, unregisteredCount = 0;
-    detail.nodes.forEach(n => {
-      const isOnline = !!n.isConnected;
-      // Nếu offline => OFFLINE; nếu online => đọc từ k8s map (Ready/NotReady)
+    // Hiển thị metrics: offline nodes hiển thị "-" ngay, online nodes hiển thị loading nếu chưa có
+    const cpuDisplay = isOffline ? '-' : (hasMetrics ? n.cpu : '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>');
+    const ramDisplay = isOffline ? '-' : (hasMetrics ? n.ram : '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>');
+    const diskDisplay = isOffline ? '-' : (hasMetrics ? n.disk : '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>');
+
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-server-id', n.id);
+    tr.innerHTML = `
+      <td title="${n.username || ''}">${n.ip}</td>
+      <td>${n.role}</td>
+      <td><span class="badge bg-${statusBadge}" id="status-badge-${n.id}" title="${statusLabel === 'UNREGISTERED' ? 'Node chưa đăng ký trong cụm (không thấy trong kubectl)' : ''}">${statusLabel}</span></td>
+      <td id="cpu-${n.id}">${cpuDisplay}</td>
+      <td class="${ramColorClass}" id="ram-${n.id}">${ramDisplay}</td>
+      <td id="disk-${n.id}">${diskDisplay}</td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">
+          <i class="bi bi-trash me-1"></i> Xóa
+        </button>
+        <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">
+          <i class="bi bi-arrow-repeat me-1"></i> Thử lại
+        </button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+    serverRows.set(n.id, tr);
+  });
+
+  // Sau khi render xong, cập nhật K8s status và metrics
+  try {
+    const k8sResp = await k8sNodesPromise;
+    if (k8sResp && Array.isArray(k8sResp.nodes)) {
+      k8sResp.nodes.forEach(nd => {
+        if (nd.internalIP) {
+          k8sNodeByIP.set(String(nd.internalIP), nd);
+        }
+        if (nd.name) {
+          k8sNodeByName.set(String(nd.name), nd);
+        }
+      });
+      try { console.info(`[k8s] nodes loaded: ${k8sResp.nodes.length}`); } catch (_) { }
+    }
+  } catch (e) {
+    // suppress debug logs
+  }
+
+  // Cập nhật K8s status cho các servers
+  // Quan trọng: Nếu master offline, vẫn hiển thị thông tin cơ bản (ONLINE/OFFLINE) cho worker nodes
+  detail.nodes.forEach(n => {
+    const tr = serverRows.get(n.id);
+    if (!tr) return;
+    
+    // Xác định node có online không (dựa trên isConnected hoặc status từ DB)
+    const isOnline = n.isConnected || (n.status === 'ONLINE');
+    const statusBadgeEl = tr.querySelector(`#status-badge-${n.id}`);
+    
+    if (statusBadgeEl) {
       let statusLabel = 'OFFLINE';
       let statusBadge = 'secondary';
+      
       if (isOnline) {
-        // Tìm theo IP trước, nếu không có thì thử theo name
+        // Node đang online (connected hoặc status = ONLINE)
+        // Thử lấy K8s status nếu có (chỉ khi master online và có k8sResp)
         const nd = k8sNodeByIP.get(String(n.ip)) || k8sNodeByName.get(String(n.ip));
         const k8sStatus = nd?.k8sStatus;
-        if (k8sStatus === 'Ready') { statusLabel = 'Ready'; statusBadge = 'success'; }
-        else if (k8sStatus === 'NotReady') { statusLabel = 'NotReady'; statusBadge = 'warning text-dark'; }
-        else {
-          // Không khớp kubectl → đánh dấu là CHƯA THÊM VÀO CLUSTER
+        
+        if (k8sStatus === 'Ready') { 
+          // Có K8s status và Ready
+          statusLabel = 'Ready'; 
+          statusBadge = 'success'; 
+        } else if (k8sStatus === 'NotReady') { 
+          // Có K8s status nhưng NotReady
+          statusLabel = 'NotReady'; 
+          statusBadge = 'warning text-dark'; 
+        } else if (k8sStatus !== undefined && k8sStatus !== null) {
+          // Có K8s status nhưng không phải Ready/NotReady
           statusLabel = 'UNREGISTERED';
           statusBadge = 'dark';
+        } else {
+          // Không có K8s status (có thể master offline hoặc node chưa join cluster)
+          // Nhưng node vẫn online → hiển thị ONLINE/CONNECTED
+          statusLabel = n.isConnected ? 'CONNECTED' : 'ONLINE';
+          statusBadge = 'info';
         }
+      } else {
+        // Node offline
+        statusLabel = 'OFFLINE';
+        statusBadge = 'secondary';
       }
-
-      // Tally summary (không log chi tiết node)
+      
+      statusBadgeEl.textContent = statusLabel;
+      statusBadgeEl.className = `badge bg-${statusBadge}`;
+      
+      // Tooltip để giải thích status
+      let tooltip = '';
+      if (statusLabel === 'UNREGISTERED') {
+        tooltip = 'Node chưa đăng ký trong cụm (không thấy trong kubectl)';
+      } else if (statusLabel === 'CONNECTED' || statusLabel === 'ONLINE') {
+        tooltip = 'Node đang online nhưng không có thông tin K8s (có thể MASTER offline)';
+      } else if (statusLabel === 'OFFLINE') {
+        tooltip = 'Node đang offline';
+      }
+      statusBadgeEl.title = tooltip;
+      
+      // Tally summary
       if (statusLabel === 'Ready') readyCount++;
       else if (statusLabel === 'NotReady') notReadyCount++;
       else if (statusLabel === 'UNREGISTERED') unregisteredCount++;
-      else offlineCount++;
-
-      // Color coding cho RAM usage
-      const ramPercentage = n.ramPercentage || 0;
-      let ramColorClass = '';
-      if (ramPercentage >= 90) {
-        ramColorClass = 'text-danger fw-bold';
-      } else if (ramPercentage >= 80) {
-        ramColorClass = 'text-danger';
-      } else if (ramPercentage >= 70) {
-        ramColorClass = 'text-warning';
-      } else if (ramPercentage >= 50) {
-        ramColorClass = 'text-info';
+      else if (statusLabel === 'CONNECTED' || statusLabel === 'ONLINE') {
+        // Đếm là online nhưng không có K8s status
+        // Không tăng offlineCount
+      } else offlineCount++;
+    }
+    
+    // Cập nhật metrics - chỉ cập nhật cho online nodes, offline nodes giữ nguyên "-"
+    const isOffline = !isOnline || (n.status === 'OFFLINE');
+    
+    const cpuEl = tr.querySelector(`#cpu-${n.id}`);
+    const ramEl = tr.querySelector(`#ram-${n.id}`);
+    const diskEl = tr.querySelector(`#disk-${n.id}`);
+    
+    if (cpuEl) {
+      if (isOffline) {
+        // Offline nodes: hiển thị "-" và không load metrics
+        cpuEl.textContent = '-';
       } else {
-        ramColorClass = 'text-success';
+        const hasMetrics = n.cpu && n.cpu !== '-';
+        if (hasMetrics) {
+          cpuEl.textContent = n.cpu || '-';
+        } else {
+          // Online nhưng chưa có metrics → hiển thị loading
+          cpuEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>';
+        }
       }
+    }
+    
+    if (ramEl) {
+      if (isOffline) {
+        // Offline nodes: hiển thị "-" và không load metrics
+        ramEl.className = 'text-muted';
+        ramEl.textContent = '-';
+      } else {
+        const hasMetrics = n.ram && n.ram !== '-';
+        const ramPercentage = n.ramPercentage || 0;
+        let ramColorClass = '';
+        if (hasMetrics) {
+          if (ramPercentage >= 90) {
+            ramColorClass = 'text-danger fw-bold';
+          } else if (ramPercentage >= 80) {
+            ramColorClass = 'text-danger';
+          } else if (ramPercentage >= 70) {
+            ramColorClass = 'text-warning';
+          } else if (ramPercentage >= 50) {
+            ramColorClass = 'text-info';
+          } else {
+            ramColorClass = 'text-success';
+          }
+        } else {
+          ramColorClass = 'text-muted'; // Màu xám cho đang load
+        }
+        ramEl.className = ramColorClass;
+        
+        if (hasMetrics) {
+          ramEl.textContent = n.ram || '-';
+        } else {
+          // Online nhưng chưa có metrics → hiển thị loading
+          ramEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>';
+        }
+      }
+    }
+    
+    if (diskEl) {
+      if (isOffline) {
+        // Offline nodes: hiển thị "-" và không load metrics
+        diskEl.textContent = '-';
+      } else {
+        const hasMetrics = n.disk && n.disk !== '-';
+        if (hasMetrics) {
+          diskEl.textContent = n.disk || '-';
+        } else {
+          // Online nhưng chưa có metrics → hiển thị loading
+          diskEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>';
+        }
+      }
+    }
+  });
 
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td title="${n.username || ''}">${n.ip}</td>
-      <td>${n.role}</td>
-        <td><span class="badge bg-${statusBadge}" title="${statusLabel === 'UNREGISTERED' ? 'Node chưa đăng ký trong cụm (không thấy trong kubectl)' : ''}">${statusLabel}</span></td>
-      <td>${n.cpu || '-'}</td>
-      <td class="${ramColorClass}">${n.ram || '-'}</td>
-      <td>${n.disk || '-'}</td>
-      <td class="text-nowrap">
-          <button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">
-            <i class="bi bi-trash me-1"></i> Xóa
-          </button>
-          <button class="btn btn-sm btn-outline-secondary cd-retry-node" data-id="${n.id}" data-cluster="${clusterId}">
-            <i class="bi bi-arrow-repeat me-1"></i> Thử lại
-          </button>
-      </td>
-    `;
-      tbody.appendChild(tr);
-    });
+  // Log tóm tắt quan trọng, không lộ dữ liệu máy chủ
+  try {
+    console.info(`[cluster] nodes total: ${detail.nodes.length}; Ready: ${readyCount}, NotReady: ${notReadyCount}, Unregistered: ${unregisteredCount}, Offline: ${offlineCount}`);
+  } catch (_) { }
 
-    // Log tóm tắt quan trọng, không lộ dữ liệu máy chủ
-    try {
-      console.info(`[cluster] nodes total: ${detail.nodes.length}; Ready: ${readyCount}, NotReady: ${notReadyCount}, Unregistered: ${unregisteredCount}, Offline: ${offlineCount}`);
-    } catch (_) { }
-  }
-
+  // Đảm bảo back button không bị disabled (sẽ được xử lý bởi global event listener)
   const backBtn = document.getElementById('cd-back');
-  if (backBtn && !backBtn.dataset.bound) {
-    backBtn.dataset.bound = '1';
-    backBtn.addEventListener('click', async () => {
-      // Reset Chi tiết Cluster, Nodes, Chi tiết server trước khi quay lại danh sách
-      resetClusterData();
-
-      document.getElementById('k8s-detail')?.classList.add('d-none');
-      document.getElementById('k8s-list')?.classList.remove('d-none');
-      document.getElementById('k8s-create')?.classList.remove('d-none');
-      document.getElementById('k8s-assign')?.classList.remove('d-none');
-
-      // Reload cả cluster list và server assignment table để cập nhật dữ liệu
-      await Promise.all([loadClusterList(), loadClustersAndServers()]);
-    });
+  if (backBtn) {
+    backBtn.disabled = false;
   }
 
   // Reload button
@@ -1269,6 +1454,51 @@ document.addEventListener('click', async (e) => {
     const id = parseInt(t.getAttribute('data-id'), 10);
     if (isNaN(id)) return;
     await showClusterDetail(id);
+  }
+
+  // Handle back button (cd-back) - dùng event delegation để luôn hoạt động
+  // Kiểm tra nếu click vào button hoặc vào icon/text bên trong button
+  let backButton = null;
+  if (t && t.id === 'cd-back') {
+    backButton = t;
+  } else if (t && t.closest && t.closest('button#cd-back')) {
+    backButton = t.closest('button#cd-back');
+  }
+  
+  if (backButton) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (backButton.disabled) {
+      console.log('Back button already disabled, ignoring click');
+      return;
+    }
+    
+    // Disable button để tránh double click
+    backButton.disabled = true;
+    const originalText = backButton.innerHTML;
+    backButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Đang quay lại...';
+    
+    try {
+      // Reset Chi tiết Cluster, Nodes, Chi tiết server trước khi quay lại danh sách
+      resetClusterData();
+
+      // Ẩn cluster detail section
+      document.getElementById('k8s-detail')?.classList.add('d-none');
+      document.getElementById('k8s-list')?.classList.remove('d-none');
+      document.getElementById('k8s-create')?.classList.remove('d-none');
+      document.getElementById('k8s-assign')?.classList.remove('d-none');
+
+      // Reload cả cluster list và server assignment table để cập nhật dữ liệu
+      await Promise.all([loadClusterList(), loadClustersAndServers()]);
+    } catch (error) {
+      console.error('Error going back to cluster list:', error);
+      // Vẫn hiển thị lại danh sách ngay cả khi có lỗi reload
+    } finally {
+      // Re-enable button sau khi hoàn thành
+      backButton.disabled = false;
+      backButton.innerHTML = originalText;
+    }
   }
 });
 
@@ -5523,21 +5753,18 @@ async function loadDeploymentRequests() {
         actionBtn = `<button class="btn btn-sm btn-secondary" disabled>${req.status}</button>`;
       }
 
-      // Delete button (luôn hiển thị cho tất cả status, đặc biệt quan trọng với DELETED)
-      // Với DELETED status: nút này dùng để xóa hoàn toàn (xóa K8s resources + namespace + DB record)
       const deleteBtn = `<button class="btn btn-sm btn-outline-danger" onclick="deleteDeploymentRequest(${req.id}, '${escapeHtml(req.appName || '')}', '${escapeHtml(req.k8sNamespace || '')}')" title="Delete deployment request and namespace">
         <i class="bi bi-trash"></i> Delete
       </button>`;
 
-      // View logs button (luôn hiển thị, kể cả DELETED)
       const viewLogsBtn = `<button class="btn btn-sm btn-outline-info" onclick="viewDeploymentLogs(${req.id})" title="Xem logs">
         <i class="bi bi-file-text"></i> Logs
       </button>`;
 
-      // Access URL (chỉ hiển thị nếu có)
       let accessUrlCell = '<td><small class="text-muted">-</small></td>';
       if (req.accessUrl) {
-        accessUrlCell = `<td><a href="${escapeHtml(req.accessUrl)}" target="_blank" class="text-primary" title="Mở trong tab mới"><code>${escapeHtml(req.accessUrl)}</code> <i class="bi bi-box-arrow-up-right"></i></a></td>`;
+        const fullUrl = escapeHtml(req.accessUrl);
+        accessUrlCell = `<td><a href="${fullUrl}" target="_blank" class="text-primary" title="${fullUrl}"><code>${fullUrl}</code> <i class="bi bi-box-arrow-up-right"></i></a></td>`;
       }
 
       tr.innerHTML = `

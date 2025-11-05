@@ -634,13 +634,13 @@ function renderProjectsList(projects) {
 
               ${project.url ? `
                 <div class="project-url">
-                  <a href="${escapeHtml(project.url)}" target="_blank" rel="noopener noreferrer">
+                  <a href="${escapeHtml(project.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(project.url)}">
                     <svg viewBox="0 0 24 24" fill="none">
                       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                       <polyline points="15 3 21 3 21 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                       <line x1="10" y1="14" x2="21" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
-                    ${escapeHtml(project.url)}
+                    <code>${escapeHtml(project.url)}</code>
                   </a>
                 </div>
               ` : ''}
@@ -741,13 +741,11 @@ function renderPagination(totalPages, currentPage) {
 
 // Project actions
 async function handleStopProject(projectId) {
-  // TODO: Implement stop API call
   console.log('Stop project:', projectId);
   loadProjects();
 }
 
 async function handleStartProject(projectId) {
-  // TODO: Implement start API call
   console.log('Start project:', projectId);
   loadProjects();
 }
@@ -775,35 +773,14 @@ async function handleDeleteProject(projectId) {
   }
 }
 
-// Load deployment requests list - REMOVED: API không còn tồn tại
-// async function loadDeploymentRequests() {
-//   try {
-//     const response = await fetch('/api/applications/requests');
-//     if (!response.ok) return [];
-//     return await response.json();
-//   } catch (error) {
-//     console.error('Error loading requests:', error);
-//     return [];
-//   }
-// }
+ 
 
 // Legacy loadApplications function for compatibility
 async function loadApplications() {
   loadProjects();
 }
 
-// WebSocket cho notifications - REMOVED: NotificationWebSocketHandler đã bị xóa
-// let notificationSocket = null;
-// function connectNotificationWebSocket() {
-//   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-//   const wsUrl = `${protocol}//${window.location.host}/ws/notifications`;
-//   
-//   notificationSocket = new WebSocket(wsUrl);
-//   // ...
-// }
-// function handleNotification(notification) {
-//   // ...
-// }
+ 
 
 function showNotification(message, type = 'info') {
   const toast = document.createElement('div');

@@ -1951,9 +1951,9 @@ public class ClusterAdminController {
                     // Offline nodes đã completed ngay, lấy ngay không cần timeout
                     nodeData = future.get();
                 } else {
-                    // Online nodes: timeout 15 giây (đã có orTimeout 15s trong
-                    // getServerMetricsAsync)
-                    nodeData = future.get(15, TimeUnit.SECONDS);
+                    // Online nodes: timeout 10 giây để tăng tốc độ phản hồi
+                    // (đã có orTimeout 15s trong getServerMetricsAsync, nhưng giảm wait time ở đây)
+                    nodeData = future.get(10, TimeUnit.SECONDS);
                 }
 
                 nodes.add(nodeData);
