@@ -28,6 +28,10 @@ public class ApplicationController {
     public ResponseEntity<?> uploadApplication(
             @RequestParam("appName") String appName,
             @RequestParam("dockerImage") String dockerImage,
+            @RequestParam(value = "cpuRequest", required = false) String cpuRequest,
+            @RequestParam(value = "cpuLimit", required = false) String cpuLimit,
+            @RequestParam(value = "memoryRequest", required = false) String memoryRequest,
+            @RequestParam(value = "memoryLimit", required = false) String memoryLimit,
             HttpServletRequest request) {
 
         try {
@@ -38,8 +42,10 @@ public class ApplicationController {
                         .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
             }
 
-            // Tạo application
-            Application application = applicationService.createApplication(userId, appName, dockerImage);
+            // Tạo application với resource limits
+            Application application = applicationService.createApplication(
+                    userId, appName, dockerImage,
+                    cpuRequest, cpuLimit, memoryRequest, memoryLimit);
 
             // Return response
             Map<String, Object> response = new HashMap<>();
@@ -79,6 +85,10 @@ public class ApplicationController {
                         map.put("status", app.getStatus());
                         map.put("k8sNamespace", app.getK8sNamespace());
                         map.put("accessUrl", app.getAccessUrl());
+                        map.put("cpuRequest", app.getCpuRequest());
+                        map.put("cpuLimit", app.getCpuLimit());
+                        map.put("memoryRequest", app.getMemoryRequest());
+                        map.put("memoryLimit", app.getMemoryLimit());
                         map.put("createdAt", app.getCreatedAt());
                         return map;
                     })
@@ -119,6 +129,10 @@ public class ApplicationController {
                         map.put("k8sServiceName", app.getK8sServiceName());
                         map.put("k8sIngressName", app.getK8sIngressName());
                         map.put("accessUrl", app.getAccessUrl());
+                        map.put("cpuRequest", app.getCpuRequest());
+                        map.put("cpuLimit", app.getCpuLimit());
+                        map.put("memoryRequest", app.getMemoryRequest());
+                        map.put("memoryLimit", app.getMemoryLimit());
                         map.put("createdAt", app.getCreatedAt());
                         map.put("updatedAt", app.getUpdatedAt());
                         return ResponseEntity.ok(map);

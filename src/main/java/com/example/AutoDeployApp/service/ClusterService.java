@@ -24,6 +24,13 @@ public class ClusterService {
         return clusterRepository.findAll();
     }
 
+    public Optional<Cluster> findById(Long id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return clusterRepository.findById(id);
+    }
+
     @Transactional
     public Cluster create(String name, String description, Long createdBy) {
         if (clusterRepository.existsByName(name)) {

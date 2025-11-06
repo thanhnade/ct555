@@ -12,7 +12,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.net.HttpURLConnection;
+import java.nio.charset.StandardCharsets;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,16 +77,16 @@ public class AdminController {
     public ResponseEntity<?> deleteUser(@PathVariable Long id) {
         // Cleanup all apps and namespace for this user across clusters, then delete
         // user
-        User user = userService.findAll().stream().filter(u -> u.getId().equals(id)).findFirst()
+        User user = userService.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         String username = user.getUsername();
         String userNamespace = sanitizeUserNamespace(username);
 
         // Find all applications of this user
-        List<Application> userApps = applicationService.getAllApplications().stream()
-                .filter(a -> a.getUserId() != null && a.getUserId().equals(id))
-                .toList();
+        List<Application> userApps = applicationService.getApplicationsByUserId(id);
+
+        List<String> cleanupErrors = new ArrayList<>();
 
         // First, delete K8s resources for each app (but not namespace)
         for (Application app : userApps) {
@@ -97,26 +100,68 @@ public class AdminController {
                             app.getK8sIngressName(),
                             clusterId);
                 }
-            } catch (Exception ignored) {
+            } catch (Exception ex) {
+                String message = "Không thể xóa tài nguyên Kubernetes cho ứng dụng #" + app.getId() + ": "
+                        + ex.getMessage();
+                cleanupErrors.add(message);
+                logger.error(message, ex);
             }
         }
 
         // Then, delete namespace on each distinct cluster used by the user
-        userApps.stream().map(Application::getClusterId).filter(cid -> cid != null).distinct().forEach(cid -> {
-            try {
-                kubernetesService.deleteNamespace(userNamespace, cid);
-            } catch (Exception ignored) {
-            }
-        });
+        userApps.stream()
+                .map(Application::getClusterId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .forEach(clusterId -> {
+                    try {
+                        kubernetesService.deleteNamespace(userNamespace, clusterId);
+                    } catch (Exception ex) {
+                        String message = "Không thể xóa namespace \"" + userNamespace + "\" trên cluster #" + clusterId
+                                + ": " + ex.getMessage();
+                        cleanupErrors.add(message);
+                        logger.error(message, ex);
+                    }
+                });
 
-        // Finally, delete application records and user
+        if (!cleanupErrors.isEmpty()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of(
+                            "error", "CleanupFailed",
+                            "message", "Không thể xóa người dùng do lỗi khi dọn dẹp tài nguyên Kubernetes",
+                            "details", cleanupErrors));
+        }
+
+        List<String> deletionErrors = new ArrayList<>();
         for (Application app : userApps) {
             try {
                 applicationService.deleteApplicationCompletely(app.getId());
-            } catch (Exception ignored) {
+            } catch (Exception ex) {
+                String message = "Không thể xóa bản ghi ứng dụng #" + app.getId() + ": " + ex.getMessage();
+                deletionErrors.add(message);
+                logger.error(message, ex);
             }
         }
-        userService.deleteUser(id);
+
+        if (!deletionErrors.isEmpty()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of(
+                            "error", "DatabaseCleanupFailed",
+                            "message", "Không thể xóa hết ứng dụng của người dùng. Đã dừng thao tác.",
+                            "details", deletionErrors));
+        }
+
+        try {
+            userService.deleteUser(id);
+        } catch (Exception ex) {
+            String message = "Không thể xóa người dùng khỏi database: " + ex.getMessage();
+            logger.error("Failed to delete user {}", id, ex);
+            return ResponseEntity.status(500)
+                    .body(Map.of(
+                            "error", "UserDeleteFailed",
+                            "message", message));
+        }
+
         return ResponseEntity.noContent().build();
     }
 
@@ -173,15 +218,23 @@ public class AdminController {
                 applications = applicationService.getAllApplications();
             }
 
+            Map<Long, User> userLookup = userService.findAllByIds(
+                    applications.stream()
+                            .map(Application::getUserId)
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toSet()));
+
             // Convert to DTO với username
             List<Map<String, Object>> response = applications.stream()
                     .map(app -> {
                         // Lấy username từ userId
-                        String username = userService.findAll().stream()
-                                .filter(u -> u.getId().equals(app.getUserId()))
-                                .findFirst()
-                                .map(User::getUsername)
-                                .orElse("Unknown");
+                        String username = "Unknown";
+                        if (app.getUserId() != null) {
+                            User matchedUser = userLookup.get(app.getUserId());
+                            if (matchedUser != null && matchedUser.getUsername() != null) {
+                                username = matchedUser.getUsername();
+                            }
+                        }
 
                         Map<String, Object> map = new HashMap<>();
                         map.put("id", app.getId());
@@ -191,7 +244,14 @@ public class AdminController {
                         map.put("username", username);
                         map.put("status", app.getStatus());
                         map.put("k8sNamespace", app.getK8sNamespace());
+                        map.put("clusterId", app.getClusterId());
                         map.put("accessUrl", app.getAccessUrl());
+                        map.put("cpuRequest", app.getCpuRequest());
+                        map.put("cpuLimit", app.getCpuLimit());
+                        map.put("memoryRequest", app.getMemoryRequest());
+                        map.put("memoryLimit", app.getMemoryLimit());
+                        map.put("replicas", app.getReplicas());
+                        map.put("containerPort", app.getContainerPort());
                         map.put("createdAt", app.getCreatedAt());
                         return map;
                     })
@@ -211,6 +271,7 @@ public class AdminController {
     @PostMapping("/deployment-requests/{id}/process")
     public ResponseEntity<?> processDeploymentRequest(
             @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> requestBody,
             @RequestHeader(value = "X-Forwarded-For", required = false) String xff,
             @RequestHeader(value = "X-Real-IP", required = false) String xri,
             jakarta.servlet.http.HttpServletRequest request) {
@@ -227,6 +288,24 @@ public class AdminController {
             if (userRole == null || !userRole.equalsIgnoreCase("ADMIN")) {
                 return ResponseEntity.status(403)
                         .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền xử lý"));
+            }
+
+            // Parse optional clusterId from request body (admin có thể chọn thủ công)
+            Long requestedClusterId = null;
+            if (requestBody != null && requestBody.containsKey("clusterId")) {
+                Object clusterObj = requestBody.get("clusterId");
+                if (clusterObj instanceof Number) {
+                    requestedClusterId = ((Number) clusterObj).longValue();
+                } else if (clusterObj instanceof String) {
+                    String clusterStr = ((String) clusterObj).trim();
+                    if (!clusterStr.isEmpty()) {
+                        try {
+                            requestedClusterId = Long.parseLong(clusterStr);
+                        } catch (NumberFormatException nfe) {
+                            throw new IllegalArgumentException("clusterId không hợp lệ");
+                        }
+                    }
+                }
             }
 
             // Load Application từ database
@@ -264,9 +343,7 @@ public class AdminController {
             }
 
             // Lấy thông tin user để có username
-            User user = userService.findAll().stream()
-                    .filter(u -> u.getId().equals(application.getUserId()))
-                    .findFirst()
+            User user = userService.findById(application.getUserId())
                     .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
             String username = user.getUsername();
@@ -288,21 +365,36 @@ public class AdminController {
             }
             String dockerImage = application.getDockerImage();
 
-            // Tự động chọn cluster HEALTHY đầu tiên (có MASTER online)
-            Cluster cluster = clusterService.getFirstHealthyCluster()
-                    .orElseThrow(() -> new RuntimeException(
-                            "Không tìm thấy cluster K8s nào để triển khai. Vui lòng thêm cluster và đảm bảo MASTER node đang online."));
+            Cluster cluster;
+            boolean autoSelectedCluster = requestedClusterId == null;
+            if (autoSelectedCluster) {
+                // Tự động chọn cluster HEALTHY đầu tiên (có MASTER online)
+                cluster = clusterService.getFirstHealthyCluster()
+                        .orElseThrow(() -> new RuntimeException(
+                                "Không tìm thấy cluster K8s nào để triển khai. Vui lòng thêm cluster và đảm bảo MASTER node đang online."));
+                if (!clusterService.hasMasterOnline(cluster.getId())) {
+                    throw new RuntimeException(
+                            "MASTER node trong cluster \"" + cluster.getName() + "\" đang offline. "
+                                    + "Không thể triển khai ứng dụng. Vui lòng kiểm tra kết nối MASTER node và thử lại.");
+                }
+            } else {
+                cluster = clusterService.findById(requestedClusterId)
+                        .orElseThrow(() -> new IllegalArgumentException("Cluster được chọn không tồn tại"));
+                if (!clusterService.hasMasterOnline(cluster.getId())) {
+                    throw new IllegalArgumentException(
+                            "MASTER node trong cluster \"" + cluster.getName() + "\" đang offline. "
+                                    + "Vui lòng chọn cluster khác hoặc kiểm tra kết nối.");
+                }
+            }
             Long clusterId = cluster.getId();
 
-            // Kiểm tra lại MASTER online trước khi deploy (double check)
-            if (!clusterService.hasMasterOnline(clusterId)) {
-                throw new RuntimeException(
-                        "MASTER node trong cluster \"" + cluster.getName() + "\" đang offline. " +
-                                "Không thể triển khai ứng dụng. Vui lòng kiểm tra kết nối MASTER node và thử lại.");
+            if (autoSelectedCluster) {
+                logger.info("Auto-selected cluster for deployment: {} (ID: {}), MASTER is online", cluster.getName(),
+                        clusterId);
+            } else {
+                logger.info("Admin selected cluster for deployment: {} (ID: {}), MASTER is online", cluster.getName(),
+                        clusterId);
             }
-
-            logger.info("Auto-selected cluster for deployment: {} (ID: {}), MASTER is online", cluster.getName(),
-                    clusterId);
 
             // Lưu clusterId ngay sau khi chọn cluster (trước khi tạo resources)
             // Để có thể cleanup nếu deployment lỗi
@@ -332,7 +424,12 @@ public class AdminController {
 
             try {
                 // 1. Tự động chọn cluster HEALTHY đầu tiên
-                appendLog.accept("✅ Đã chọn cluster: " + cluster.getName() + " (ID: " + clusterId + ")");
+                if (autoSelectedCluster) {
+                    appendLog.accept("✅ Đã tự động chọn cluster: " + cluster.getName() + " (ID: " + clusterId + ")");
+                } else {
+                    appendLog.accept("✅ Đã sử dụng cluster do admin chọn: " + cluster.getName() + " (ID: " + clusterId
+                            + ")");
+                }
                 appendLog.accept("💾 Đã lưu cluster ID vào database để theo dõi");
 
                 // 2. Lấy kubeconfig từ master node
@@ -356,10 +453,124 @@ public class AdminController {
                 appendLog.accept("📝 Tên resources: Deployment=" + deploymentName + ", Service=" + serviceName
                         + ", Ingress=" + ingressName);
 
+                // 5.5 Validate docker image exists (basic pre-check for Docker Hub)
+                var imageCheck = validateDockerImageInternal(dockerImage);
+                if (!imageCheck.valid) {
+                    appendLog.accept("❌ Image không hợp lệ: " + dockerImage + ". Lý do: " + imageCheck.message);
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Invalid Image",
+                                    "message",
+                                    "Docker image không tồn tại hoặc không truy cập được: " + imageCheck.message));
+                }
+
                 // 6. Create Deployment
                 appendLog.accept("🔨 Đang tạo Deployment: " + deploymentName + " với image: " + dockerImage);
-                int containerPort = 80; // Default port, can be configured later
-                kubernetesService.createDeployment(namespace, deploymentName, dockerImage, containerPort, clusterId);
+
+                // Get parameters from request body, application entity, or use defaults
+                // Default values: Container Port=80, Replicas=1
+                int containerPort = application.getContainerPort() != null ? application.getContainerPort() : 80;
+                int replicas = application.getReplicas() != null ? application.getReplicas() : 1;
+
+                // Override with request body values if provided
+                if (requestBody != null) {
+                    if (requestBody.containsKey("containerPort")) {
+                        Object portObj = requestBody.get("containerPort");
+                        if (portObj instanceof Number) {
+                            containerPort = ((Number) portObj).intValue();
+                        } else if (portObj instanceof String) {
+                            try {
+                                containerPort = Integer.parseInt((String) portObj);
+                            } catch (NumberFormatException e) {
+                                // Keep existing value
+                            }
+                        }
+                    }
+                    if (requestBody.containsKey("replicas")) {
+                        Object replicasObj = requestBody.get("replicas");
+                        if (replicasObj instanceof Number) {
+                            replicas = ((Number) replicasObj).intValue();
+                        } else if (replicasObj instanceof String) {
+                            try {
+                                replicas = Integer.parseInt((String) replicasObj);
+                            } catch (NumberFormatException e) {
+                                // Keep existing value
+                            }
+                        }
+                    }
+                }
+
+                // Get resource limits from request body or application, with defaults
+                // Default values: CPU Request=100m, CPU Limit=500m, Memory Request=128Mi,
+                // Memory Limit=256Mi
+                String cpuRequest = "100m";
+                String cpuLimit = "500m";
+                String memoryRequest = "128Mi";
+                String memoryLimit = "256Mi";
+
+                // Use values from application entity if available (not null/empty)
+                if (application.getCpuRequest() != null && !application.getCpuRequest().trim().isEmpty()) {
+                    cpuRequest = application.getCpuRequest();
+                }
+                if (application.getCpuLimit() != null && !application.getCpuLimit().trim().isEmpty()) {
+                    cpuLimit = application.getCpuLimit();
+                }
+                if (application.getMemoryRequest() != null && !application.getMemoryRequest().trim().isEmpty()) {
+                    memoryRequest = application.getMemoryRequest();
+                }
+                if (application.getMemoryLimit() != null && !application.getMemoryLimit().trim().isEmpty()) {
+                    memoryLimit = application.getMemoryLimit();
+                }
+
+                // Override with request body values if provided (not null/empty)
+                if (requestBody != null) {
+                    if (requestBody.containsKey("cpuRequest")) {
+                        String reqCpuRequest = (String) requestBody.get("cpuRequest");
+                        if (reqCpuRequest != null && !reqCpuRequest.trim().isEmpty()) {
+                            cpuRequest = reqCpuRequest;
+                        }
+                    }
+                    if (requestBody.containsKey("cpuLimit")) {
+                        String reqCpuLimit = (String) requestBody.get("cpuLimit");
+                        if (reqCpuLimit != null && !reqCpuLimit.trim().isEmpty()) {
+                            cpuLimit = reqCpuLimit;
+                        }
+                    }
+                    if (requestBody.containsKey("memoryRequest")) {
+                        String reqMemoryRequest = (String) requestBody.get("memoryRequest");
+                        if (reqMemoryRequest != null && !reqMemoryRequest.trim().isEmpty()) {
+                            memoryRequest = reqMemoryRequest;
+                        }
+                    }
+                    if (requestBody.containsKey("memoryLimit")) {
+                        String reqMemoryLimit = (String) requestBody.get("memoryLimit");
+                        if (reqMemoryLimit != null && !reqMemoryLimit.trim().isEmpty()) {
+                            memoryLimit = reqMemoryLimit;
+                        }
+                    }
+                }
+
+                // Parse env vars from request body
+                Map<String, String> envVars = null;
+                if (requestBody != null && requestBody.containsKey("envVars")) {
+                    try {
+                        String envVarsStr = (String) requestBody.get("envVars");
+                        if (envVarsStr != null && !envVarsStr.trim().isEmpty()) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, String> parsed = new com.fasterxml.jackson.databind.ObjectMapper()
+                                    .readValue(envVarsStr, Map.class);
+                            envVars = parsed;
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Failed to parse envVars, will continue without them", e);
+                    }
+                }
+
+                appendLog.accept("💻 Resource limits: CPU=" + cpuRequest + "/" + cpuLimit + ", Memory=" + memoryRequest
+                        + "/" + memoryLimit);
+                appendLog.accept("🔢 Replicas: " + replicas + ", Container Port: " + containerPort);
+
+                kubernetesService.createDeployment(namespace, deploymentName, dockerImage, containerPort, clusterId,
+                        cpuRequest, cpuLimit, memoryRequest, memoryLimit, replicas, envVars);
                 appendLog.accept("✅ Deployment đã được tạo: " + deploymentName);
 
                 // 7. Create Service
@@ -454,6 +665,328 @@ public class AdminController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Bad Request", "message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Admin: Kiểm tra nhanh image có tồn tại (public Docker Hub) hay không
+     */
+    @GetMapping("/images/validate")
+    public ResponseEntity<?> validateDockerImage(@RequestParam("image") String image,
+            jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (session == null) {
+                return ResponseEntity.status(401)
+                        .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
+            }
+            String userRole = (String) session.getAttribute("USER_ROLE");
+            if (userRole == null || !userRole.equalsIgnoreCase("ADMIN")) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền thực hiện"));
+            }
+
+            var result = validateDockerImageInternal(image);
+            return ResponseEntity.ok(Map.of(
+                    "image", image,
+                    "valid", result.valid,
+                    "message", result.message));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
+        }
+    }
+
+    private static class ImageValidation {
+        final boolean valid;
+        final String message;
+
+        ImageValidation(boolean valid, String message) {
+            this.valid = valid;
+            this.message = message;
+        }
+    }
+
+    // Very basic validator focusing on Docker Hub public images
+    private ImageValidation validateDockerImageInternal(String image) {
+        try {
+            if (image == null || image.trim().isEmpty()) {
+                return new ImageValidation(false, "Chuỗi image rỗng");
+            }
+            String ref = image.trim();
+            // Extract tag
+            String namePart = ref;
+            String tag = "latest";
+            int idx = ref.lastIndexOf(':');
+            if (idx > 0 && ref.indexOf('/') < idx) { // has tag
+                namePart = ref.substring(0, idx);
+                tag = ref.substring(idx + 1);
+            }
+
+            // Detect registry
+            String registry = "docker.io";
+            String path = namePart;
+            int slashIdx = namePart.indexOf('/');
+            if (slashIdx > 0
+                    && (namePart.contains(".") || namePart.contains(":") || namePart.startsWith("localhost"))) {
+                // Explicit registry provided
+                int firstSlash = namePart.indexOf('/');
+                registry = namePart.substring(0, firstSlash);
+                path = namePart.substring(firstSlash + 1);
+            }
+
+            if ("docker.io".equals(registry) || "registry-1.docker.io".equals(registry)) {
+                // Docker Hub: map to hub API
+                // If no namespace, assume library/
+                if (!path.contains("/")) {
+                    path = "library/" + path;
+                }
+                String hubUrl = "https://hub.docker.com/v2/repositories/" + urlEncode(path) + "/tags/" + urlEncode(tag);
+                int code = httpHeadOrGet(hubUrl);
+                if (code == 200)
+                    return new ImageValidation(true, "Found on Docker Hub");
+                if (code == 404)
+                    return new ImageValidation(false, "Tag không tồn tại trên Docker Hub");
+                return new ImageValidation(false, "Không xác minh được (HTTP " + code + ")");
+            }
+
+            // Generic registry check (unauth HEAD to v2 manifest) - best effort
+            String manifestUrl = "https://" + registry + "/v2/" + path + "/manifests/" + tag;
+            int code = httpHead(manifestUrl, "application/vnd.docker.distribution.manifest.v2+json");
+            if (code == 200)
+                return new ImageValidation(true, "Found on registry");
+            return new ImageValidation(false, "Không xác minh được trên registry (HTTP " + code + ")");
+        } catch (Exception e) {
+            return new ImageValidation(false, e.getMessage());
+        }
+    }
+
+    private int httpHeadOrGet(String url) throws Exception {
+        int code = httpHead(url, null);
+        if (code == 405 || code == 403) { // fallback GET when HEAD not allowed
+            return httpGet(url);
+        }
+        return code;
+    }
+
+    private int httpHead(String url, String accept) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) java.net.URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("HEAD");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        if (accept != null)
+            conn.setRequestProperty("Accept", accept);
+        conn.connect();
+        int code = conn.getResponseCode();
+        conn.disconnect();
+        return code;
+    }
+
+    private int httpGet(String url) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) java.net.URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        conn.connect();
+        int code = conn.getResponseCode();
+        conn.disconnect();
+        return code;
+    }
+
+    private String urlEncode(String s) {
+        return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Admin: Xem chi tiết một deployment request
+     */
+    @GetMapping("/deployment-requests/{id}")
+    public ResponseEntity<?> getDeploymentRequestDetail(
+            @PathVariable Long id,
+            jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (session == null) {
+                return ResponseEntity.status(401)
+                        .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
+            }
+            String userRole = (String) session.getAttribute("USER_ROLE");
+            if (userRole == null || !userRole.equalsIgnoreCase("ADMIN")) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền truy cập"));
+            }
+
+            return applicationService.getApplicationById(id)
+                    .map(app -> {
+                        // Get username from userId
+                        String username = "Unknown";
+                        if (app.getUserId() != null) {
+                            username = userService.findById(app.getUserId())
+                                    .map(User::getUsername)
+                                    .orElse("Unknown");
+                        }
+
+                        java.util.Map<String, Object> map = new java.util.HashMap<>();
+                        map.put("id", app.getId());
+                        map.put("appName", app.getAppName());
+                        map.put("dockerImage", app.getDockerImage());
+                        map.put("userId", app.getUserId());
+                        map.put("username", username);
+                        map.put("status", app.getStatus());
+                        map.put("k8sNamespace", app.getK8sNamespace());
+                        map.put("accessUrl", app.getAccessUrl());
+                        map.put("cpuRequest", app.getCpuRequest());
+                        map.put("cpuLimit", app.getCpuLimit());
+                        map.put("memoryRequest", app.getMemoryRequest());
+                        map.put("memoryLimit", app.getMemoryLimit());
+                        map.put("replicas", app.getReplicas());
+                        map.put("containerPort", app.getContainerPort());
+                        map.put("createdAt", app.getCreatedAt());
+                        map.put("updatedAt", app.getUpdatedAt());
+                        return ResponseEntity.ok(map);
+                    })
+                    .orElse(ResponseEntity.status(404)
+                            .body(Map.of("error", "Not Found", "message", "Application not found")));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Admin: Cập nhật thông tin một deployment request (docker image, resource
+     * limits)
+     */
+    @PutMapping("/deployment-requests/{id}")
+    public ResponseEntity<?> updateDeploymentRequest(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body,
+            jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (session == null) {
+                return ResponseEntity.status(401)
+                        .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
+            }
+            String userRole = (String) session.getAttribute("USER_ROLE");
+            if (userRole == null || !userRole.equalsIgnoreCase("ADMIN")) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền cập nhật"));
+            }
+
+            Application app = applicationService.getApplicationById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Application not found"));
+
+            // Chỉ cho phép cập nhật khi chưa chạy hoặc đang lỗi
+            if (!"PENDING".equalsIgnoreCase(app.getStatus()) && !"ERROR".equalsIgnoreCase(app.getStatus())) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid State",
+                                "message", "Chỉ có thể chỉnh sửa khi trạng thái là PENDING hoặc ERROR"));
+            }
+
+            String dockerImage = body.getOrDefault("dockerImage", app.getDockerImage());
+            String cpuRequest = body.getOrDefault("cpuRequest", app.getCpuRequest());
+            String cpuLimit = body.getOrDefault("cpuLimit", app.getCpuLimit());
+            String memoryRequest = body.getOrDefault("memoryRequest", app.getMemoryRequest());
+            String memoryLimit = body.getOrDefault("memoryLimit", app.getMemoryLimit());
+
+            // Update replicas and containerPort if provided
+            if (body.containsKey("replicas")) {
+                try {
+                    int replicas = Integer.parseInt(body.get("replicas"));
+                    app.setReplicas(replicas);
+                } catch (NumberFormatException e) {
+                    // Invalid number, keep existing value
+                }
+            }
+            if (body.containsKey("containerPort")) {
+                try {
+                    int containerPort = Integer.parseInt(body.get("containerPort"));
+                    app.setContainerPort(containerPort);
+                } catch (NumberFormatException e) {
+                    // Invalid number, keep existing value
+                }
+            }
+
+            // Validate docker image format nếu thay đổi
+            if (dockerImage == null || dockerImage.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Validation Error", "message", "Docker image không được để trống"));
+            }
+            String dockerImagePattern = "^[a-zA-Z0-9._\\/-]+(:[a-zA-Z0-9._-]+)?$";
+            if (!dockerImage.trim().matches(dockerImagePattern)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Validation Error",
+                                "message", "Định dạng Docker image không hợp lệ"));
+            }
+
+            app.setDockerImage(dockerImage.trim());
+            app.setCpuRequest(cpuRequest);
+            app.setCpuLimit(cpuLimit);
+            app.setMemoryRequest(memoryRequest);
+            app.setMemoryLimit(memoryLimit);
+            applicationService.updateApplication(app);
+
+            return ResponseEntity.ok(Map.of(
+                    "id", app.getId(),
+                    "dockerImage", app.getDockerImage(),
+                    "cpuRequest", app.getCpuRequest(),
+                    "cpuLimit", app.getCpuLimit(),
+                    "memoryRequest", app.getMemoryRequest(),
+                    "memoryLimit", app.getMemoryLimit(),
+                    "status", app.getStatus()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Validation Error", "message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Admin: Từ chối (reject) một deployment request
+     */
+    @PostMapping("/deployment-requests/{id}/reject")
+    public ResponseEntity<?> rejectDeploymentRequest(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body,
+            jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (session == null) {
+                return ResponseEntity.status(401)
+                        .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
+            }
+            String userRole = (String) session.getAttribute("USER_ROLE");
+            if (userRole == null || !userRole.equalsIgnoreCase("ADMIN")) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền từ chối"));
+            }
+
+            Application app = applicationService.getApplicationById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Application not found"));
+
+            if (!"PENDING".equalsIgnoreCase(app.getStatus())) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid State",
+                                "message", "Chỉ có thể từ chối khi trạng thái là PENDING"));
+            }
+
+            String reason = body != null ? body.getOrDefault("reason", "No reason provided") : "No reason provided";
+            app.setStatus("REJECTED");
+            String existingLogs = app.getDeploymentLogs() != null ? app.getDeploymentLogs() : "";
+            String logLine = "\n[ADMIN] Request rejected: " + reason;
+            app.setDeploymentLogs(existingLogs + logLine);
+            applicationService.updateApplication(app);
+
+            return ResponseEntity.ok(Map.of("id", app.getId(), "status", app.getStatus()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Validation Error", "message", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500)
                     .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));

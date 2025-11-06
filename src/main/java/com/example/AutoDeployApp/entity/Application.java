@@ -49,6 +49,25 @@ public class Application {
     @Column(name = "subdomain", length = 200)
     private String subdomain; // Legacy field - kept for compatibility
 
+    // Resource limits configuration
+    @Column(name = "cpu_request", length = 20)
+    private String cpuRequest = "100m"; // Default: 100m CPU
+
+    @Column(name = "cpu_limit", length = 20)
+    private String cpuLimit = "500m"; // Default: 500m CPU
+
+    @Column(name = "memory_request", length = 20)
+    private String memoryRequest = "128Mi"; // Default: 128Mi RAM
+
+    @Column(name = "memory_limit", length = 20)
+    private String memoryLimit = "256Mi"; // Default: 256Mi RAM
+
+    @Column(name = "replicas")
+    private Integer replicas = 1; // Default: 1 replica
+
+    @Column(name = "container_port")
+    private Integer containerPort = 80; // Default: port 80
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt; // populated by DB default CURRENT_TIMESTAMP
 
@@ -69,11 +88,10 @@ public class Application {
     }
 
     public void setAppName(String appName) {
-        this.appName = appName;
-        // Sync with legacy name field for compatibility
-        if (this.name == null) {
-            this.name = appName;
-        }
+        String normalized = (appName != null && !appName.trim().isEmpty()) ? appName.trim() : null;
+        this.appName = normalized;
+        // Đồng bộ trường legacy để tránh hiển thị tên cũ.
+        this.name = normalized;
     }
 
     public String getName() {
@@ -81,7 +99,11 @@ public class Application {
     }
 
     public void setName(String name) {
-        this.name = name;
+        String normalized = (name != null && !name.trim().isEmpty()) ? name.trim() : null;
+        this.name = normalized;
+        if ((this.appName == null || this.appName.trim().isEmpty()) && normalized != null) {
+            this.appName = normalized;
+        }
     }
 
     public String getDockerImage() {
@@ -186,5 +208,54 @@ public class Application {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getCpuRequest() {
+        return cpuRequest != null ? cpuRequest : "100m";
+    }
+
+    public void setCpuRequest(String cpuRequest) {
+        this.cpuRequest = cpuRequest != null && !cpuRequest.trim().isEmpty() ? cpuRequest.trim() : "100m";
+    }
+
+    public String getCpuLimit() {
+        return cpuLimit != null ? cpuLimit : "500m";
+    }
+
+    public void setCpuLimit(String cpuLimit) {
+        this.cpuLimit = cpuLimit != null && !cpuLimit.trim().isEmpty() ? cpuLimit.trim() : "500m";
+    }
+
+    public String getMemoryRequest() {
+        return memoryRequest != null ? memoryRequest : "128Mi";
+    }
+
+    public void setMemoryRequest(String memoryRequest) {
+        this.memoryRequest = memoryRequest != null && !memoryRequest.trim().isEmpty() ? memoryRequest.trim() : "128Mi";
+    }
+
+    public String getMemoryLimit() {
+        return memoryLimit != null ? memoryLimit : "256Mi";
+    }
+
+    public void setMemoryLimit(String memoryLimit) {
+        this.memoryLimit = memoryLimit != null && !memoryLimit.trim().isEmpty() ? memoryLimit.trim() : "256Mi";
+    }
+
+    public Integer getReplicas() {
+        return replicas != null ? replicas : 1;
+    }
+
+    public void setReplicas(Integer replicas) {
+        this.replicas = (replicas != null && replicas > 0) ? replicas : 1;
+    }
+
+    public Integer getContainerPort() {
+        return containerPort != null ? containerPort : 80;
+    }
+
+    public void setContainerPort(Integer containerPort) {
+        this.containerPort = (containerPort != null && containerPort > 0 && containerPort <= 65535) ? containerPort
+                : 80;
     }
 }

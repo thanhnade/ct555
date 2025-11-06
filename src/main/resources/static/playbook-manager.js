@@ -1012,7 +1012,7 @@ async function generateK8sPlaybookFromTemplate(template) {
 - name: Install and configure MetalLB on Kubernetes
   hosts: master
   become: yes
-  gather_facts: no
+  gather_facts: yes
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
     DEBIAN_FRONTEND: noninteractive
@@ -1020,9 +1020,36 @@ async function generateK8sPlaybookFromTemplate(template) {
     metallb_version: "v0.14.8"
     metallb_namespace: "metallb-system"
     metallb_url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
-    ip_range_start: "192.168.56.240"
-    ip_range_end: "192.168.56.250"
   tasks:
+    - name: Get master IP address dynamically
+      set_fact:
+        master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
+      # Lấy địa chỉ IP động của master node
+
+    - name: Calculate IP range from master IP subnet using shell
+      shell: |
+        MASTER_IP="{{ master_ip }}"
+        SUBNET=$(echo "$MASTER_IP" | cut -d'.' -f1-3)
+        echo "\${SUBNET}.240"
+        echo "\${SUBNET}.250"
+      register: ip_range_result
+      changed_when: false
+      # Tự động tính toán IP range từ subnet của master IP (240-250)
+
+    - name: Extract IP range start and end
+      set_fact:
+        ip_range_start: "{{ ip_range_result.stdout_lines[0] }}"
+        ip_range_end: "{{ ip_range_result.stdout_lines[1] }}"
+      # Trích xuất IP range start và end từ kết quả shell
+
+    - name: Display calculated MetalLB IP range
+      debug:
+        msg:
+          - "Master IP: {{ master_ip }}"
+          - "Auto-detected MetalLB IP Pool: {{ ip_range_start }} - {{ ip_range_end }}"
+          - "IP range được tính tự động từ network của master node"
+      # Hiển thị IP range đã được tính toán
+
     - name: Check if MetalLB namespace exists
       command: kubectl get namespace {{ metallb_namespace }}
       register: ns_check
@@ -1052,7 +1079,7 @@ async function generateK8sPlaybookFromTemplate(template) {
       ignore_errors: true
       # Chờ controller pods của MetalLB khởi động
 
-    - name: Create MetalLB IPAddressPool manifest
+    - name: Create MetalLB IPAddressPool manifest with auto-detected IP range
       copy:
         dest: /tmp/metallb-ip-pool.yaml
         content: |
@@ -1064,7 +1091,7 @@ async function generateK8sPlaybookFromTemplate(template) {
           spec:
             addresses:
               - {{ ip_range_start }}-{{ ip_range_end }}
-      # Tạo manifest IPAddressPool cho MetalLB
+      # Tạo manifest IPAddressPool với IP range tự động từ master node
 
     - name: Apply IPAddressPool manifest
       command: kubectl apply -f /tmp/metallb-ip-pool.yaml
@@ -1108,9 +1135,10 @@ async function generateK8sPlaybookFromTemplate(template) {
         msg:
           - "MetalLB installed successfully."
           - "Namespace: {{ metallb_namespace }}"
-          - "IP Pool: {{ ip_range_start }} - {{ ip_range_end }}"
+          - "Master IP: {{ master_ip }}"
+          - "Auto-detected IP Pool: {{ ip_range_start }} - {{ ip_range_end }}"
           - "{{ metallb_status.stdout_lines }}"
-      # Hoàn tất cài đặt MetalLB LoadBalancer`,
+      # Hoàn tất cài đặt MetalLB LoadBalancer với IP range tự động`,
 
     '12-setup-storage': `---
 - hosts: master

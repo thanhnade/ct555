@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -189,11 +190,67 @@ public class KubernetesService {
     }
 
     /**
-     * Create Deployment in Kubernetes
+     * Create Deployment in Kubernetes with configurable resource limits
      */
     public String createDeployment(String namespace, String deploymentName, String dockerImage, int containerPort,
-            Long clusterId) {
+            Long clusterId, String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit) {
+        return createDeployment(namespace, deploymentName, dockerImage, containerPort, clusterId,
+                cpuRequest, cpuLimit, memoryRequest, memoryLimit, 1, null);
+    }
+
+    /**
+     * Create Deployment in Kubernetes with configurable resource limits, replicas
+     * and env vars
+     */
+    public String createDeployment(String namespace, String deploymentName, String dockerImage, int containerPort,
+            Long clusterId, String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit,
+            int replicas, Map<String, String> envVars) {
         try (KubernetesClient client = getKubernetesClient(clusterId)) {
+            // Use provided resource limits or defaults
+            String finalCpuRequest = (cpuRequest != null && !cpuRequest.trim().isEmpty()) ? cpuRequest.trim() : "100m";
+            String finalCpuLimit = (cpuLimit != null && !cpuLimit.trim().isEmpty()) ? cpuLimit.trim() : "500m";
+            String finalMemoryRequest = (memoryRequest != null && !memoryRequest.trim().isEmpty())
+                    ? memoryRequest.trim()
+                    : "128Mi";
+            String finalMemoryLimit = (memoryLimit != null && !memoryLimit.trim().isEmpty()) ? memoryLimit.trim()
+                    : "256Mi";
+
+            // Ensure replicas is at least 1
+            int finalReplicas = Math.max(1, replicas);
+
+            // Build environment variables list
+            java.util.List<EnvVar> envVarList = new java.util.ArrayList<>();
+            if (envVars != null && !envVars.isEmpty()) {
+                for (Map.Entry<String, String> entry : envVars.entrySet()) {
+                    if (entry.getKey() != null && !entry.getKey().trim().isEmpty()) {
+                        EnvVar envVar = new EnvVarBuilder()
+                                .withName(entry.getKey().trim())
+                                .withValue(entry.getValue() != null ? entry.getValue() : "")
+                                .build();
+                        envVarList.add(envVar);
+                    }
+                }
+            }
+
+            // Build container with environment variables
+            ContainerBuilder containerBuilder = new ContainerBuilder()
+                    .withName(deploymentName)
+                    .withImage(dockerImage)
+                    .addNewPort()
+                    .withContainerPort(containerPort)
+                    .withProtocol("TCP")
+                    .endPort()
+                    .withNewResources()
+                    .addToRequests("memory", new Quantity(finalMemoryRequest))
+                    .addToRequests("cpu", new Quantity(finalCpuRequest))
+                    .addToLimits("memory", new Quantity(finalMemoryLimit))
+                    .addToLimits("cpu", new Quantity(finalCpuLimit))
+                    .endResources();
+
+            if (!envVarList.isEmpty()) {
+                containerBuilder.withEnv(envVarList);
+            }
+
             Deployment deployment = new DeploymentBuilder()
                     .withNewMetadata()
                     .withName(deploymentName)
@@ -201,7 +258,7 @@ public class KubernetesService {
                     .addToLabels("app", deploymentName)
                     .endMetadata()
                     .withNewSpec()
-                    .withReplicas(1)
+                    .withReplicas(finalReplicas)
                     .withNewSelector()
                     .addToMatchLabels("app", deploymentName)
                     .endSelector()
@@ -210,27 +267,16 @@ public class KubernetesService {
                     .addToLabels("app", deploymentName)
                     .endMetadata()
                     .withNewSpec()
-                    .addNewContainer()
-                    .withName(deploymentName)
-                    .withImage(dockerImage)
-                    .addNewPort()
-                    .withContainerPort(containerPort)
-                    .withProtocol("TCP")
-                    .endPort()
-                    .withNewResources()
-                    .addToRequests("memory", new Quantity("128Mi"))
-                    .addToRequests("cpu", new Quantity("100m"))
-                    .addToLimits("memory", new Quantity("256Mi"))
-                    .addToLimits("cpu", new Quantity("500m"))
-                    .endResources()
-                    .endContainer()
+                    .addToContainers(containerBuilder.build())
                     .endSpec()
                     .endTemplate()
                     .endSpec()
                     .build();
 
             client.apps().deployments().inNamespace(namespace).resource(deployment).create();
-            logger.info("Created deployment: {}/{}", namespace, deploymentName);
+            logger.info("Created deployment: {}/{} with replicas={}, port={}, resources: CPU={}/{}, Memory={}/{}",
+                    namespace, deploymentName, finalReplicas, containerPort,
+                    finalCpuRequest, finalCpuLimit, finalMemoryRequest, finalMemoryLimit);
             return deploymentName;
         } catch (Exception e) {
             logger.error("Failed to create deployment: {}/{}", namespace, deploymentName, e);

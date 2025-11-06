@@ -5,7 +5,7 @@ let deploymentType = 'docker'; // Default to docker like React component
 let activeTab = 'projects';
 let envVariables = [{ key: '', value: '' }];
 let buildSettingsExpanded = true;
-let envVarsExpanded = false;
+let envVarsExpanded = true;
 
 // Framework presets
 const frameworkPresets = [
@@ -293,6 +293,7 @@ function initializeDeploymentTypeChange() {
   }
 }
 
+
 // Click outside to close framework dropdown
 function initializeClickOutside() {
   document.addEventListener('click', (e) => {
@@ -352,11 +353,21 @@ function initializeUploadForm() {
     }
 
     const formData = new FormData();
-    // Chỉ gửi 2 field: appName và dockerImage
     const appName = projectNameInput.value.trim();
     
     formData.append('appName', appName);
-    formData.append('dockerImage', imageValue); // imageValue đã được khai báo ở trên
+    formData.append('dockerImage', imageValue);
+    
+    // Append environment variables to form data
+    const envVarsObj = {};
+    envVariables.forEach(env => {
+      if (env.key && env.key.trim()) {
+        envVarsObj[env.key.trim()] = env.value || '';
+      }
+    });
+    if (Object.keys(envVarsObj).length > 0) {
+      formData.append('envVars', JSON.stringify(envVarsObj));
+    }
     
     // Namespace sẽ được backend tự động tạo theo tên người dùng
     // Admin sẽ xử lý tạo Deployment, Service, Ingress với namespace đó
@@ -842,6 +853,16 @@ function initializeComponents() {
   initializeClickOutside();
   initializeUploadForm();
   renderEnvVariables();
+  
+  // Set envVars section to be expanded by default
+  const envVarsSection = document.getElementById('envVars');
+  if (envVarsSection && envVarsExpanded) {
+    envVarsSection.style.display = 'flex';
+    const toggleIcon = envVarsSection.previousElementSibling?.querySelector('.toggle-icon');
+    if (toggleIcon) {
+      toggleIcon.classList.add('expanded');
+    }
+  }
   
   // Framework preset mặc định
   const frameworkLabel = document.getElementById('frameworkLabel');

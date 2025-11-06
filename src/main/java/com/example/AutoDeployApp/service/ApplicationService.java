@@ -21,11 +21,10 @@ public class ApplicationService {
     }
 
     @Transactional
-    public Application createApplication(Long userId, String appName, String dockerImage) {
+    public Application createApplication(Long userId, String appName, String dockerImage,
+            String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit) {
         // Lấy thông tin user để lấy username
-        User user = userService.findAll().stream()
-                .filter(u -> u.getId().equals(userId))
-                .findFirst()
+        User user = userService.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         // Validate input
@@ -54,6 +53,20 @@ public class ApplicationService {
         // Mỗi user chỉ có 1 namespace: dựa theo username đã sanitize
         String namespace = sanitizeUserNamespace(user.getUsername());
         application.setK8sNamespace(namespace);
+
+        // Set resource limits (nếu có, nếu không dùng default từ entity)
+        if (cpuRequest != null && !cpuRequest.trim().isEmpty()) {
+            application.setCpuRequest(cpuRequest.trim());
+        }
+        if (cpuLimit != null && !cpuLimit.trim().isEmpty()) {
+            application.setCpuLimit(cpuLimit.trim());
+        }
+        if (memoryRequest != null && !memoryRequest.trim().isEmpty()) {
+            application.setMemoryRequest(memoryRequest.trim());
+        }
+        if (memoryLimit != null && !memoryLimit.trim().isEmpty()) {
+            application.setMemoryLimit(memoryLimit.trim());
+        }
 
         return applicationRepository.save(application);
     }
@@ -101,6 +114,10 @@ public class ApplicationService {
     public List<Application> getAllApplications() {
         // Admin có thể xem tất cả, kể cả DELETED
         return applicationRepository.findAllByOrderByCreatedAtDesc();
+    }
+
+    public List<Application> getApplicationsByUserId(Long userId) {
+        return applicationRepository.findByUserIdOrderByCreatedAtDesc(userId);
     }
 
     /**
