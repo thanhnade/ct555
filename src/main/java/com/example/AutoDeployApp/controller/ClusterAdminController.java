@@ -4,6 +4,7 @@ import com.example.AutoDeployApp.entity.Cluster;
 import com.example.AutoDeployApp.service.ClusterService;
 import com.example.AutoDeployApp.service.ServerService;
 import com.example.AutoDeployApp.service.AnsibleInstallationService;
+import com.example.AutoDeployApp.service.KubernetesService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +16,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PreDestroy;
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.ContainerStatus;
+import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
+import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.apps.StatefulSet;
+import io.fabric8.kubernetes.api.model.apps.DaemonSet;
 
 @RestController
 @RequestMapping("/admin/clusters")
@@ -34,6 +41,7 @@ public class ClusterAdminController {
     private final ClusterService clusterService;
     private final ServerService serverService;
     private final AnsibleInstallationService ansibleInstallationService;
+    private final KubernetesService kubernetesService;
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
 
     // Constants for timeouts and commands
@@ -45,16 +53,13 @@ public class ClusterAdminController {
             "echo \"DISK_PERCENT:$(df / | awk 'NR==2{print $5}')\"";
     private static final String KUBELET_VERSION_COMMAND = "kubelet --version 2>/dev/null | awk '{print $2}'";
     private static final String KUBEADM_VERSION_COMMAND = "kubeadm version -o short 2>/dev/null";
-    private static final String KUBECTL_GET_NODES_JSON = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o json";
-    private static final String KUBECTL_GET_NODES_JSON_ALT = "KUBECONFIG=/root/.kube/config kubectl get nodes -o json";
-    private static final String KUBECTL_GET_NODES_JSON_SUDO = "sudo -E kubectl get nodes -o json";
-    private static final String KUBECTL_GET_NODES_WIDE = "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes -o wide";
 
     public ClusterAdminController(ClusterService clusterService, ServerService serverService,
-            AnsibleInstallationService ansibleInstallationService) {
+            AnsibleInstallationService ansibleInstallationService, KubernetesService kubernetesService) {
         this.clusterService = clusterService;
         this.serverService = serverService;
         this.ansibleInstallationService = ansibleInstallationService;
+        this.kubernetesService = kubernetesService;
     }
 
     @PreDestroy
@@ -151,262 +156,90 @@ public class ClusterAdminController {
     }
 
     /**
-     * Lấy danh sách node từ kubectl (trên MASTER) và trả về trạng thái
+     * Lấy danh sách node từ Kubernetes API (sử dụng Fabric8 client)
      * Ready/NotReady, IP nội bộ, version
      */
     @GetMapping("/{id}/k8s/nodes")
     public ResponseEntity<?> getKubernetesNodes(@PathVariable Long id, HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-
-            // Lấy servers trong cluster và chọn MASTER đầu tiên
-            var clusterServers = serverService.findByClusterId(id);
-            if (clusterServers == null || clusterServers.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            java.util.List<java.util.Map<String, Object>> nodes = kubernetesService.getKubernetesNodes(id);
+            return ResponseEntity.ok(Map.of("nodes", nodes));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            // Handle specific Kubernetes API errors
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of(
+                        "error", "Kubernetes API server unavailable - Master may be NOTREADY",
+                        "nodes", java.util.List.of()));
             }
-
-            com.example.AutoDeployApp.entity.Server master = null;
-            for (var s : clusterServers) {
-                if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
-                    master = s;
-                    break;
-                }
-            }
-            if (master == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER trong cluster."));
-            }
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            String output = null;
-            String wide = null;
-            String rawTried = "";
-            try {
-                if (pem != null && !pem.isBlank()) {
-                    // Try default
-                    output = serverService.execCommandWithKey(
-                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                            master.getUsername(), pem, KUBECTL_GET_NODES_JSON, 8000);
-                    rawTried += "JSON@/etc/kubernetes/admin.conf:" + (output == null ? "null" : output.length()) + "\n";
-                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
-                        // Try alt kubeconfig
-                        output = serverService.execCommandWithKey(
-                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                                master.getUsername(), pem, KUBECTL_GET_NODES_JSON_ALT, 8000);
-                        rawTried += "JSON@/root/.kube/config:" + (output == null ? "null" : output.length()) + "\n";
-                    }
-                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
-                        // Try sudo -E
-                        output = serverService.execCommandWithKey(
-                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                                master.getUsername(), pem, KUBECTL_GET_NODES_JSON_SUDO, 8000);
-                        rawTried += "JSON@sudo -E:" + (output == null ? "null" : output.length()) + "\n";
-                    }
-                    wide = serverService.execCommandWithKey(
-                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                            master.getUsername(), pem, KUBECTL_GET_NODES_WIDE, 8000);
-                } else {
-                    String pw = pwCache.get(master.getId());
-                    if (pw == null || pw.isBlank()) {
-                        return ResponseEntity.badRequest().body(Map.of("error",
-                                "Không có thông tin xác thực để chạy kubectl trên MASTER."));
-                    }
-                    // Try default
-                    output = serverService.execCommand(
-                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                            master.getUsername(), pw, KUBECTL_GET_NODES_JSON, 8000);
-                    rawTried += "JSON@/etc/kubernetes/admin.conf:" + (output == null ? "null" : output.length()) + "\n";
-                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
-                        // Try alt kubeconfig
-                        output = serverService.execCommand(
-                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                                master.getUsername(), pw, KUBECTL_GET_NODES_JSON_ALT, 8000);
-                        rawTried += "JSON@/root/.kube/config:" + (output == null ? "null" : output.length()) + "\n";
-                    }
-                    if (output == null || output.isBlank() || output.trim().startsWith("error")) {
-                        // Try sudo -E
-                        output = serverService.execCommand(
-                                master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                                master.getUsername(), pw, KUBECTL_GET_NODES_JSON_SUDO, 8000);
-                        rawTried += "JSON@sudo -E:" + (output == null ? "null" : output.length()) + "\n";
-                    }
-                    wide = serverService.execCommand(
-                            master.getHost(), master.getPort() != null ? master.getPort() : 22,
-                            master.getUsername(), pw, KUBECTL_GET_NODES_WIDE, 8000);
-                }
-            } catch (Exception e) {
-                return ResponseEntity.status(500)
-                        .body(Map.of("error", "Không thể thực thi kubectl trên MASTER: " + e.getMessage()));
-            }
-
-            if (output == null || output.isBlank()) {
-                return ResponseEntity.ok(Map.of("nodes", java.util.List.of()));
-            }
-
-            // Parse JSON output
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            com.fasterxml.jackson.databind.JsonNode root = null;
-            try {
-                root = mapper.readTree(output);
-            } catch (Exception parseEx) {
-                // Nếu parse lỗi, trả thông tin debug
-                return ResponseEntity.ok(Map.of(
-                        "nodes", java.util.List.of(),
-                        "wide", wide != null ? wide : "",
-                        "rawJson", output != null ? output : "",
-                        "tried", rawTried));
-            }
-            var items = root.path("items");
-            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
-            if (items.isArray()) {
-                for (var node : items) {
-                    String name = node.path("metadata").path("name").asText("");
-                    // internalIP
-                    String internalIP = "";
-                    var addresses = node.path("status").path("addresses");
-                    if (addresses.isArray()) {
-                        for (var addr : addresses) {
-                            if ("InternalIP".equals(addr.path("type").asText())) {
-                                internalIP = addr.path("address").asText("");
-                                break;
-                            }
-                        }
-                    }
-                    // Ready condition
-                    String readyStatus = "Unknown";
-                    var conditions = node.path("status").path("conditions");
-                    if (conditions.isArray()) {
-                        for (var c : conditions) {
-                            if ("Ready".equals(c.path("type").asText())) {
-                                readyStatus = "True".equals(c.path("status").asText()) ? "Ready" : "NotReady";
-                                break;
-                            }
-                        }
-                    }
-                    // Roles (from labels if present)
-                    String roles = node.path("metadata").path("labels").path("kubernetes.io/role").asText("");
-                    if (roles.isBlank()) {
-                        roles = node.path("metadata").path("labels").path("node-role.kubernetes.io/control-plane")
-                                .isMissingNode() ? roles : "master";
-                    }
-                    String kubeletVersion = node.path("status").path("nodeInfo").path("kubeletVersion").asText("");
-
-                    result.add(Map.of(
-                            "name", name,
-                            "internalIP", internalIP,
-                            "k8sStatus", readyStatus,
-                            "roles", roles,
-                            "kubeletVersion", kubeletVersion));
-                }
-            }
-
-            return ResponseEntity.ok(Map.of("nodes", result, "wide", wide != null ? wide : ""));
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to get nodes: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Lỗi lấy danh sách node: " + e.getMessage()));
         }
     }
 
     /**
-     * Liệt kê namespaces
+     * Liệt kê namespaces (sử dụng Fabric8 client)
      */
     @GetMapping("/{id}/k8s/namespaces")
     public ResponseEntity<?> listNamespaces(@PathVariable Long id, HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-
-            // Kiểm tra master online trước
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.ok(Map.of("namespaces", new java.util.ArrayList<>(),
-                        "error", "Master server đang offline"));
-            }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var clusterServers = serverService.findByClusterId(id);
-            if (clusterServers == null || clusterServers.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
-            }
-            com.example.AutoDeployApp.entity.Server master = clusterServers.stream()
-                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                    .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl get ns -o json";
-            String output = null;
-            try {
-                if (pem != null && !pem.isBlank()) {
-                    output = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 10000);
-                } else {
-                    String pw = pwCache.get(master.getId());
-                    output = serverService.execCommand(master.getHost(), port, user, pw, cmd, 10000);
-                }
-            } catch (Exception e) {
-                return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-            }
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            var root = mapper.readTree(output);
-            var items = root.path("items");
-            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
-            if (items.isArray()) {
-                for (var ns : items) {
-                    result.add(Map.of(
-                            "name", ns.path("metadata").path("name").asText(""),
-                            "status", ns.path("status").path("phase").asText("")));
-                }
-            }
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            var namespaceList = kubernetesService.getNamespaces(id);
+            java.util.List<java.util.Map<String, Object>> result = namespaceList.getItems().stream()
+                    .map(ns -> {
+                        java.util.Map<String, Object> map = new java.util.HashMap<>();
+                        map.put("name", ns.getMetadata().getName());
+                        map.put("status", ns.getStatus() != null ? ns.getStatus().getPhase() : "Unknown");
+                        return map;
+                    })
+                    .collect(java.util.stream.Collectors.toList());
             return ResponseEntity.ok(Map.of("namespaces", result));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of(
+                        "error", "Kubernetes API server unavailable",
+                        "namespaces", new java.util.ArrayList<>()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to get namespaces: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 
     /**
-     * Describe Namespace
+     * Describe Namespace (sử dụng Fabric8 client)
      */
     @GetMapping("/{id}/k8s/namespaces/{name}")
     public ResponseEntity<?> describeNamespace(@PathVariable Long id,
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            var namespace = kubernetesService.getNamespace(id, name);
+            if (namespace == null) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Namespace not found: " + name));
             }
 
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl get namespace " + name + " -o yaml";
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            // Convert to JSON (có thể thêm YAML conversion nếu cần)
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(namespace);
+            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404).body(Map.of("error", "Namespace not found: " + name));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe namespace: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 
     /**
-     * Delete Namespace (cấm namespace hệ thống)
+     * Delete Namespace (sử dụng Fabric8 client, cấm namespace hệ thống)
      */
     @DeleteMapping("/{id}/k8s/namespaces/{name}")
     public ResponseEntity<?> deleteNamespace(@PathVariable Long id,
@@ -421,437 +254,150 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa namespace hệ thống"));
             }
 
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            kubernetesService.deleteNamespace(name, id);
+            String output = String.format("namespace \"%s\" deleted", name);
+            return ResponseEntity.ok(Map.of("success", true, "output", output));
+        } catch (IllegalArgumentException e) {
+            // Validation error từ KubernetesService (system namespace protection)
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404).body(Map.of("error", "Namespace not found: " + name));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            // Xóa namespace có thể mất nhiều thời gian vì phải xóa tất cả tài nguyên bên
-            // trong
-            // Sử dụng --wait=true (mặc định) để đợi đến khi xóa hoàn toàn
-            // Timeout 120 giây để đảm bảo có đủ thời gian cho namespace có nhiều tài nguyên
-            String cmd = "kubectl delete namespace " + name + " --wait=true --timeout=120s";
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 130000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 130000);
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete namespace: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 
     /**
-     * Liệt kê pods (tất cả namespaces)
+     * Liệt kê pods (sử dụng Fabric8 client)
+     * Supports optional namespace query parameter to filter pods
      */
     @GetMapping("/{id}/k8s/pods")
-    public ResponseEntity<?> listPods(@PathVariable Long id, HttpServletRequest request) {
+    public ResponseEntity<?> listPods(@PathVariable Long id,
+            @RequestParam(required = false) String namespace,
+            HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-
-            // Kiểm tra master online trước
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.ok(Map.of("pods", new java.util.ArrayList<>(),
-                        "error", "Master server đang offline"));
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            var podList = kubernetesService.getPods(id, namespace);
+            java.util.List<java.util.Map<String, Object>> result = podList.getItems().stream()
+                    .map(pod -> parsePodToMap(pod))
+                    .collect(java.util.stream.Collectors.toList());
+            return ResponseEntity.ok(Map.of("pods", result));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of(
+                        "error", "Kubernetes API server unavailable",
+                        "pods", new java.util.ArrayList<>()));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var clusterServers = serverService.findByClusterId(id);
-            if (clusterServers == null || clusterServers.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
-            }
-            com.example.AutoDeployApp.entity.Server master = clusterServers.stream()
-                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                    .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl get pods -A -o json";
-            String output = null;
-            try {
-                if (pem != null && !pem.isBlank()) {
-                    output = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-                } else {
-                    String pw = pwCache.get(master.getId());
-                    output = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
-                }
-            } catch (Exception e) {
-                return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-            }
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
-            try {
-                if (output == null || output.isBlank()) {
-                    return ResponseEntity.ok(Map.of("pods", result, "rawJson", ""));
-                }
-                var root = mapper.readTree(output);
-                var items = root.path("items");
-                if (items.isArray()) {
-                    for (var pod : items) {
-                        String ns = pod.path("metadata").path("namespace").asText("");
-                        String name = pod.path("metadata").path("name").asText("");
-                        String nodeName = pod.path("spec").path("nodeName").asText("");
-                        String phase = pod.path("status").path("phase").asText("");
-                        result.add(Map.of(
-                                "namespace", ns,
-                                "name", name,
-                                "node", nodeName,
-                                "status", phase));
-                    }
-                }
-                return ResponseEntity.ok(Map.of("pods", result));
-            } catch (Exception parseEx) {
-                // Nếu parse lỗi (ví dụ JSON bị cắt khi có pods fail), trả về pods rỗng +
-                // rawJson để UI không vỡ
-                return ResponseEntity.ok(Map.of("pods", result, "rawJson", output));
-            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to get pods: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 
     /**
-     * Liệt kê workloads: Deployments/StatefulSets/DaemonSets (tất cả namespaces)
+     * Liệt kê workloads: Deployments/StatefulSets/DaemonSets (sử dụng Fabric8
+     * client)
+     * Supports optional namespace query parameter to filter workloads
      */
     @GetMapping("/{id}/k8s/workloads")
-    public ResponseEntity<?> listWorkloads(@PathVariable Long id, HttpServletRequest request) {
+    public ResponseEntity<?> listWorkloads(@PathVariable Long id,
+            @RequestParam(required = false) String namespace,
+            HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            var deployments = kubernetesService.getDeployments(id, namespace);
+            var statefulSets = kubernetesService.getStatefulSets(id, namespace);
+            var daemonSets = kubernetesService.getDaemonSets(id, namespace);
 
-            // Kiểm tra master online trước
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.ok(Map.of(
-                        "deployments", new java.util.ArrayList<>(),
-                        "statefulSets", new java.util.ArrayList<>(),
-                        "daemonSets", new java.util.ArrayList<>(),
-                        "error", "Master server đang offline"));
-            }
+            // Parse Deployments
+            java.util.List<java.util.Map<String, Object>> deploymentList = deployments.getItems().stream()
+                    .map(dep -> parseWorkloadToMap(dep))
+                    .collect(java.util.stream.Collectors.toList());
 
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var clusterServers = serverService.findByClusterId(id);
-            if (clusterServers == null || clusterServers.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
-            }
-            com.example.AutoDeployApp.entity.Server master = clusterServers.stream()
-                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                    .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+            // Parse StatefulSets
+            java.util.List<java.util.Map<String, Object>> statefulSetList = statefulSets.getItems().stream()
+                    .map(sts -> parseWorkloadToMap(sts))
+                    .collect(java.util.stream.Collectors.toList());
 
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-
-            String cmdDeploy = "kubectl get deploy -A -o json";
-            String cmdSts = "kubectl get statefulset -A -o json";
-            String cmdDs = "kubectl get daemonset -A -o json";
-
-            String outDeploy, outSts, outDs;
-            try {
-                if (pem != null && !pem.isBlank()) {
-                    outDeploy = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmdDeploy, 15000);
-                    outSts = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmdSts, 15000);
-                    outDs = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmdDs, 15000);
-                } else {
-                    String pw = pwCache.get(master.getId());
-                    outDeploy = serverService.execCommand(master.getHost(), port, user, pw, cmdDeploy, 15000);
-                    outSts = serverService.execCommand(master.getHost(), port, user, pw, cmdSts, 15000);
-                    outDs = serverService.execCommand(master.getHost(), port, user, pw, cmdDs, 15000);
-                }
-            } catch (Exception e) {
-                return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-            }
-
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            java.util.List<java.util.Map<String, Object>> deployments = new java.util.ArrayList<>();
-            java.util.List<java.util.Map<String, Object>> statefulSets = new java.util.ArrayList<>();
-            java.util.List<java.util.Map<String, Object>> daemonSets = new java.util.ArrayList<>();
-
-            try {
-                var items = mapper.readTree(outDeploy).path("items");
-                if (items.isArray())
-                    for (var d : items) {
-                        int ready = d.path("status").path("readyReplicas").asInt(0);
-                        int replicas = d.path("status").path("replicas").asInt(0);
-                        deployments.add(Map.of(
-                                "namespace", d.path("metadata").path("namespace").asText(""),
-                                "name", d.path("metadata").path("name").asText(""),
-                                "ready", ready,
-                                // desired: giữ tương thích và cung cấp khóa chuẩn
-                                "desired", replicas,
-                                "replicas", replicas));
-                    }
-            } catch (Exception ignored) {
-            }
-            try {
-                var items = mapper.readTree(outSts).path("items");
-                if (items.isArray())
-                    for (var s : items) {
-                        int ready = s.path("status").path("readyReplicas").asInt(0);
-                        int replicas = s.path("status").path("replicas").asInt(0);
-                        statefulSets.add(Map.of(
-                                "namespace", s.path("metadata").path("namespace").asText(""),
-                                "name", s.path("metadata").path("name").asText(""),
-                                "ready", ready,
-                                "desired", replicas,
-                                "replicas", replicas));
-                    }
-            } catch (Exception ignored) {
-            }
-            try {
-                var items = mapper.readTree(outDs).path("items");
-                if (items.isArray())
-                    for (var ds : items) {
-                        daemonSets.add(Map.of(
-                                "namespace", ds.path("metadata").path("namespace").asText(""),
-                                "name", ds.path("metadata").path("name").asText(""),
-                                "ready", ds.path("status").path("numberReady").asInt(0),
-                                "desired", ds.path("status").path("desiredNumberScheduled").asInt(0)));
-                    }
-            } catch (Exception ignored) {
-            }
+            // Parse DaemonSets
+            java.util.List<java.util.Map<String, Object>> daemonSetList = daemonSets.getItems().stream()
+                    .map(ds -> parseWorkloadToMap(ds))
+                    .collect(java.util.stream.Collectors.toList());
 
             return ResponseEntity.ok(Map.of(
-                    "deployments", deployments,
-                    "statefulSets", statefulSets,
-                    "daemonSets", daemonSets));
+                    "deployments", deploymentList,
+                    "statefulSets", statefulSetList,
+                    "daemonSets", daemonSetList));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of(
+                        "error", "Kubernetes API server unavailable",
+                        "deployments", new java.util.ArrayList<>(),
+                        "statefulSets", new java.util.ArrayList<>(),
+                        "daemonSets", new java.util.ArrayList<>()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to get workloads: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 
     /**
-     * Liệt kê services (tất cả namespaces)
+     * Liệt kê services (sử dụng Fabric8 client)
+     * Supports optional namespace query parameter to filter services
      */
     @GetMapping("/{id}/k8s/services")
-    public ResponseEntity<?> listServices(@PathVariable Long id, HttpServletRequest request) {
+    public ResponseEntity<?> listServices(@PathVariable Long id,
+            @RequestParam(required = false) String namespace,
+            HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-
-            // Kiểm tra master online trước
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.ok(Map.of("services", new java.util.ArrayList<>(),
-                        "error", "Master server đang offline"));
-            }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var clusterServers = serverService.findByClusterId(id);
-            if (clusterServers == null || clusterServers.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
-            }
-            com.example.AutoDeployApp.entity.Server master = clusterServers.stream()
-                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                    .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl get svc -A -o json";
-            String output = null;
-            try {
-                if (pem != null && !pem.isBlank()) {
-                    output = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-                } else {
-                    String pw = pwCache.get(master.getId());
-                    output = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
-                }
-            } catch (Exception e) {
-                return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-            }
-
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
-            try {
-                var root = mapper.readTree(output);
-                var items = root.path("items");
-                if (items.isArray()) {
-                    for (var svc : items) {
-                        String namespace = svc.path("metadata").path("namespace").asText("");
-                        String name = svc.path("metadata").path("name").asText("");
-                        String type = svc.path("spec").path("type").asText("");
-                        String clusterIP = svc.path("spec").path("clusterIP").asText("");
-                        String age = calculateAge(svc.path("metadata").path("creationTimestamp").asText(""));
-
-                        // External-IP
-                        String externalIP = "";
-                        var status = svc.path("status").path("loadBalancer").path("ingress");
-                        if (status.isArray() && status.size() > 0) {
-                            var ingress = status.get(0);
-                            externalIP = ingress.path("hostname").asText("");
-                            if (externalIP.isBlank()) {
-                                externalIP = ingress.path("ip").asText("");
-                            }
-                        }
-                        if (externalIP.isBlank() && "ExternalName".equals(type)) {
-                            externalIP = svc.path("spec").path("externalName").asText("");
-                        }
-                        if (externalIP.isBlank() && "LoadBalancer".equals(type)) {
-                            externalIP = "<pending>";
-                        }
-
-                        // Ports
-                        String ports = "";
-                        var portsArray = svc.path("spec").path("ports");
-                        if (portsArray.isArray()) {
-                            java.util.List<String> portStrs = new java.util.ArrayList<>();
-                            for (var p : portsArray) {
-                                int targetPort = p.path("targetPort").asInt(0);
-                                int svcPort = p.path("port").asInt(0);
-                                String protocol = p.path("protocol").asText("TCP");
-                                if (targetPort > 0 && svcPort > 0) {
-                                    portStrs.add(svcPort + ":" + targetPort + "/" + protocol);
-                                } else if (svcPort > 0) {
-                                    portStrs.add(svcPort + "/" + protocol);
-                                }
-                            }
-                            ports = String.join(", ", portStrs);
-                        }
-
-                        result.add(Map.of(
-                                "namespace", namespace,
-                                "name", name,
-                                "type", type,
-                                "clusterIP", clusterIP,
-                                "externalIP", externalIP,
-                                "ports", ports,
-                                "age", age));
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            var serviceList = kubernetesService.getServices(id, namespace);
+            java.util.List<java.util.Map<String, Object>> result = serviceList.getItems().stream()
+                    .map(svc -> parseServiceToMap(svc))
+                    .collect(java.util.stream.Collectors.toList());
             return ResponseEntity.ok(Map.of("services", result));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of(
+                        "error", "Kubernetes API server unavailable",
+                        "services", new java.util.ArrayList<>()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to get services: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 
     /**
-     * Liệt kê ingress (tất cả namespaces)
+     * Liệt kê ingress (sử dụng Fabric8 client)
+     * Supports optional namespace query parameter to filter ingress
      */
     @GetMapping("/{id}/k8s/ingress")
-    public ResponseEntity<?> listIngress(@PathVariable Long id, HttpServletRequest request) {
+    public ResponseEntity<?> listIngress(@PathVariable Long id,
+            @RequestParam(required = false) String namespace,
+            HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-
-            // Kiểm tra master online trước
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.ok(Map.of("ingress", new java.util.ArrayList<>(),
-                        "error", "Master server đang offline"));
-            }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var clusterServers = serverService.findByClusterId(id);
-            if (clusterServers == null || clusterServers.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có servers nào."));
-            }
-            com.example.AutoDeployApp.entity.Server master = clusterServers.stream()
-                    .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                    .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl get ingress -A -o json";
-            String output = null;
-            try {
-                if (pem != null && !pem.isBlank()) {
-                    output = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-                } else {
-                    String pw = pwCache.get(master.getId());
-                    output = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
-                }
-            } catch (Exception e) {
-                return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-            }
-
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
-            try {
-                var root = mapper.readTree(output);
-                var items = root.path("items");
-                if (items.isArray()) {
-                    for (var ing : items) {
-                        String namespace = ing.path("metadata").path("namespace").asText("");
-                        String name = ing.path("metadata").path("name").asText("");
-                        String ingressClass = ing.path("spec").path("ingressClassName").asText("");
-                        String age = calculateAge(ing.path("metadata").path("creationTimestamp").asText(""));
-
-                        // Address
-                        String address = "";
-                        var statusIngress = ing.path("status").path("loadBalancer").path("ingress");
-                        if (statusIngress.isArray() && statusIngress.size() > 0) {
-                            var in = statusIngress.get(0);
-                            address = in.path("hostname").asText("");
-                            if (address.isBlank()) {
-                                address = in.path("ip").asText("");
-                            }
-                        }
-
-                        // Hosts & Ports
-                        String hosts = "";
-                        String ports = "";
-                        var rules = ing.path("spec").path("rules");
-                        if (rules.isArray()) {
-                            java.util.List<String> hostList = new java.util.ArrayList<>();
-                            for (var rule : rules) {
-                                String host = rule.path("host").asText("");
-                                if (!host.isBlank()) {
-                                    hostList.add(host);
-                                }
-                                // Ports from TLS
-                                var tls = ing.path("spec").path("tls");
-                                if (tls.isArray() && tls.size() > 0) {
-                                    ports = "80, 443";
-                                } else if (ports.isBlank()) {
-                                    ports = "80";
-                                }
-                            }
-                            hosts = String.join(", ", hostList);
-                        }
-                        if (hosts.isBlank()) {
-                            hosts = "*";
-                        }
-
-                        result.add(Map.of(
-                                "namespace", namespace,
-                                "name", name,
-                                "class", ingressClass,
-                                "host", hosts,
-                                "address", address,
-                                "ports", ports,
-                                "age", age));
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            var ingressList = kubernetesService.getIngress(id, namespace);
+            java.util.List<java.util.Map<String, Object>> result = ingressList.getItems().stream()
+                    .map(ing -> parseIngressToMap(ing))
+                    .collect(java.util.stream.Collectors.toList());
             return ResponseEntity.ok(Map.of("ingress", result));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of(
+                        "error", "Kubernetes API server unavailable",
+                        "ingress", new java.util.ArrayList<>()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to get ingress: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -866,35 +412,28 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            var pod = kubernetesService.getPod(id, namespace, name);
+            if (pod == null) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Pod not found: " + name + " in namespace " + namespace));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " get pod " + name + " -o yaml";
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            String formatParam = request.getParameter("format");
+            if (formatParam != null && formatParam.equalsIgnoreCase("yaml")) {
+                String yamlOutput = convertToYaml(pod);
+                return ResponseEntity.ok(Map.of("output", yamlOutput, "format", "yaml"));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(pod);
+            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Pod not found: " + name + " in namespace " + namespace));
+            }
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe pod: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -909,35 +448,23 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            var service = kubernetesService.getService(id, namespace, name);
+            if (service == null) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " get svc " + name + " -o yaml";
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(service);
+            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe service: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -958,35 +485,18 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa Service trong namespace hệ thống"));
             }
 
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            kubernetesService.deleteService(id, namespace, name);
+            String output = String.format("service \"%s\" deleted", name);
+            return ResponseEntity.ok(Map.of("success", true, "output", output));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " delete svc " + name;
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete service: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1001,35 +511,23 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            var ingress = kubernetesService.getIngress(id, namespace, name);
+            if (ingress == null) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " get ingress " + name + " -o yaml";
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(ingress);
+            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe ingress: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1050,35 +548,18 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa Ingress trong namespace hệ thống"));
             }
 
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            kubernetesService.deleteIngress(id, namespace, name);
+            String output = String.format("ingress.networking.k8s.io \"%s\" deleted", name);
+            return ResponseEntity.ok(Map.of("success", true, "output", output));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " delete ingress " + name;
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete ingress: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1097,35 +578,18 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa pod trong namespace hệ thống"));
             }
 
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            kubernetesService.deletePod(id, namespace, name);
+            String output = String.format("pod \"%s\" deleted", name);
+            return ResponseEntity.ok(Map.of("success", true, "output", output));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Pod not found: " + name + " in namespace " + namespace));
             }
-
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " delete pod " + name;
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete pod: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1138,40 +602,43 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
-            }
-
             String t = type == null ? "" : type.toLowerCase();
             if (!(t.equals("deployment") || t.equals("statefulset") || t.equals("daemonset"))) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Loại workload không hợp lệ"));
             }
 
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " get " + t + " " + name + " -o yaml";
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 15000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 15000);
+            Object workload = null;
+            switch (t) {
+                case "deployment":
+                    workload = kubernetesService.getDeployment(id, namespace, name);
+                    break;
+                case "statefulset":
+                    workload = kubernetesService.getStatefulSet(id, namespace, name);
+                    break;
+                case "daemonset":
+                    workload = kubernetesService.getDaemonSet(id, namespace, name);
+                    break;
+                default:
+                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid workload type: " + type));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+
+            if (workload == null) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", type + " not found: " + name + " in namespace " + namespace));
+            }
+
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(workload);
+            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", type + " not found: " + name + " in namespace " + namespace));
+            }
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe workload: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1189,6 +656,10 @@ public class ClusterAdminController {
         }
     }
 
+    /**
+     * Scale workload (sử dụng Fabric8 client)
+     * Supports Deployment and StatefulSet only
+     */
     @PostMapping("/{id}/k8s/{type}/{namespace}/{name}/scale")
     public ResponseEntity<?> scaleWorkload(@PathVariable Long id,
             @PathVariable String type,
@@ -1197,48 +668,62 @@ public class ClusterAdminController {
             @org.springframework.web.bind.annotation.RequestBody ScaleRequest body,
             HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
+            String t = type == null ? "" : type.toLowerCase();
+
+            // Validate workload type
+            if (!(t.equals("deployment") || t.equals("statefulset"))) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Chỉ hỗ trợ scale Deployment/StatefulSet. DaemonSet không thể scale."));
             }
 
-            String t = type == null ? "" : type.toLowerCase();
-            if (!(t.equals("deployment") || t.equals("statefulset"))) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Chỉ hỗ trợ scale Deployment/StatefulSet"));
-            }
+            // Prevent scaling in system namespaces
             String nsLower = namespace == null ? "" : namespace.toLowerCase();
-            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
+            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") ||
+                    nsLower.equals("kube-node-lease")) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Không cho phép scale trong namespace hệ thống"));
             }
+
+            // Validate replicas
             if (body == null || body.replicas == null || body.replicas < 0) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Giá trị replicas không hợp lệ"));
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Giá trị replicas không hợp lệ. Phải >= 0"));
             }
 
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
+            int replicas = body.replicas;
 
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " scale " + t + "/" + name + " --replicas=" + body.replicas;
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            switch (t) {
+                case "deployment":
+                    kubernetesService.scaleDeployment(id, namespace, name, replicas);
+                    break;
+                case "statefulset":
+                    kubernetesService.scaleStatefulSet(id, namespace, name, replicas);
+                    break;
+                default:
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Invalid workload type: " + type));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "type", type,
+                    "namespace", namespace,
+                    "name", name,
+                    "replicas", replicas,
+                    "message", "Scaled " + type + " " + name + " to " + replicas + " replicas"));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error",
+                                "Workload not found: " + type + "/" + name + " in namespace " + namespace));
+            }
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503)
+                        .body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Failed to scale workload: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1251,45 +736,46 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var session = request.getSession(false);
-            if (!isMasterOnline(id, session)) {
-                return ResponseEntity.status(503).body(Map.of("error", "Master server đang offline"));
-            }
-
             String t = type == null ? "" : type.toLowerCase();
             if (!(t.equals("deployment") || t.equals("statefulset") || t.equals("daemonset"))) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Chỉ cho phép xóa Deployment/StatefulSet/DaemonSet"));
             }
+
             String nsLower = namespace == null ? "" : namespace.toLowerCase();
             if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Không cho phép xóa trong namespace hệ thống"));
             }
 
-            java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            var masters = serverService.findByClusterId(id);
-            var master = masters == null ? null
-                    : masters.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                            .findFirst().orElse(null);
-            if (master == null)
-                return ResponseEntity.badRequest().body(Map.of("error", "Không tìm thấy MASTER"));
-
-            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
-            int port = master.getPort() != null ? master.getPort() : 22;
-            String user = master.getUsername();
-            String cmd = "kubectl -n " + namespace + " delete " + t + " " + name;
-
-            String out;
-            if (pem != null && !pem.isBlank()) {
-                out = serverService.execCommandWithKey(master.getHost(), port, user, pem, cmd, 20000);
-            } else {
-                String pw = pwCache.get(master.getId());
-                out = serverService.execCommand(master.getHost(), port, user, pw, cmd, 20000);
+            String output;
+            switch (t) {
+                case "deployment":
+                    kubernetesService.deleteDeployment(id, namespace, name);
+                    output = String.format("deployment.apps \"%s\" deleted", name);
+                    break;
+                case "statefulset":
+                    kubernetesService.deleteStatefulSet(id, namespace, name);
+                    output = String.format("statefulset.apps \"%s\" deleted", name);
+                    break;
+                case "daemonset":
+                    kubernetesService.deleteDaemonSet(id, namespace, name);
+                    output = String.format("daemonset.apps \"%s\" deleted", name);
+                    break;
+                default:
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Invalid workload type: " + type));
             }
-            if (out == null)
-                out = "";
-            return ResponseEntity.ok(Map.of("output", out));
+
+            return ResponseEntity.ok(Map.of("success", true, "output", output));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", type + " not found: " + name + " in namespace " + namespace));
+            }
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete workload: " + e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
@@ -1663,6 +1149,197 @@ public class ClusterAdminController {
     }
 
     /**
+     * Parse Pod object thành Map format cho API response
+     */
+    private Map<String, Object> parsePodToMap(Pod pod) {
+        java.util.Map<String, Object> map = new java.util.HashMap<>();
+        map.put("namespace", pod.getMetadata().getNamespace());
+        map.put("name", pod.getMetadata().getName());
+        map.put("node",
+                pod.getSpec() != null && pod.getSpec().getNodeName() != null
+                        ? pod.getSpec().getNodeName()
+                        : "");
+        map.put("status", pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown");
+
+        // Thêm container statuses nếu có
+        if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
+            java.util.List<Map<String, Object>> containerStatuses = new java.util.ArrayList<>();
+            for (ContainerStatus cs : pod.getStatus().getContainerStatuses()) {
+                java.util.Map<String, Object> csMap = new java.util.HashMap<>();
+                csMap.put("name", cs.getName());
+                csMap.put("ready", cs.getReady());
+                csMap.put("restartCount", cs.getRestartCount());
+
+                // Trích xuất trạng thái container
+                String state = extractContainerState(cs);
+                csMap.put("state", state);
+                containerStatuses.add(csMap);
+            }
+            map.put("containerStatuses", containerStatuses);
+        }
+
+        return map;
+    }
+
+    /**
+     * Trích xuất trạng thái container từ ContainerStatus
+     */
+    private String extractContainerState(ContainerStatus cs) {
+        if (cs.getState() == null) {
+            return "Unknown";
+        }
+        if (cs.getState().getRunning() != null) {
+            return "Running";
+        } else if (cs.getState().getWaiting() != null) {
+            return "Waiting: " + cs.getState().getWaiting().getReason();
+        } else if (cs.getState().getTerminated() != null) {
+            return "Terminated: " + cs.getState().getTerminated().getReason();
+        }
+        return "Unknown";
+    }
+
+    /**
+     * Parse Service object thành Map format cho API response
+     */
+    private Map<String, Object> parseServiceToMap(io.fabric8.kubernetes.api.model.Service svc) {
+        java.util.Map<String, Object> map = new java.util.HashMap<>();
+        map.put("namespace", svc.getMetadata().getNamespace());
+        map.put("name", svc.getMetadata().getName());
+
+        // Type
+        String type = svc.getSpec() != null && svc.getSpec().getType() != null ? svc.getSpec().getType()
+                : "ClusterIP";
+        map.put("type", type);
+
+        // ClusterIP
+        String clusterIP = svc.getSpec() != null && svc.getSpec().getClusterIP() != null
+                ? svc.getSpec().getClusterIP()
+                : "";
+        map.put("clusterIP", clusterIP);
+
+        // Age
+        String age = "";
+        if (svc.getMetadata() != null && svc.getMetadata().getCreationTimestamp() != null) {
+            age = calculateAge(svc.getMetadata().getCreationTimestamp().toString());
+        }
+        map.put("age", age);
+
+        // External IP
+        String externalIP = "";
+        if (svc.getStatus() != null && svc.getStatus().getLoadBalancer() != null &&
+                svc.getStatus().getLoadBalancer().getIngress() != null &&
+                !svc.getStatus().getLoadBalancer().getIngress().isEmpty()) {
+            var ingress = svc.getStatus().getLoadBalancer().getIngress().get(0);
+            if (ingress.getHostname() != null && !ingress.getHostname().isEmpty()) {
+                externalIP = ingress.getHostname();
+            } else if (ingress.getIp() != null && !ingress.getIp().isEmpty()) {
+                externalIP = ingress.getIp();
+            }
+        }
+        if (externalIP.isEmpty() && "ExternalName".equals(type) &&
+                svc.getSpec() != null && svc.getSpec().getExternalName() != null) {
+            externalIP = svc.getSpec().getExternalName();
+        }
+        if (externalIP.isEmpty() && "LoadBalancer".equals(type)) {
+            externalIP = "<pending>";
+        }
+        map.put("externalIP", externalIP);
+
+        // Ports
+        java.util.List<String> portStrs = new java.util.ArrayList<>();
+        if (svc.getSpec() != null && svc.getSpec().getPorts() != null) {
+            for (var port : svc.getSpec().getPorts()) {
+                int svcPort = port.getPort() != null ? port.getPort() : 0;
+                String protocol = port.getProtocol() != null ? port.getProtocol() : "TCP";
+
+                if (port.getTargetPort() != null) {
+                    int targetPort = 0;
+                    if (port.getTargetPort().getIntVal() != null) {
+                        targetPort = port.getTargetPort().getIntVal();
+                    } else if (port.getTargetPort().getStrVal() != null) {
+                        try {
+                            targetPort = Integer.parseInt(port.getTargetPort().getStrVal());
+                        } catch (NumberFormatException ignored) {
+                            // Giữ nguyên dạng string nếu không phải số
+                            portStrs.add(
+                                    svcPort + ":" + port.getTargetPort().getStrVal() + "/" + protocol);
+                            continue;
+                        }
+                    }
+                    if (targetPort > 0 && svcPort > 0) {
+                        portStrs.add(svcPort + ":" + targetPort + "/" + protocol);
+                    } else if (svcPort > 0) {
+                        portStrs.add(svcPort + "/" + protocol);
+                    }
+                } else if (svcPort > 0) {
+                    portStrs.add(svcPort + "/" + protocol);
+                }
+            }
+        }
+        map.put("ports", String.join(", ", portStrs));
+
+        return map;
+    }
+
+    /**
+     * Parse Ingress object thành Map format cho API response
+     */
+    private Map<String, Object> parseIngressToMap(Ingress ing) {
+        java.util.Map<String, Object> map = new java.util.HashMap<>();
+        map.put("namespace", ing.getMetadata().getNamespace());
+        map.put("name", ing.getMetadata().getName());
+
+        // Ingress Class
+        String ingressClass = ing.getSpec() != null && ing.getSpec().getIngressClassName() != null
+                ? ing.getSpec().getIngressClassName()
+                : "";
+        map.put("class", ingressClass);
+
+        // Age
+        String age = "";
+        if (ing.getMetadata() != null && ing.getMetadata().getCreationTimestamp() != null) {
+            age = calculateAge(ing.getMetadata().getCreationTimestamp().toString());
+        }
+        map.put("age", age);
+
+        // Address (từ LoadBalancer status)
+        String address = "";
+        if (ing.getStatus() != null && ing.getStatus().getLoadBalancer() != null &&
+                ing.getStatus().getLoadBalancer().getIngress() != null &&
+                !ing.getStatus().getLoadBalancer().getIngress().isEmpty()) {
+            var lbIngress = ing.getStatus().getLoadBalancer().getIngress().get(0);
+            if (lbIngress.getHostname() != null && !lbIngress.getHostname().isEmpty()) {
+                address = lbIngress.getHostname();
+            } else if (lbIngress.getIp() != null && !lbIngress.getIp().isEmpty()) {
+                address = lbIngress.getIp();
+            }
+        }
+        map.put("address", address);
+
+        // Hosts & Ports
+        java.util.List<String> hostList = new java.util.ArrayList<>();
+        String ports = "";
+        if (ing.getSpec() != null && ing.getSpec().getRules() != null) {
+            for (var rule : ing.getSpec().getRules()) {
+                if (rule.getHost() != null && !rule.getHost().isEmpty()) {
+                    hostList.add(rule.getHost());
+                }
+            }
+            // Ports từ TLS
+            if (ing.getSpec().getTls() != null && !ing.getSpec().getTls().isEmpty()) {
+                ports = "80, 443";
+            } else if (ports.isEmpty()) {
+                ports = "80";
+            }
+        }
+        String hosts = hostList.isEmpty() ? "*" : String.join(", ", hostList);
+        map.put("host", hosts);
+        map.put("ports", ports);
+
+        return map;
+    }
+
+    /**
      * Parse memory value to bytes
      * Supports G, M, K suffixes
      */
@@ -1907,15 +1584,9 @@ public class ClusterAdminController {
                                         "version", ""));
                     }
 
-                    // Chỉ load metrics và version cho nodes online
+                    // Chỉ load metrics cho nodes online
                     return getServerMetricsAsync(serverDataItem, pwCache)
                             .thenApply(metrics -> {
-                                // Lấy phiên bản Kubernetes từ master node (chỉ một lần)
-                                String version = "";
-                                if (serverDataItem.role == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
-                                    version = getKubernetesVersion(serverDataItem, pwCache);
-                                }
-
                                 return java.util.Map.<String, Object>of(
                                         "id", serverDataItem.id,
                                         "ip", serverDataItem.host,
@@ -1926,14 +1597,30 @@ public class ClusterAdminController {
                                         "ram", metrics.get("ram"),
                                         "ramPercentage", metrics.get("ramPercentage"),
                                         "disk", metrics.get("disk"),
-                                        "version", version);
+                                        "version", ""); // Version sẽ được lấy từ cluster level
                             });
                 })
                 .toList();
 
         // Chờ tất cả futures hoàn thành và thu thập kết quả
         var nodes = new java.util.ArrayList<java.util.Map<String, Object>>();
+
+        // Lấy Kubernetes version từ cluster (sử dụng Fabric8 client)
         String version = "";
+        try {
+            version = kubernetesService.getKubernetesVersion(id);
+        } catch (Exception e) {
+            System.err.println("Lỗi lấy Kubernetes version: " + e.getMessage());
+            // Fallback: thử lấy từ SSH nếu API không available
+            var masterServer = serverData.stream()
+                    .filter(s -> s.role == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER &&
+                            s.isConnected &&
+                            s.status != com.example.AutoDeployApp.entity.Server.ServerStatus.OFFLINE)
+                    .findFirst();
+            if (masterServer.isPresent()) {
+                version = getKubernetesVersion(masterServer.get(), pwCache);
+            }
+        }
 
         // Xử lý futures với cách ly lỗi
         // Tối ưu: xử lý offline nodes trước (đã completed ngay), sau đó xử lý online
@@ -1957,12 +1644,6 @@ public class ClusterAdminController {
                 }
 
                 nodes.add(nodeData);
-
-                // Thu thập phiên bản từ master node
-                String nodeVersion = (String) nodeData.get("version");
-                if (version.isBlank() && nodeVersion != null && !nodeVersion.isBlank()) {
-                    version = nodeVersion;
-                }
             } catch (java.util.concurrent.TimeoutException e) {
                 // Timeout riêng cho online nodes - fallback nhanh
                 System.err.println("Timeout lấy metrics cho " + serverDataItem.host);
@@ -2008,41 +1689,6 @@ public class ClusterAdminController {
                 "status", sum.status(),
                 "version", version,
                 "nodes", nodes));
-    }
-
-    /**
-     * Kiểm tra xem master server có online không
-     */
-    private boolean isMasterOnline(Long clusterId, jakarta.servlet.http.HttpSession session) {
-        if (session == null)
-            return false;
-
-        var clusterServers = serverService.findByClusterId(clusterId);
-        if (clusterServers == null || clusterServers.isEmpty())
-            return false;
-
-        var master = clusterServers.stream()
-                .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
-                .findFirst()
-                .orElse(null);
-        if (master == null)
-            return false;
-
-        java.util.Set<Long> connectedIds = new java.util.HashSet<>();
-        Object connectedAttr = session.getAttribute("CONNECTED_SERVERS");
-        if (connectedAttr instanceof java.util.Set<?> set) {
-            for (Object o : set) {
-                if (o instanceof Number n) {
-                    connectedIds.add(n.longValue());
-                } else if (o instanceof String str) {
-                    try {
-                        connectedIds.add(Long.parseLong(str));
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-        }
-        return connectedIds.contains(master.getId());
     }
 
     /**
@@ -2214,6 +1860,69 @@ public class ClusterAdminController {
             }
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /**
+     * Parse workload (Deployment/StatefulSet/DaemonSet) thành Map chung
+     */
+    private Map<String, Object> parseWorkloadToMap(Object workload) {
+        java.util.Map<String, Object> map = new java.util.HashMap<>();
+        if (workload instanceof Deployment dep) {
+            map.put("namespace", dep.getMetadata().getNamespace());
+            map.put("name", dep.getMetadata().getName());
+            int ready = dep.getStatus() != null && dep.getStatus().getReadyReplicas() != null
+                    ? dep.getStatus().getReadyReplicas()
+                    : 0;
+            int replicas = dep.getSpec() != null && dep.getSpec().getReplicas() != null
+                    ? dep.getSpec().getReplicas()
+                    : 0;
+            map.put("ready", ready);
+            map.put("desired", replicas);
+            map.put("replicas", replicas);
+            return map;
+        }
+        if (workload instanceof StatefulSet sts) {
+            map.put("namespace", sts.getMetadata().getNamespace());
+            map.put("name", sts.getMetadata().getName());
+            int ready = sts.getStatus() != null && sts.getStatus().getReadyReplicas() != null
+                    ? sts.getStatus().getReadyReplicas()
+                    : 0;
+            int replicas = sts.getSpec() != null && sts.getSpec().getReplicas() != null
+                    ? sts.getSpec().getReplicas()
+                    : 0;
+            map.put("ready", ready);
+            map.put("desired", replicas);
+            map.put("replicas", replicas);
+            return map;
+        }
+        if (workload instanceof DaemonSet ds) {
+            map.put("namespace", ds.getMetadata().getNamespace());
+            map.put("name", ds.getMetadata().getName());
+            int ready = ds.getStatus() != null && ds.getStatus().getNumberReady() != null
+                    ? ds.getStatus().getNumberReady()
+                    : 0;
+            int desired = ds.getStatus() != null && ds.getStatus().getDesiredNumberScheduled() != null
+                    ? ds.getStatus().getDesiredNumberScheduled()
+                    : 0;
+            map.put("ready", ready);
+            map.put("desired", desired);
+            return map;
+        }
+        throw new IllegalArgumentException(
+                "Unsupported workload type: " + (workload != null ? workload.getClass() : "null"));
+    }
+
+    /**
+     * Chuyển đối tượng K8s sang YAML (dùng cho export/describe)
+     */
+    private String convertToYaml(Object k8sObject) {
+        try {
+            var yamlMapper = new com.fasterxml.jackson.databind.ObjectMapper(
+                    new com.fasterxml.jackson.dataformat.yaml.YAMLFactory());
+            return yamlMapper.writeValueAsString(k8sObject);
+        } catch (Exception e) {
+            return "# Failed to convert to YAML: " + e.getMessage();
         }
     }
 }

@@ -342,7 +342,6 @@ function resetClusterData() {
 
   console.log('Cluster data has been reset - Chi tiết Cluster, Nodes, Chi tiết server, K8s resources đã được xóa');
 }
-
 async function showClusterDetail(clusterId) {
   // Set current cluster ID for Ansible functions
   currentClusterId = clusterId;
@@ -576,21 +575,28 @@ async function showClusterDetail(clusterId) {
   });
 
   // Sau khi render xong, cập nhật K8s status và metrics
+  let hasK8sData = false;
+  let k8sResp = null;
   try {
-    const k8sResp = await k8sNodesPromise;
-    if (k8sResp && Array.isArray(k8sResp.nodes)) {
+    k8sResp = await k8sNodesPromise;
+    if (k8sResp && Array.isArray(k8sResp.nodes) && k8sResp.nodes.length > 0) {
+      hasK8sData = true;
       k8sResp.nodes.forEach(nd => {
-        if (nd.internalIP) {
-          k8sNodeByIP.set(String(nd.internalIP), nd);
+        // Backend trả về k8sInternalIP, không phải internalIP
+        const ip = nd.k8sInternalIP || nd.internalIP;
+        if (ip) {
+          k8sNodeByIP.set(String(ip), nd);
         }
         if (nd.name) {
           k8sNodeByName.set(String(nd.name), nd);
         }
       });
-      try { console.info(`[k8s] nodes loaded: ${k8sResp.nodes.length}`); } catch (_) { }
+      try { console.info(`[k8s] nodes loaded: ${k8sResp.nodes.length}, IPs:`, Array.from(k8sNodeByIP.keys())); } catch (_) { }
     }
   } catch (e) {
     // suppress debug logs
+    hasK8sData = false;
+    k8sResp = null;
   }
 
   // Cập nhật K8s status cho các servers
@@ -610,8 +616,18 @@ async function showClusterDetail(clusterId) {
       if (isOnline) {
         // Node đang online (connected hoặc status = ONLINE)
         // Thử lấy K8s status nếu có (chỉ khi master online và có k8sResp)
-        const nd = k8sNodeByIP.get(String(n.ip)) || k8sNodeByName.get(String(n.ip));
+        // Match theo IP (server IP với k8sInternalIP) hoặc theo name
+        const nd = k8sNodeByIP.get(String(n.ip)) || 
+                   k8sNodeByName.get(String(n.ip)) || 
+                   k8sNodeByName.get(String(n.hostname || n.ip));
         const k8sStatus = nd?.k8sStatus;
+        
+        // Debug: log để kiểm tra matching (chỉ khi có K8s data nhưng không match được)
+        if (isOnline && hasK8sData && k8sNodeByIP.size > 0 && !nd) {
+          try {
+            console.debug(`[k8s] Node ${n.ip} not found in K8s nodes. Available IPs:`, Array.from(k8sNodeByIP.keys()));
+          } catch (_) {}
+        }
         
         if (k8sStatus === 'Ready') { 
           // Có K8s status và Ready
@@ -621,9 +637,9 @@ async function showClusterDetail(clusterId) {
           // Có K8s status nhưng NotReady
           statusLabel = 'NotReady'; 
           statusBadge = 'warning text-dark'; 
-        } else if (k8sStatus !== undefined && k8sStatus !== null) {
-          // Có K8s status nhưng không phải Ready/NotReady
-          statusLabel = 'UNREGISTERED';
+        } else if (k8sStatus !== undefined && k8sStatus !== null && k8sStatus !== 'Unknown') {
+          // Có K8s status nhưng không phải Ready/NotReady/Unknown
+          statusLabel = String(k8sStatus);
           statusBadge = 'dark';
         } else {
           // Không có K8s status (có thể master offline hoặc node chưa join cluster)
@@ -733,6 +749,67 @@ async function showClusterDetail(clusterId) {
       }
     }
   });
+
+  // Hiển thị các node có trong K8s nhưng không có trong DB (orphan nodes)
+  if (hasK8sData && k8sResp && k8sResp.nodes && k8sNodeByIP.size > 0) {
+    const dbNodeIPs = new Set(detail.nodes.map(n => String(n.ip)));
+    const orphanNodes = [];
+    
+    // Tìm các node K8s không có trong DB
+    k8sResp.nodes.forEach(nd => {
+      const ip = nd.k8sInternalIP || nd.internalIP;
+      if (ip && !dbNodeIPs.has(String(ip))) {
+        // Kiểm tra xem có match theo name không
+        const matchedByName = detail.nodes.some(n => 
+          String(n.hostname || n.ip) === String(nd.name)
+        );
+        if (!matchedByName) {
+          orphanNodes.push(nd);
+        }
+      }
+    });
+    
+    // Hiển thị orphan nodes nếu có
+    if (orphanNodes.length > 0) {
+      const tbody = document.getElementById('cd-nodes-tbody');
+      if (tbody) {
+        orphanNodes.forEach(nd => {
+          const ip = nd.k8sInternalIP || nd.internalIP || 'N/A';
+          const name = nd.name || 'Unknown';
+          const k8sStatus = nd.k8sStatus || 'Unknown';
+          const statusBadge = k8sStatus === 'Ready' ? 'success' : 
+                             k8sStatus === 'NotReady' ? 'warning text-dark' : 'dark';
+          const roles = (nd.k8sRoles || []).join(', ') || 'Unknown';
+          
+          const tr = document.createElement('tr');
+          tr.className = 'table-warning'; // Highlight orphan nodes
+          tr.innerHTML = `
+            <td title="Node không có trong database">${ip}</td>
+            <td><span class="badge bg-info">${roles}</span></td>
+            <td>
+              <span class="badge bg-${statusBadge}" title="Node có trong K8s nhưng không có trong DB">
+                ${k8sStatus === 'Ready' ? 'Ready' : k8sStatus === 'NotReady' ? 'NotReady' : k8sStatus}
+              </span>
+              <span class="badge bg-danger ms-1" title="Node không có trong database">ORPHAN</span>
+            </td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td class="text-nowrap">
+              <span class="text-muted small" title="Node: ${name}">${name}</span>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+      
+      // Log orphan nodes
+      try {
+        console.warn(`[cluster] Found ${orphanNodes.length} orphan K8s nodes (not in DB):`, 
+          orphanNodes.map(n => n.name || (n.k8sInternalIP || n.internalIP)));
+      } catch (_) {}
+    }
+  }
 
   // Log tóm tắt quan trọng, không lộ dữ liệu máy chủ
   try {
@@ -1024,7 +1101,6 @@ function resetAddNodeModal() {
     addNewBtn.style.display = 'inline-block';
   }
 }
-
 // Load danh sách nodes chưa thuộc cluster nào
 async function loadExistingNodes() {
   const loadingEl = document.getElementById('existing-nodes-loading');
@@ -1806,7 +1882,6 @@ async function createServer(ev) {
     btn.disabled = false; btn.textContent = 'Thêm máy chủ';
   }
 }
-
 async function saveServer(id, btn) {
   const row = btn ? btn.closest('tr') : null;
   const q = (sel) => row ? row.querySelector(sel) : document.querySelector(sel);
@@ -2580,7 +2655,6 @@ async function showAnsibleInstallModalForServer(clusterId, targetHost, isReinsta
     alert('Lỗi khi mở modal cài đặt: ' + error.message);
   }
 }
-
 // Show Ansible Install Modal
 async function showAnsibleInstallModal(clusterId) {
   currentClusterId = clusterId;
@@ -3130,7 +3204,6 @@ function ansibleInstallComplete() {
   // Reset chế độ uninstall
   window.isUninstallMode = false;
 }
-
 // Event listeners for Ansible
 document.addEventListener('DOMContentLoaded', function () {
   // Start installation button
@@ -4424,30 +4497,61 @@ document.addEventListener('DOMContentLoaded', function () {
     modal.show();
   }
 
-  // Function to show alert messages
+  // Function to show alert messages (singleton at top-right)
   function showAlert(type, message) {
-    // Create alert element
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type === 'error' ? 'danger' : type === 'warning' ? 'warning' : type === 'success' ? 'success' : 'info'} alert-dismissible fade show`;
-    alertDiv.style.position = 'fixed';
-    alertDiv.style.top = '20px';
-    alertDiv.style.right = '20px';
-    alertDiv.style.zIndex = '9999';
-    alertDiv.style.minWidth = '300px';
+    try {
+      const cls = (type === 'error') ? 'danger' : (type === 'warning' ? 'warning' : (type === 'success' ? 'success' : 'info'));
 
-    alertDiv.innerHTML = `
-      ${message}
-      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-
-    document.body.appendChild(alertDiv);
-
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-      if (alertDiv.parentNode) {
-        alertDiv.remove();
+      // Create container if missing
+      let container = document.getElementById('global-alert-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'global-alert-container';
+        container.style.position = 'fixed';
+        container.style.top = '20px';
+        container.style.right = '20px';
+        container.style.zIndex = '9999';
+        container.style.minWidth = '300px';
+        document.body.appendChild(container);
       }
-    }, 5000);
+
+      // Reuse single alert element
+      if (!window.__GLOBAL_ALERT__) {
+        const el = document.createElement('div');
+        el.id = 'global-alert';
+        el.className = `alert alert-${cls} alert-dismissible fade show`;
+        el.innerHTML = `
+          ${message}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        container.replaceChildren(el);
+        window.__GLOBAL_ALERT__ = el;
+      } else {
+        const el = window.__GLOBAL_ALERT__;
+        el.className = `alert alert-${cls} alert-dismissible fade show`;
+        el.innerHTML = `
+          ${message}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        if (!el.parentNode) container.appendChild(el);
+      }
+
+      // Reset existing timeout and set a new one
+      if (window.__GLOBAL_ALERT_TO__) {
+        clearTimeout(window.__GLOBAL_ALERT_TO__);
+      }
+      window.__GLOBAL_ALERT_TO__ = setTimeout(() => {
+        const el = window.__GLOBAL_ALERT__;
+        if (el && el.parentNode) {
+          el.remove();
+        }
+        window.__GLOBAL_ALERT__ = null;
+        window.__GLOBAL_ALERT_TO__ = null;
+      }, 5000);
+    } catch (_) {
+      // Fallback to native alert to avoid losing critical messages
+      try { alert(typeof message === 'string' ? message.replace(/<[^>]*>/g, '') : String(message)); } catch (__) {}
+    }
   }
 
   // Function to verify ansible connectivity
@@ -4615,7 +4719,6 @@ document.addEventListener('DOMContentLoaded', function () {
       textarea.classList.remove('error', 'success');
     });
   }
-
   // Function to update config status panel
   function updateConfigStatus(status, message, lastCheck = null) {
     const statusPanel = document.getElementById('config-status-panel');
@@ -4853,7 +4956,12 @@ async function loadPods(token) {
       renderPods();
       updatePodsCount();
     } else {
-      showPodsError(data.error || 'Lỗi tải pods');
+      // Xử lý lỗi 503 - Kubernetes API unavailable
+      if (response.status === 503) {
+        showPodsError(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+      } else {
+        showPodsError(data.error || 'Lỗi tải pods');
+      }
     }
   } catch (error) {
     showPodsError('Lỗi kết nối: ' + error.message);
@@ -4873,7 +4981,12 @@ async function loadNamespaces(token) {
       updateNamespacesCount();
       updatePodsNamespaceFilter();
     } else {
-      showNamespacesError(data.error || 'Lỗi tải namespaces');
+      // Xử lý lỗi 503 - Kubernetes API unavailable
+      if (response.status === 503) {
+        showNamespacesError(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+      } else {
+        showNamespacesError(data.error || 'Lỗi tải namespaces');
+      }
     }
   } catch (error) {
     showNamespacesError('Lỗi kết nối: ' + error.message);
@@ -4896,7 +5009,12 @@ async function loadWorkloads(token) {
       renderWorkloads();
       updateWorkloadsCount();
     } else {
-      showWorkloadsError(data.error || 'Lỗi tải workloads');
+      // Xử lý lỗi 503 - Kubernetes API unavailable
+      if (response.status === 503) {
+        showWorkloadsError(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+      } else {
+        showWorkloadsError(data.error || 'Lỗi tải workloads');
+      }
     }
   } catch (error) {
     showWorkloadsError('Lỗi kết nối: ' + error.message);
@@ -4934,7 +5052,12 @@ async function loadNetworkingResources(clusterId) {
       renderServices();
       updateServicesCount();
     } else {
-      showServicesError(data1.error || 'Lỗi tải services');
+      // Xử lý lỗi 503 - Kubernetes API unavailable
+      if (response1.status === 503) {
+        showServicesError(data1.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+      } else {
+        showServicesError(data1.error || 'Lỗi tải services');
+      }
     }
 
     if (response2.ok) {
@@ -4942,7 +5065,12 @@ async function loadNetworkingResources(clusterId) {
       renderIngress();
       updateIngressCount();
     } else {
-      showIngressError(data2.error || 'Lỗi tải ingress');
+      // Xử lý lỗi 503 - Kubernetes API unavailable
+      if (response2.status === 503) {
+        showIngressError(data2.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+      } else {
+        showIngressError(data2.error || 'Lỗi tải ingress');
+      }
     }
   } catch (error) {
     // Silent error handling
@@ -5097,7 +5225,14 @@ function showNetworkingOfflineMessage() {
 function describeService(namespace, name) {
   if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
   fetch(`/admin/clusters/${currentClusterId}/k8s/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`)
-    .then(r => r.json())
+    .then(r => {
+      if (r.status === 503) {
+        return r.json().then(data => {
+          throw new Error(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+        });
+      }
+      return r.json();
+    })
     .then(res => {
       if (res.error) { alert(res.error); return; }
       showK8sOutput(`Service ${namespace}/${name}`, res.output || '');
@@ -5117,19 +5252,26 @@ function deleteService(namespace, name) {
     method: 'DELETE'
   })
     .then(r => r.json())
-    .then(async res => {
-      if (res.error) { showAlert('danger', res.error); return; }
-      const out = res.output || '';
-      showAlert('success', `Đã xóa Service ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
-      try { await loadNetworkingResources(currentClusterId); } catch (_) { }
-    })
+      .then(async res => {
+        if (res.error) { showAlert('danger', res.error); return; }
+        const out = res.output || `service "${name}" deleted`;
+        showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(out)}</pre>`);
+        try { await loadNetworkingResources(currentClusterId); } catch (_) { }
+      })
     .catch(e => alert(e.message || 'Lỗi'));
 }
 
 function describeIngress(namespace, name) {
   if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
   fetch(`/admin/clusters/${currentClusterId}/k8s/ingress/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`)
-    .then(r => r.json())
+    .then(r => {
+      if (r.status === 503) {
+        return r.json().then(data => {
+          throw new Error(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+        });
+      }
+      return r.json();
+    })
     .then(res => {
       if (res.error) { alert(res.error); return; }
       showK8sOutput(`Ingress ${namespace}/${name}`, res.output || '');
@@ -5149,12 +5291,12 @@ function deleteIngress(namespace, name) {
     method: 'DELETE'
   })
     .then(r => r.json())
-    .then(async res => {
-      if (res.error) { showAlert('danger', res.error); return; }
-      const out = res.output || '';
-      showAlert('success', `Đã xóa Ingress ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
-      try { await loadNetworkingResources(currentClusterId); } catch (_) { }
-    })
+      .then(async res => {
+        if (res.error) { showAlert('danger', res.error); return; }
+        const out = res.output || `ingress.networking.k8s.io "${name}" deleted`;
+        showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(out)}</pre>`);
+        try { await loadNetworkingResources(currentClusterId); } catch (_) { }
+      })
     .catch(e => alert(e.message || 'Lỗi'));
 }
 
@@ -5374,7 +5516,6 @@ function getNamespaceStatusBadgeClass(status) {
     default: return 'bg-secondary';
   }
 }
-
 function getWorkloadStatusBadgeClass(ready, total) {
   if (ready === total && total > 0) return 'bg-success';
   if (ready > 0) return 'bg-warning';
@@ -5443,14 +5584,127 @@ function showWorkloadsError(message) {
   `;
 }
 
+// Button loading helper
+function withButtonLoading(buttonEl, runner) {
+  const btn = (buttonEl && buttonEl.tagName === 'BUTTON') ? buttonEl : (document.activeElement && document.activeElement.tagName === 'BUTTON' ? document.activeElement : null);
+  const originalHtml = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Đang xử lý...';
+  }
+  const finalize = () => {
+    if (btn) {
+      btn.disabled = false;
+      if (originalHtml !== null) btn.innerHTML = originalHtml;
+    }
+  };
+  try {
+    const maybePromise = runner();
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      return maybePromise.finally(finalize);
+    }
+    finalize();
+    return maybePromise;
+  } catch (e) {
+    finalize();
+    throw e;
+  }
+}
+
+// Wrap describe/delete/scale actions with loading (avoid hoisting recursion)
+const _origDescribePod = (typeof window !== 'undefined' && typeof window.describePod === 'function') ? window.describePod : null;
+if (typeof window !== 'undefined') {
+  window.describePod = function(namespace, name, format = 'json') {
+    return withButtonLoading(document.activeElement, () => _origDescribePod ? _origDescribePod(namespace, name, format) : Promise.resolve());
+  };
+}
+
+const _origDeletePod = (typeof window !== 'undefined' && typeof window.deletePod === 'function') ? window.deletePod : null;
+if (typeof window !== 'undefined') {
+  window.deletePod = function(namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origDeletePod ? _origDeletePod(namespace, name) : Promise.resolve());
+  };
+}
+
+const _origDescribeNamespace = (typeof window !== 'undefined' && typeof window.describeNamespace === 'function') ? window.describeNamespace : null;
+if (typeof window !== 'undefined') {
+  window.describeNamespace = function(name) {
+    return withButtonLoading(document.activeElement, () => _origDescribeNamespace ? _origDescribeNamespace(name) : Promise.resolve());
+  };
+}
+
+const _origDeleteNamespace = (typeof window !== 'undefined' && typeof window.deleteNamespace === 'function') ? window.deleteNamespace : null;
+if (typeof window !== 'undefined') {
+  window.deleteNamespace = function(name) {
+    return withButtonLoading(document.activeElement, () => _origDeleteNamespace ? _origDeleteNamespace(name) : Promise.resolve());
+  };
+}
+
+const _origDescribeService = (typeof window !== 'undefined' && typeof window.describeService === 'function') ? window.describeService : null;
+if (typeof window !== 'undefined') {
+  window.describeService = function(namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origDescribeService ? _origDescribeService(namespace, name) : Promise.resolve());
+  };
+}
+
+const _origDeleteService = (typeof window !== 'undefined' && typeof window.deleteService === 'function') ? window.deleteService : null;
+if (typeof window !== 'undefined') {
+  window.deleteService = function(namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origDeleteService ? _origDeleteService(namespace, name) : Promise.resolve());
+  };
+}
+
+const _origDescribeIngress = (typeof window !== 'undefined' && typeof window.describeIngress === 'function') ? window.describeIngress : null;
+if (typeof window !== 'undefined') {
+  window.describeIngress = function(namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origDescribeIngress ? _origDescribeIngress(namespace, name) : Promise.resolve());
+  };
+}
+
+const _origDeleteIngress = (typeof window !== 'undefined' && typeof window.deleteIngress === 'function') ? window.deleteIngress : null;
+if (typeof window !== 'undefined') {
+  window.deleteIngress = function(namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origDeleteIngress ? _origDeleteIngress(namespace, name) : Promise.resolve());
+  };
+}
+
+const _origDescribeWorkload = (typeof window !== 'undefined' && typeof window.describeWorkload === 'function') ? window.describeWorkload : null;
+if (typeof window !== 'undefined') {
+  window.describeWorkload = function(type, namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origDescribeWorkload ? _origDescribeWorkload(type, namespace, name) : Promise.resolve());
+  };
+}
+
+const _origDeleteWorkload = (typeof window !== 'undefined' && typeof window.deleteWorkload === 'function') ? window.deleteWorkload : null;
+if (typeof window !== 'undefined') {
+  window.deleteWorkload = function(type, namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origDeleteWorkload ? _origDeleteWorkload(type, namespace, name) : Promise.resolve());
+  };
+}
+
+const _origScaleWorkload = (typeof window !== 'undefined' && typeof window.scaleWorkload === 'function') ? window.scaleWorkload : null;
+if (typeof window !== 'undefined') {
+  window.scaleWorkload = function(type, namespace, name) {
+    return withButtonLoading(document.activeElement, () => _origScaleWorkload ? _origScaleWorkload(type, namespace, name) : Promise.resolve());
+  };
+}
+
 // Action functions (placeholders)
-function describePod(namespace, name) {
+function describePod(namespace, name, format = 'json') {
   if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
-  fetch(`/admin/clusters/${currentClusterId}/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`)
-    .then(r => r.json())
+  const formatParam = format === 'yaml' ? '?format=yaml' : '';
+  fetch(`/admin/clusters/${currentClusterId}/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}${formatParam}`)
+    .then(r => {
+      if (r.status === 503) {
+        return r.json().then(data => {
+          throw new Error(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+        });
+      }
+      return r.json();
+    })
     .then(res => {
       if (res.error) { alert(res.error); return; }
-      showK8sOutput(`Pod ${namespace}/${name}`, res.output || '');
+      showK8sOutput(`Pod ${namespace}/${name} (${res.format || 'json'})`, res.output || '');
     })
     .catch(e => alert(e.message || 'Lỗi'));
 }
@@ -5465,8 +5719,8 @@ function deletePod(namespace, name) {
       .then(r => r.json())
       .then(async res => {
         if (res.error) { showAlert('danger', res.error); return; }
-        const out = res.output || '';
-        showAlert('success', `Đã xóa pod ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
+        const out = res.output || `pod "${name}" deleted`;
+        showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(out)}</pre>`);
         try { await loadK8sResources(); } catch (_) { }
       })
       .catch(e => alert(e.message || 'Lỗi'));
@@ -5481,7 +5735,14 @@ function describeNamespace(name) {
 
   // Gọi API để lấy chi tiết namespace
   fetch(`/admin/clusters/${currentClusterId}/k8s/namespaces/${encodeURIComponent(name)}`)
-    .then(r => r.json())
+    .then(r => {
+      if (r.status === 503) {
+        return r.json().then(data => {
+          throw new Error(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+        });
+      }
+      return r.json();
+    })
     .then(res => {
       if (res.error) {
         alert('Lỗi: ' + res.error);
@@ -5536,7 +5797,8 @@ function deleteNamespace(name) {
         // Reload để restore button
         renderNamespaces();
       } else {
-        showAlert('success', `Đã xóa namespace "${name}" thành công!<hr><pre class="small mb-0">${escapeHtml(res.output || '')}</pre>`);
+        const out = res.output || `namespace "${name}" deleted`;
+        showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(out)}</pre>`);
         // Reload namespaces list
         loadNamespaces(k8sRequestToken);
         // Reload other resources that might be affected
@@ -5557,7 +5819,14 @@ function deleteNamespace(name) {
 function describeWorkload(type, namespace, name) {
   if (!currentClusterId) { alert('Chưa chọn cluster'); return; }
   fetch(`/admin/clusters/${currentClusterId}/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`)
-    .then(r => r.json())
+    .then(r => {
+      if (r.status === 503) {
+        return r.json().then(data => {
+          throw new Error(data.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY');
+        });
+      }
+      return r.json();
+    })
     .then(res => {
       if (res.error) { alert(res.error); return; }
       showK8sOutput(`${type} ${namespace}/${name}`, res.output || '');
@@ -5599,12 +5868,15 @@ function deleteWorkload(type, namespace, name) {
     method: 'DELETE'
   })
     .then(r => r.json())
-    .then(async res => {
-      if (res.error) { showAlert('danger', res.error); return; }
-      const out = res.output || '';
-      showAlert('success', `Đã xóa ${type} ${namespace}/${name}<hr><pre class="small mb-0">${escapeHtml(out)}</pre>`);
-      try { await loadK8sResources(); } catch (_) { }
-    })
+      .then(async res => {
+        if (res.error) { showAlert('danger', res.error); return; }
+        const defaultOutput = type === 'deployment' ? `deployment.apps "${name}" deleted` :
+                              type === 'statefulset' ? `statefulset.apps "${name}" deleted` :
+                              type === 'daemonset' ? `daemonset.apps "${name}" deleted` : `${type} "${name}" deleted`;
+        const out = res.output || defaultOutput;
+        showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(out)}</pre>`);
+        try { await loadK8sResources(); } catch (_) { }
+      })
     .catch(e => alert(e.message || 'Lỗi'));
 }
 
@@ -5872,8 +6144,6 @@ async function processDeploymentRequestWithParams(id, params = {}) {
       `;
     }
 
-    showAlert('success', `Đã xử lý yêu cầu #${id} thành công! Trạng thái: ${data.status}`);
-
     // Reload list
     await loadDeploymentRequests();
 
@@ -5885,10 +6155,8 @@ async function processDeploymentRequestWithParams(id, params = {}) {
       alertDiv.style.display = 'block';
       messageSpan.textContent = 'Lỗi: ' + (error.message || 'Không thể xử lý yêu cầu');
     }
-    showAlert('danger', 'Lỗi xử lý yêu cầu: ' + (error.message || 'Unknown error'));
   }
 }
-
 async function viewDeploymentRequest(id) {
   try {
     const [detail, clusterResponse] = await Promise.all([
@@ -6403,5 +6671,3 @@ async function deleteDeploymentRequest(id, appName, namespace) {
     showAlert('danger', '❌ Lỗi xóa yêu cầu: ' + escapeHtml(errorMsg));
   }
 }
-
-

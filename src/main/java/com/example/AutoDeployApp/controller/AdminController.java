@@ -572,16 +572,25 @@ public class AdminController {
                 kubernetesService.createDeployment(namespace, deploymentName, dockerImage, containerPort, clusterId,
                         cpuRequest, cpuLimit, memoryRequest, memoryLimit, replicas, envVars);
                 appendLog.accept("✅ Deployment đã được tạo: " + deploymentName);
+                // Lưu ngay tên deployment để có thể cleanup nếu bước sau lỗi
+                application.setK8sDeploymentName(deploymentName);
+                applicationService.updateApplication(application);
 
                 // 7. Create Service
                 appendLog.accept("🔌 Đang tạo Service: " + serviceName);
                 kubernetesService.createService(namespace, serviceName, deploymentName, 80, containerPort, clusterId);
                 appendLog.accept("✅ Service đã được tạo: " + serviceName);
+                // Lưu ngay tên service
+                application.setK8sServiceName(serviceName);
+                applicationService.updateApplication(application);
 
                 // 8. Create Ingress
                 appendLog.accept("🌐 Đang tạo Ingress: " + ingressName);
                 kubernetesService.createIngress(namespace, ingressName, serviceName, 80, clusterId, appName);
                 appendLog.accept("✅ Ingress đã được tạo: " + ingressName);
+                // Lưu ngay tên ingress
+                application.setK8sIngressName(ingressName);
+                applicationService.updateApplication(application);
 
                 // 9. Wait for Deployment ready (timeout: 2 minutes)
                 appendLog.accept("⏳ Đang chờ Deployment sẵn sàng... (timeout: 2 phút)");

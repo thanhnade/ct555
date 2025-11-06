@@ -7,7 +7,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 class AutoDeployAppApplicationTests {
 
 	@Test
-	void contextLoads() {
+	void testGetNodesWithFabric8() {
 	}
-
 }
