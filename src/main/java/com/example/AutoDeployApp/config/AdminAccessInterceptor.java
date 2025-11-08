@@ -22,7 +22,7 @@ public class AdminAccessInterceptor implements HandlerInterceptor {
         boolean isAdminArea = path.startsWith("/admin");
         boolean isAdminPage = "/home-admin".equals(path);
 
-        // Not logged in
+        // Chưa đăng nhập
         if (session == null || role == null) {
             if (isAdminArea) {
                 writeJson(response, HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
@@ -32,7 +32,7 @@ public class AdminAccessInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        // Logged in but not ADMIN
+        // Đã đăng nhập nhưng không phải ADMIN
         if (!"ADMIN".equalsIgnoreCase(role)) {
             if (isAdminArea) {
                 writeJson(response, HttpServletResponse.SC_FORBIDDEN, "Forbidden");

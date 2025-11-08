@@ -89,6 +89,8 @@ public class ApplicationController {
                         map.put("cpuLimit", app.getCpuLimit());
                         map.put("memoryRequest", app.getMemoryRequest());
                         map.put("memoryLimit", app.getMemoryLimit());
+                        map.put("replicas", app.getReplicas());
+                        map.put("replicasRequested", app.getReplicasRequested());
                         map.put("createdAt", app.getCreatedAt());
                         return map;
                     })
@@ -129,6 +131,8 @@ public class ApplicationController {
                         map.put("k8sServiceName", app.getK8sServiceName());
                         map.put("k8sIngressName", app.getK8sIngressName());
                         map.put("accessUrl", app.getAccessUrl());
+                        map.put("replicas", app.getReplicas());
+                        map.put("replicasRequested", app.getReplicasRequested());
                         map.put("cpuRequest", app.getCpuRequest());
                         map.put("cpuLimit", app.getCpuLimit());
                         map.put("memoryRequest", app.getMemoryRequest());
@@ -177,7 +181,7 @@ public class ApplicationController {
     }
 
     /**
-     * User request delete: Chỉ đánh dấu status = DELETED, chờ admin xóa hoàn toàn
+     * Người dùng yêu cầu xóa: chỉ đánh dấu trạng thái DELETED và chờ admin xóa hẳn
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteApplication(@PathVariable Long id, HttpServletRequest request) {
@@ -190,7 +194,7 @@ public class ApplicationController {
 
             Application deletedApp = applicationService.markAsDeleted(id, userId);
 
-            // Best-effort cleanup K8s resources for this app, but DO NOT delete namespace
+            // Cố gắng dọn dẹp tài nguyên K8s cho ứng dụng nhưng KHÔNG xóa namespace
             try {
                 String namespace = deletedApp.getK8sNamespace();
                 Long clusterId = deletedApp.getClusterId();
@@ -203,7 +207,7 @@ public class ApplicationController {
                             clusterId);
                 }
             } catch (Exception cleanupEx) {
-                // Log only; still return success for delete request marking
+                // Chỉ ghi log; vẫn trả về thành công cho thao tác đánh dấu xóa
             }
 
             Map<String, Object> response = new HashMap<>();
@@ -218,6 +222,60 @@ public class ApplicationController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Bad Request", "message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Người dùng yêu cầu scale/tạm dừng/khôi phục ứng dụng – admin sẽ duyệt và thực thi
+     */
+    @PostMapping("/{id}/actions/scale")
+    public ResponseEntity<?> requestScaleAction(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body,
+            HttpServletRequest request) {
+        try {
+            Long userId = getUserIdFromSession(request);
+            if (userId == null) {
+                return ResponseEntity.status(401)
+                        .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
+            }
+
+            if (body == null || !body.containsKey("replicas")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Validation Error", "message", "Thiếu tham số replicas"));
+            }
+
+            Integer replicas = null;
+            Object replicasObj = body.get("replicas");
+            if (replicasObj instanceof Number) {
+                replicas = ((Number) replicasObj).intValue();
+            } else if (replicasObj instanceof String) {
+                try {
+                    replicas = Integer.parseInt(((String) replicasObj).trim());
+                } catch (NumberFormatException ex) {
+                    replicas = null;
+                }
+            }
+
+            if (replicas == null || replicas < 0 || replicas > 50) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Validation Error",
+                                "message", "replicas phải nằm trong khoảng 0-50"));
+            }
+
+            Application updated = applicationService.requestScaleAction(id, userId, replicas);
+
+            String actionLabel = replicas == 0 ? "tạm dừng (scale về 0)" : "scale lên " + replicas + " replicas";
+            return ResponseEntity.ok(Map.of(
+                    "applicationId", updated.getId(),
+                    "replicasRequested", updated.getReplicasRequested(),
+                    "message", "Đã gửi yêu cầu " + actionLabel + ". Vui lòng chờ admin phê duyệt."));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Validation Error", "message", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500)
                     .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));

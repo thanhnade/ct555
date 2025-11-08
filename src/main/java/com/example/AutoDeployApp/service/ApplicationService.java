@@ -27,7 +27,7 @@ public class ApplicationService {
         User user = userService.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        // Validate input
+        // Kiểm tra dữ liệu đầu vào
         if (appName == null || appName.trim().isEmpty()) {
             throw new IllegalArgumentException("Tên dự án không được để trống");
         }
@@ -35,18 +35,18 @@ public class ApplicationService {
             throw new IllegalArgumentException("Docker Hub image không được để trống");
         }
 
-        // Validate docker image format
+        // Kiểm tra định dạng docker image
         String dockerImagePattern = "^[a-zA-Z0-9._\\/-]+(:[a-zA-Z0-9._-]+)?$";
         if (!dockerImage.trim().matches(dockerImagePattern)) {
             throw new IllegalArgumentException(
                     "Định dạng Docker Hub image không hợp lệ. Ví dụ: nginx:latest, username/my-app:v1.0");
         }
 
-        // Tạo Application entity
+        // Tạo entity Application
         Application application = new Application();
         String trimmedAppName = appName.trim();
         application.setAppName(trimmedAppName);
-        application.setName(trimmedAppName); // Set legacy name field for compatibility
+        application.setName(trimmedAppName); // Đồng bộ trường legacy để tương thích
         application.setDockerImage(dockerImage.trim());
         application.setUserId(userId);
         application.setStatus("PENDING");
@@ -54,7 +54,7 @@ public class ApplicationService {
         String namespace = sanitizeUserNamespace(user.getUsername());
         application.setK8sNamespace(namespace);
 
-        // Set resource limits (nếu có, nếu không dùng default từ entity)
+        // Thiết lập resource limit (nếu null thì dùng mặc định trên entity)
         if (cpuRequest != null && !cpuRequest.trim().isEmpty()) {
             application.setCpuRequest(cpuRequest.trim());
         }
@@ -72,7 +72,7 @@ public class ApplicationService {
     }
 
     public List<Application> getUserApplications(Long userId) {
-        // Filter out DELETED applications - chỉ hiển thị các app chưa bị xóa
+        // Bỏ qua các application có trạng thái DELETED để chỉ hiển thị app còn hoạt động
         return applicationRepository.findByUserIdOrderByCreatedAtDesc(userId)
                 .stream()
                 .filter(app -> !"DELETED".equals(app.getStatus()))
@@ -84,8 +84,7 @@ public class ApplicationService {
     }
 
     /**
-     * User request delete: Chỉ đánh dấu status = DELETED, không xóa thực sự
-     * Admin sẽ xóa hoàn toàn sau
+     * Người dùng yêu cầu xóa: chỉ đánh dấu trạng thái DELETED, phần xóa hoàn toàn do admin thực hiện
      */
     @Transactional
     public Application markAsDeleted(Long applicationId, Long userId) {
@@ -102,7 +101,7 @@ public class ApplicationService {
             throw new IllegalArgumentException("Ứng dụng đã được đánh dấu xóa rồi");
         }
 
-        // Đánh dấu status = DELETED (chờ admin xóa hoàn toàn)
+        // Đánh dấu trạng thái DELETED (đợi admin xóa hẳn)
         application.setStatus("DELETED");
         return applicationRepository.save(application);
     }
@@ -139,6 +138,27 @@ public class ApplicationService {
         return applicationRepository.save(application);
     }
 
+    @Transactional
+    public Application requestScaleAction(Long applicationId, Long userId, int replicas) {
+        Application application = applicationRepository.findById(applicationId)
+                .orElseThrow(() -> new IllegalArgumentException("Application not found"));
+
+        if (!application.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("Bạn không có quyền thay đổi ứng dụng này");
+        }
+
+        if ("DELETED".equalsIgnoreCase(application.getStatus())) {
+            throw new IllegalStateException("Ứng dụng đã bị xóa");
+        }
+
+        if (replicas < 0 || replicas > 200) {
+            throw new IllegalArgumentException("Giá trị replicas phải nằm trong khoảng 0-200");
+        }
+
+        application.setReplicasRequested(replicas);
+        return applicationRepository.save(application);
+    }
+
     /**
      * Tạo namespace cho user: chỉ dựa vào username (mỗi user 1 namespace)
      */
@@ -154,7 +174,7 @@ public class ApplicationService {
     }
 
     /**
-     * Sanitize một string để phù hợp với K8s naming conventions
+     * Làm sạch chuỗi để phù hợp chuẩn đặt tên của K8s
      */
     private String sanitizeStringForK8s(String input) {
         if (input == null || input.trim().isEmpty()) {

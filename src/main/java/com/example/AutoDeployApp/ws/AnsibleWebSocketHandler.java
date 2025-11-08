@@ -40,7 +40,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             Boolean isReinstall = (Boolean) request.get("isReinstall");
             Boolean isUninstall = (Boolean) request.get("isUninstall");
 
-            // Safe parsing of sudoPasswords
+        // Phân tích tham số sudoPasswords một cách an toàn
             Map<String, String> sudoPasswords = new java.util.HashMap<>();
             Object sudoPasswordsObj = request.get("sudoPasswords");
 
@@ -55,7 +55,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     }
                 });
             } else if (sudoPasswordsObj instanceof String) {
-                // Handle case where sudoPasswords is a JSON string
+                // Trường hợp client gửi sudoPasswords dạng chuỗi JSON
                 try {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> parsedMap = new com.fasterxml.jackson.databind.ObjectMapper()
@@ -72,7 +72,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 }
             }
 
-            // Bắt đầu cài đặt/gỡ cài đặt Ansible với real-time output
+            // Bắt đầu cài đặt/gỡ cài đặt Ansible và stream log theo thời gian thực
             startAnsibleInstallationWithOutput(session, clusterId, sudoPasswords, targetServer, isReinstall,
                     isUninstall);
         } else if ("init_structure".equals(action)) {
@@ -134,7 +134,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 var allClusterServers = serverService.findByClusterId(clusterId);
                 java.util.List<com.example.AutoDeployApp.entity.Server> clusterServers;
 
-                // Chỉ cài đặt trên MASTER server
+                // Chỉ thao tác trên MASTER server
                 clusterServers = allClusterServers.stream()
                         .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
                         .collect(java.util.stream.Collectors.toList());
@@ -168,7 +168,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         }
                     }
                 } catch (Exception e) {
-                    // Nếu không kiểm tra được sudo NOPASSWD, tiếp tục với logic cũ
+                    // Nếu không kiểm tra được sudo NOPASSWD thì tiếp tục với logic cũ
                 }
 
                 if (needsPassword && (masterSudoPassword == null || masterSudoPassword.trim().isEmpty())) {
@@ -183,7 +183,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         "{\"type\":\"info\",\"message\":\"Bắt đầu %s Ansible trên MASTER: %s\"}",
                         action, masterServer.getHost()));
 
-                // Cài đặt trên MASTER server
+                // Thực hiện thao tác trên MASTER server
                 com.example.AutoDeployApp.entity.Server server = clusterServers.get(0);
                 String progress = "(1/1)";
 
@@ -200,7 +200,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         result = installAnsibleOnServerWithOutput(session, server, masterSudoPassword);
                     }
 
-                    // Tạo success message an toàn với Jackson
+                    // Tạo thông điệp thành công an toàn bằng Jackson
                     try {
                         java.util.Map<String, Object> successMessage = new java.util.HashMap<>();
                         successMessage.put("type", "server_success");
@@ -212,7 +212,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         sendMessage(session, jsonMessage);
                     } catch (Exception jsonError) {
                         System.err.println("ERROR: Failed to create success JSON: " + jsonError.getMessage());
-                        // Fallback với escaped message
+                        // Nếu lỗi thì fallback bằng thông điệp đã escape
                         sendMessage(session,
                                 String.format(
                                         "{\"type\":\"server_success\",\"server\":\"%s\",\"message\":\"✅ %s: %s\"}",
@@ -248,7 +248,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         });
     }
 
-    // ================= Init Quick Actions (Realtime) =================
+    // ================= Nhóm thao tác khởi tạo nhanh (Realtime) =================
     private void streamInitStructure(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
@@ -264,7 +264,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         "mkdir -p /etc/ansible/{playbooks,roles,group_vars,host_vars}", sudoPassword, 15000);
                 executeCommandWithTerminalOutput(session, target, "mkdir -p ~/.ansible", sudoPassword, 8000);
                 executeCommandWithTerminalOutput(session, target, "chmod -R 755 /etc/ansible", sudoPassword, 8000);
-                // Verify directories exist
+                // Kiểm tra xem thư mục đã tồn tại chưa
                 String verify = executeCommandWithTerminalOutput(session, target,
                         "bash -lc 'for d in /etc/ansible /etc/ansible/group_vars /etc/ansible/host_vars /etc/ansible/playbooks /etc/ansible/roles; do [ -d \"$d\" ] || { echo MISSING:$d; exit 1; }; done; echo OK'",
                         sudoPassword, 8000);
@@ -318,7 +318,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         + cfg + "\nEOF";
                 executeCommandWithTerminalOutput(session, target, "mkdir -p /etc/ansible", sudoPassword, 8000);
                 executeCommandWithTerminalOutput(session, target, cmdCfg, sudoPassword, 20000);
-                // Verify ansible.cfg exists and non-empty
+                // Kiểm tra ansible.cfg tồn tại và không rỗng
                 String verifyCfg = executeCommandWithTerminalOutput(session, target,
                         "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'",
                         sudoPassword, 6000);
@@ -330,13 +330,13 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     return;
                 }
 
-                // Sinh nội dung hosts theo CSDL, theo nhóm [master], [worker], và [all:vars]
+                // Sinh nội dung hosts dựa trên CSDL với nhóm [master], [worker], [all:vars]
                 StringBuilder hosts = new StringBuilder();
 
                 hosts.append("[master]\n");
                 for (var s : servers) {
                     if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
-                        // Lấy hostname làm inventory_hostname (nếu chưa có, dùng IP tạm)
+                        // Dùng hostname làm inventory_hostname (không có thì dùng IP tạm)
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
                                 .append(" ansible_host=").append(s.getHost())
@@ -396,8 +396,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
                     return;
                 }
-                // Luồng mới: luôn đảm bảo MASTER có ~/.ssh/id_rsa (RSA 2048) và dùng public key
-                // tại chỗ làm nguồn phân phối
+                // Luồng mới: luôn đảm bảo MASTER có ~/.ssh/id_rsa (RSA 2048) và dùng chính public key đó làm nguồn phân phối
                 sendMessage(session, String.format(
                         "{\"type\":\"info\",\"message\":\"Đảm bảo SSH key trên %s (RSA 2048)...\"}", target.getHost()));
                 executeCommandWithTerminalOutput(session, target,
@@ -419,7 +418,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         "{\"type\":\"terminal_output\",\"server\":\"%s\",\"output\":\"%s\"}",
                         target.getHost(), escapeJsonString(masterPub)));
 
-                // Ensure master's own authorized_keys contains its public key
+                // Đảm bảo chính máy MASTER cũng có public key trong authorized_keys
                 try {
                     String[] partsCore = masterPub.split(" ", 3);
                     String core = (partsCore.length > 1 ? partsCore[1] : masterPub.trim());
@@ -438,9 +437,9 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
                 String publicKeyToDistribute = masterPub.trim();
 
-                // 5) Phân phối xuống WORKERs nếu có publicKeyToDistribute
+                // 5) Phân phối xuống các WORKER nếu có publicKeyToDistribute
                 if (publicKeyToDistribute != null && !publicKeyToDistribute.isBlank()) {
-                    // Tính key-core (trường thứ 2) để so khớp bền vững, tránh lệch comment
+                    // Tách phần key-core (trường thứ 2) để so khớp ổn định, tránh phụ thuộc comment
                     String keyCore = null;
                     try {
                         String[] parts = publicKeyToDistribute.split(" ", 3);
@@ -448,8 +447,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                             keyCore = parts[1];
                     } catch (Exception ignored) {
                     }
-                    // Chuẩn bị danh sách kết nối WORKER và nạp sẵn privateKey PEM để tránh
-                    // lazy-load
+                    // Chuẩn bị danh sách kết nối WORKER và nạp sẵn privateKey PEM để tránh lazy-load
                     java.util.List<Object[]> workerConns = new java.util.ArrayList<>();
                     for (var s : servers) {
                         if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER
@@ -531,7 +529,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                         "{\\\"type\\\":\\\"warning\\\",\\\"message\\\":\\\"⚠️ Phân phối xong nhưng không xác minh được trên %s (verify=%s)\\\"}",
                                         hostW, verify == null ? "null" : escapeJsonString(verify)));
 
-                                // Extra diagnostics to show on UI
+                                // Ghi thêm thông tin chẩn đoán để hiển thị lên UI
                                 String diagCmd = "bash -lc \"echo USER=$(whoami); ls -ld $HOME/.ssh || echo NO_SSH_DIR; ls -l $HOME/.ssh/authorized_keys || echo NO_AUTH_KEYS; echo -n GREP_CORE=; grep -nF "
                                         + matchToken
                                         + " $HOME/.ssh/authorized_keys || echo NO_MATCH; echo --- AUTH_KEYS_HEAD ---; head -n 5 $HOME/.ssh/authorized_keys 2>/dev/null || true; echo --- AUTH_KEYS_TAIL ---; tail -n 5 $HOME/.ssh/authorized_keys 2>/dev/null || true\"";
@@ -576,7 +574,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         });
     }
 
-    // Escape 1 dòng shell trích dẫn trong single-quotes để an toàn
+    // Thoát ký tự trên một dòng shell nằm trong single-quote cho an toàn
     private String escapeShellForSingleQuotes(String s) {
         if (s == null)
             return "''";
@@ -593,7 +591,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     return;
                 }
                 String pingCmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'";
-                // Use sudoPassword as SSH password fallback (no sudo wrapping for this command)
+                // Dùng sudoPassword làm phương án dự phòng cho mật khẩu SSH (không bọc sudo cho lệnh này)
                 executeCommandWithTerminalOutput(session, target, pingCmd,
                         sudoPassword, 30000);
                 sendMessage(session, String.format("{\"type\":\"complete\",\"message\":\"Ping hoàn tất trên %s\"}",
@@ -618,7 +616,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 sendMessage(session, String.format(
                         "{\"type\":\"start\",\"message\":\"Đọc cấu hình Ansible từ %s...\"}", target.getHost()));
 
-                // Prefer SSH key from DB to avoid missing-credential issues
+                // Ưu tiên SSH key lưu trong DB để tránh thiếu thông tin xác thực
                 String pem = serverService.resolveServerPrivateKeyPem(target.getId());
                 String cfg = "";
                 String hosts = "";
@@ -658,7 +656,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                         escapeJsonString(e.getMessage())));
                     }
                 } else {
-                    // Fallback: sử dụng sudoPassword làm SSH password
+                    // Nếu vẫn không được thì dùng sudoPassword làm mật khẩu SSH
                     try {
                         cfg = serverService.execCommand(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
@@ -693,7 +691,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     }
                 }
 
-                // Trả về kết quả dưới dạng structured message
+                // Trả về kết quả ở dạng thông điệp có cấu trúc
                 java.util.Map<String, Object> payload = new java.util.HashMap<>();
                 payload.put("type", "ansible_config");
                 payload.put("server", target.getHost());
@@ -728,12 +726,12 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 sendMessage(session, String.format(
                         "{\"type\":\"start\",\"message\":\"Ghi cấu hình Ansible trên %s...\"}", target.getHost()));
 
-                // Prefer SSH key from DB
+                // Ưu tiên SSH key từ DB
                 String pem = serverService.resolveServerPrivateKeyPem(target.getId());
                 boolean success = true;
 
                 try {
-                    // Ensure dirs
+                    // Đảm bảo thư mục tồn tại
                     if (pem != null && !pem.isBlank()) {
                         serverService.execCommandWithKey(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
@@ -744,7 +742,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                 target.getUsername(), sudoPassword, "mkdir -p /etc/ansible /var/log/ansible", 10000);
                     }
 
-                    // Backups
+                    // Tạo bản sao lưu
                     if (pem != null && !pem.isBlank()) {
                         serverService.execCommandWithKey(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
@@ -769,7 +767,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                 10000);
                     }
 
-                    // Write cfg
+                    // Ghi file cfg
                     String cfgSafe = cfgContent == null ? "" : cfgContent;
                     String cmdCfg = "tee /etc/ansible/ansible.cfg > /dev/null <<'EOF'\n" + cfgSafe + "\nEOF";
                     if (pem != null && !pem.isBlank()) {
@@ -782,7 +780,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                 target.getUsername(), sudoPassword, cmdCfg, 30000);
                     }
 
-                    // Write hosts
+                    // Ghi file hosts
                     String hostsSafe = hostsContent == null ? "" : hostsContent;
                     String cmdHosts = "tee /etc/ansible/hosts > /dev/null <<'EOF'\n" + hostsSafe + "\nEOF";
                     if (pem != null && !pem.isBlank()) {
@@ -795,7 +793,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                 target.getUsername(), sudoPassword, cmdHosts, 30000);
                     }
 
-                    // Write variables (group_vars/all.yml)
+                    // Ghi file variables (group_vars/all.yml)
                     if (varsContent != null && !varsContent.trim().isEmpty()) {
                         String varsSafe = varsContent;
                         String cmdVars = "tee /etc/ansible/group_vars/all.yml > /dev/null <<'EOF'\n" + varsSafe
@@ -811,7 +809,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         }
                     }
 
-                    // Set permissions
+                    // Đặt quyền truy cập
                     if (pem != null && !pem.isBlank()) {
                         serverService.execCommandWithKey(target.getHost(),
                                 target.getPort() != null ? target.getPort() : 22,
@@ -841,7 +839,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                 target.getUsername(), sudoPassword, "chmod -R 755 /etc/ansible", 8000);
                     }
 
-                    // Verify files exist
+                    // Xác nhận file đã tồn tại
                     String verifyCfg = "";
                     String verifyHosts = "";
                     if (pem != null && !pem.isBlank()) {
@@ -872,7 +870,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         success = false;
                     }
 
-                    // Validate inventory syntax
+                    // Kiểm tra cú pháp inventory
                     String invCheck = "";
                     if (pem != null && !pem.isBlank()) {
                         invCheck = serverService.execCommandWithKey(target.getHost(),
@@ -952,23 +950,23 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             com.example.AutoDeployApp.entity.Server server, String sudoPassword) throws Exception {
         String host = server.getHost();
 
-        // Step 1: Update packages
+        // Bước 1: cập nhật các gói hệ thống
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":1,\"message\":\"Cập nhật package manager...\"}", host));
         executeCommandWithTerminalOutput(session, server, "apt update -y", sudoPassword, 30000);
 
-        // Step 2: Install Python
+        // Bước 2: cài Python
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":2,\"message\":\"Cài đặt Python và pip...\"}", host));
         executeCommandWithTerminalOutput(session, server, "apt install -y python3 python3-pip python3-venv",
                 sudoPassword, 30000);
 
-        // Step 3: Install Ansible
+        // Bước 3: cài Ansible
         sendMessage(session, String
                 .format("{\"type\":\"step\",\"server\":\"%s\",\"step\":3,\"message\":\"Cài đặt Ansible...\"}", host));
         executeCommandWithTerminalOutput(session, server, "pip3 install ansible", sudoPassword, 60000);
 
-        // Step 4: Verify installation
+        // Bước 4: kiểm tra lại kết quả cài đặt
         sendMessage(session, String
                 .format("{\"type\":\"step\",\"server\":\"%s\",\"step\":4,\"message\":\"Kiểm tra cài đặt...\"}", host));
         String checkResult = executeCommandWithTerminalOutput(session, server, "ansible --version", sudoPassword,
@@ -984,7 +982,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             com.example.AutoDeployApp.entity.Server server, String sudoPassword) throws Exception {
         String host = server.getHost();
 
-        // Step 0: Kiểm tra hiện trạng cài đặt
+        // Bước 0: kiểm tra hiện trạng cài đặt
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":0,\"message\":\"Kiểm tra hiện trạng Ansible...\"}",
                 host));
@@ -994,7 +992,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         executeCommandWithTerminalOutput(session, server, "dpkg -s ansible || true", sudoPassword, 8000);
         executeCommandWithTerminalOutput(session, server, "dpkg -s ansible-core || true", sudoPassword, 8000);
 
-        // Step 1: Gỡ bằng pip (bao quát các tên gói phổ biến)
+        // Bước 1: gỡ Ansible bằng pip (bao gồm các tên gói phổ biến)
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":1,\"message\":\"Gỡ Ansible bằng pip...\"}",
                 host));
@@ -1004,7 +1002,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         executeCommandWithTerminalOutput(session, server,
                 "pip3 uninstall -y community.general community.kubernetes || true", sudoPassword, 60000);
 
-        // Gỡ thêm các collections và modules khác
+        // Gỡ thêm các collection/module liên quan
         executeCommandWithTerminalOutput(session, server,
                 "pip3 uninstall -y ansible-collections-community ansible-collections-kubernetes || true",
                 sudoPassword, 60000);
@@ -1012,7 +1010,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 "pip3 uninstall -y ansible-runner-http ansible-runner-kubernetes || true",
                 sudoPassword, 60000);
 
-        // Step 2: Nếu cài qua apt thì gỡ thêm bằng apt
+        // Bước 2: nếu cài qua apt thì gỡ thêm bằng apt
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":2,\"message\":\"Gỡ Ansible bằng apt (nếu có)...\"}",
                 host));
@@ -1023,7 +1021,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         executeCommandWithTerminalOutput(session, server, "apt autoremove -y || true", sudoPassword, 60000);
         executeCommandWithTerminalOutput(session, server, "apt autoclean || true", sudoPassword, 60000);
 
-        // Step 3: Dọn dẹp file/binary còn sót
+        // Bước 3: dọn dẹp các file/binary còn sót
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":3,\"message\":\"Dọn dẹp thư mục cấu hình/collections...\"}",
                 host));
@@ -1034,7 +1032,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 "bash -lc 'shopt -s nullglob; rm -rf /usr/local/lib/python3*/dist-packages/ansible* /usr/lib/python3*/dist-packages/ansible*'",
                 sudoPassword, 30000);
 
-        // Dọn dẹp thêm các thư mục collections và cache
+        // Dọn dẹp thêm thư mục collection và cache
         executeCommandWithTerminalOutput(session, server,
                 "rm -rf ~/.ansible/collections ~/.ansible/cache ~/.ansible/tmp || true",
                 sudoPassword, 30000);
@@ -1047,7 +1045,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 "rm -rf /etc/ansible/hosts /etc/ansible/ansible.cfg /etc/ansible/group_vars /etc/ansible/host_vars || true",
                 sudoPassword, 30000);
 
-        // Step 4: Kiểm tra lại bằng command -v
+        // Bước 4: kiểm tra lại bằng command -v
         sendMessage(session, String.format(
                 "{\"type\":\"step\",\"server\":\"%s\",\"step\":4,\"message\":\"Kiểm tra sau khi gỡ...\"}",
                 host));
@@ -1060,12 +1058,12 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 "which ansible-playbook ansible-galaxy ansible-vault ansible-console || true",
                 sudoPassword, 5000);
 
-        // Kiểm tra pip packages còn lại
+        // Kiểm tra các package pip còn lại
         executeCommandWithTerminalOutput(session, server,
                 "pip3 list | grep -i ansible || echo 'No ansible packages found'",
                 sudoPassword, 5000);
 
-        // Kiểm tra dpkg packages còn lại
+        // Kiểm tra các package dpkg còn lại
         executeCommandWithTerminalOutput(session, server,
                 "dpkg -l | grep -i ansible || echo 'No ansible packages found'",
                 sudoPassword, 5000);
@@ -1089,12 +1087,12 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         // Tạo prompt giống terminal
         String prompt = String.format("%s@%s:~$ ", username, host);
 
-        // Hiển thị prompt và command
+        // Hiển thị prompt và câu lệnh
         sendMessage(session,
                 String.format("{\"type\":\"terminal_prompt\",\"server\":\"%s\",\"prompt\":\"%s\",\"command\":\"%s\"}",
                         host, prompt, command));
 
-        // Tạo lệnh với sudo nếu cần
+        // Xây dựng câu lệnh kèm sudo nếu cần
         String finalCommand = command;
         boolean isAnsibleInvocation = command.startsWith("bash -lc 'ansible ");
         boolean needsSudo = (command.startsWith("apt") || command.startsWith("pip") || command.startsWith("rm ")
@@ -1103,7 +1101,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 || command.startsWith("cat > ") || command.startsWith("mkdir ")
                 || command.startsWith("tee ") || command.contains(" /etc/ansible"));
 
-        // Kiểm tra xem server có SSH key với sudo NOPASSWD không
+        // Kiểm tra server có SSH key với sudo NOPASSWD hay không
         boolean hasSudoNopasswd = false;
         String pem = serverService.resolveServerPrivateKeyPem(server.getId());
 
@@ -1114,7 +1112,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         5000);
                 hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
             } catch (Exception e) {
-                // Nếu không kiểm tra được với SSH key, thử với password
+                // Nếu không kiểm tra được bằng SSH key thì thử bằng mật khẩu
                 try {
                     if (sudoPassword != null && !sudoPassword.isBlank()) {
                         String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
@@ -1123,25 +1121,25 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         hasSudoNopasswd = (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD"));
                     }
                 } catch (Exception e2) {
-                    // Nếu không kiểm tra được, giả định cần sudo password
+                    // Nếu vẫn không kiểm tra được thì giả định cần sudo password
                 }
             }
         }
 
-        // Chỉ sử dụng sudo password nếu cần thiết và không có sudo NOPASSWD
+        // Chỉ sử dụng sudo password khi thật sự cần và không có sudo NOPASSWD
         if (sudoPassword != null && !sudoPassword.trim().isEmpty()
                 && !isAnsibleInvocation && needsSudo && !hasSudoNopasswd) {
             String escapedPassword = sudoPassword.replace("'", "'\"'\"'");
             String quotedOriginal = "'" + command.replace("'", "'\"'\"'") + "'";
             finalCommand = String.format("echo '%s' | sudo -S bash -lc %s", escapedPassword, quotedOriginal);
 
-            // Hiển thị sudo password prompt
+            // Hiển thị prompt yêu cầu sudo password
             sendMessage(session,
                     String.format(
                             "{\"type\":\"sudo_prompt\",\"server\":\"%s\",\"message\":\"[sudo] password for %s: \"}",
                             host, username));
         } else if (needsSudo && hasSudoNopasswd) {
-            // Có sudo NOPASSWD, chỉ cần thêm sudo vào command
+            // Có sudo NOPASSWD thì chỉ cần thêm sudo vào câu lệnh
             finalCommand = "sudo " + command;
             sendMessage(session,
                     String.format(
@@ -1149,14 +1147,13 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                             host, username));
         }
 
-        // Thực thi lệnh và lấy output
+        // Thực thi câu lệnh và lấy output
         String output = "";
-        // Không sử dụng sudoPassword như SSH password. Thử lấy password đăng nhập từ
-        // cache nếu có (không khả dụng tại đây),
-        // nếu không thì ưu tiên SSH key; nếu cả hai không có, báo lỗi rõ ràng.
+        // Không dùng sudoPassword làm SSH password. Thử lấy password đăng nhập từ cache nếu có (ở đây không sẵn),
+        // nếu không thì ưu tiên SSH key; cả hai đều thiếu thì báo lỗi rõ ràng.
 
         try {
-            // Ưu tiên SSH key từ database; fallback dùng sudoPassword làm mật khẩu SSH
+            // Ưu tiên SSH key trong database; nếu không được mới dùng sudoPassword làm mật khẩu SSH
             if (pem != null && !pem.isBlank()) {
                 output = serverService.execCommandWithKey(host, port, username, pem, finalCommand, timeoutMs);
             } else if (sudoPassword != null && !sudoPassword.isBlank()) {
@@ -1165,7 +1162,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 throw new RuntimeException("Không có SSH key hoặc mật khẩu SSH để kết nối tới " + host);
             }
         } catch (Exception e) {
-            // Fallback password nếu key không truy cập được
+            // Dùng mật khẩu dự phòng nếu key không truy cập được
             if (sudoPassword != null && !sudoPassword.isBlank()) {
                 output = serverService.execCommand(host, port, username, sudoPassword, finalCommand, timeoutMs);
             } else {
@@ -1176,7 +1173,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         // Hiển thị output
         if (output != null && !output.trim().isEmpty()) {
             try {
-                // Sử dụng Jackson để tạo JSON an toàn
+                // Dùng Jackson tạo JSON an toàn
                 java.util.Map<String, Object> outputMessage = new java.util.HashMap<>();
                 outputMessage.put("type", "terminal_output");
                 outputMessage.put("server", host);
@@ -1187,7 +1184,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 sendMessage(session, jsonMessage);
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to create JSON for terminal output: " + e.getMessage());
-                // Fallback to simple message
+                // Nếu thất bại thì fallback sang thông điệp đơn giản
                 sendMessage(session, String.format("{\"type\":\"terminal_output\",\"server\":\"%s\",\"output\":\"%s\"}",
                         host, escapeJsonString(output)));
             }
@@ -1233,7 +1230,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sb.append("\\f");
                     break;
                 default:
-                    // Escape control characters (ASCII 0-31) except for already handled ones
+                    // Thoát các ký tự điều khiển (ASCII 0-31) trừ những ký tự đã xử lý
                     if (c < 32) {
                         sb.append(String.format("\\u%04x", (int) c));
                     } else {
@@ -1255,7 +1252,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    // JSON parser (tương tự như TerminalWebSocketHandler)
+    // Trình phân tích JSON (tương tự TerminalWebSocketHandler)
     private static Map<String, Object> parseJsonObject(String json) {
         java.util.LinkedHashMap<String, Object> map = new java.util.LinkedHashMap<>();
         if (json == null)

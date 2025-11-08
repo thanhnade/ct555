@@ -61,7 +61,7 @@ public class KubernetesService {
     private int defaultContainerPort;
 
     /**
-     * Get Kubernetes client từ cluster ID - lấy kubeconfig từ master node qua SSH
+     * Lấy Kubernetes client dựa trên cluster ID bằng cách kéo kubeconfig từ master node qua SSH
      */
     private KubernetesClient getKubernetesClient(Long clusterId) {
         try {
@@ -445,79 +445,80 @@ public class KubernetesService {
         } catch (Exception e) {
             logger.error("Chờ Deployment sẵn sàng thất bại: {}/{}", namespace, deploymentName, e);
 
-            // Thu thập chẩn đoán để làm rõ nguyên nhân (ImagePullBackOff,
-            // CrashLoopBackOff, v.v.)
-            String diagnostics;
-            try (KubernetesClient diagClient = getKubernetesClient(clusterId)) {
-                StringBuilder sb = new StringBuilder();
-                sb.append("Chẩn đoán cho ")
-                        .append(namespace).append("/").append(deploymentName).append(": ");
-
-                Deployment dep = diagClient.apps().deployments().inNamespace(namespace).withName(deploymentName).get();
-                if (dep != null && dep.getStatus() != null) {
-                    Integer desired = dep.getSpec() != null ? dep.getSpec().getReplicas() : null;
-                    Integer ready = dep.getStatus().getReadyReplicas();
-                    Integer unavailable = dep.getStatus().getUnavailableReplicas();
-                    sb.append("bản sao (mong muốn=").append(desired)
-                            .append(", sẵn sàng=").append(ready)
-                            .append(", không sẵn sàng=").append(unavailable).append("). ");
-                }
-
-                // Tìm Pods theo label app=deploymentName
-                PodList pods = diagClient.pods().inNamespace(namespace)
-                        .withLabel("app", deploymentName)
-                        .list();
-                if (pods != null && pods.getItems() != null && !pods.getItems().isEmpty()) {
-                    for (int i = 0; i < Math.min(3, pods.getItems().size()); i++) { // giới hạn chi tiết cho 3 pods đầu
-                                                                                    // tiên
-                        Pod pod = pods.getItems().get(i);
-                        sb.append("\nPod ").append(pod.getMetadata().getName()).append(" trạng thái=")
-                                .append(pod.getStatus() != null ? pod.getStatus().getPhase() : "?");
-                        if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
-                            for (ContainerStatus cs : pod.getStatus().getContainerStatuses()) {
-                                sb.append("\n  container ").append(cs.getName());
-                                if (cs.getState() != null && cs.getState().getWaiting() != null) {
-                                    sb.append(" đang chờ - lý do=")
-                                            .append(cs.getState().getWaiting().getReason())
-                                            .append(", thông điệp=")
-                                            .append(cs.getState().getWaiting().getMessage());
-                                }
-                                if (cs.getState() != null && cs.getState().getTerminated() != null) {
-                                    sb.append(" kết thúc - lý do=")
-                                            .append(cs.getState().getTerminated().getReason())
-                                            .append(", thông điệp=")
-                                            .append(cs.getState().getTerminated().getMessage());
-                                }
-                            }
-                        }
-                        // Thử bao gồm 50 dòng log cuối cùng của container đầu tiên
-                        try {
-                            if (pod.getSpec() != null && pod.getSpec().getContainers() != null
-                                    && !pod.getSpec().getContainers().isEmpty()) {
-                                String cName = pod.getSpec().getContainers().get(0).getName();
-                                String logs = diagClient.pods().inNamespace(namespace)
-                                        .withName(pod.getMetadata().getName())
-                                        .inContainer(cName)
-                                        .tailingLines(50)
-                                        .getLog();
-                                if (logs != null && !logs.isEmpty()) {
-                                    sb.append("\n  log gần nhất (" + cName + "):\n").append(logs);
-                                }
-                            }
-                        } catch (Exception logEx) {
-                            sb.append("\n  (không thể lấy log: ").append(logEx.getMessage()).append(")");
-                        }
-                    }
-                } else {
-                    sb.append("Không tìm thấy Pod với nhãn app=").append(deploymentName);
-                }
-
-                diagnostics = sb.toString();
-            } catch (Exception diagEx) {
-                diagnostics = "(không thể thu thập chẩn đoán: " + diagEx.getMessage() + ")";
-            }
+            String diagnostics = collectDeploymentDiagnostics(namespace, deploymentName, clusterId, 50);
 
             throw new RuntimeException("Deployment chưa sẵn sàng: " + deploymentName + ". " + diagnostics, e);
+        }
+    }
+
+    /**
+     * Thu thập chẩn đoán cho deployment (pods, container state, log tail)
+     */
+    public String collectDeploymentDiagnostics(String namespace, String deploymentName, Long clusterId, int logLines) {
+        try (KubernetesClient diagClient = getKubernetesClient(clusterId)) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Chẩn đoán cho ")
+                    .append(namespace).append("/").append(deploymentName).append(": ");
+
+            Deployment dep = diagClient.apps().deployments().inNamespace(namespace).withName(deploymentName).get();
+            if (dep != null && dep.getStatus() != null) {
+                Integer desired = dep.getSpec() != null ? dep.getSpec().getReplicas() : null;
+                Integer ready = dep.getStatus().getReadyReplicas();
+                Integer unavailable = dep.getStatus().getUnavailableReplicas();
+                sb.append("bản sao (mong muốn=").append(desired)
+                        .append(", sẵn sàng=").append(ready)
+                        .append(", không sẵn sàng=").append(unavailable).append("). ");
+            }
+
+            PodList pods = diagClient.pods().inNamespace(namespace)
+                    .withLabel("app", deploymentName)
+                    .list();
+            if (pods != null && pods.getItems() != null && !pods.getItems().isEmpty()) {
+                for (int i = 0; i < Math.min(3, pods.getItems().size()); i++) {
+                    Pod pod = pods.getItems().get(i);
+                    sb.append("\nPod ").append(pod.getMetadata().getName()).append(" trạng thái=")
+                            .append(pod.getStatus() != null ? pod.getStatus().getPhase() : "?");
+                    if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
+                        for (ContainerStatus cs : pod.getStatus().getContainerStatuses()) {
+                            sb.append("\n  container ").append(cs.getName());
+                            if (cs.getState() != null && cs.getState().getWaiting() != null) {
+                                sb.append(" đang chờ - lý do=")
+                                        .append(cs.getState().getWaiting().getReason())
+                                        .append(", thông điệp=")
+                                        .append(cs.getState().getWaiting().getMessage());
+                            }
+                            if (cs.getState() != null && cs.getState().getTerminated() != null) {
+                                sb.append(" kết thúc - lý do=")
+                                        .append(cs.getState().getTerminated().getReason())
+                                        .append(", thông điệp=")
+                                        .append(cs.getState().getTerminated().getMessage());
+                            }
+                        }
+                    }
+                    try {
+                        if (pod.getSpec() != null && pod.getSpec().getContainers() != null
+                                && !pod.getSpec().getContainers().isEmpty()) {
+                            String cName = pod.getSpec().getContainers().get(0).getName();
+                            String logs = diagClient.pods().inNamespace(namespace)
+                                    .withName(pod.getMetadata().getName())
+                                    .inContainer(cName)
+                                    .tailingLines(Math.max(logLines, 10))
+                                    .getLog();
+                            if (logs != null && !logs.isEmpty()) {
+                                sb.append("\n  log gần nhất (" + cName + "):\n").append(logs);
+                            }
+                        }
+                    } catch (Exception logEx) {
+                        sb.append("\n  (không thể lấy log: ").append(logEx.getMessage()).append(")");
+                    }
+                }
+            } else {
+                sb.append("Không tìm thấy Pod với nhãn app=").append(deploymentName);
+            }
+
+            return sb.toString();
+        } catch (Exception diagEx) {
+            return "(không thể thu thập chẩn đoán: " + diagEx.getMessage() + ")";
         }
     }
 

@@ -117,7 +117,7 @@ public class AnsibleConfigController {
             boolean success = true;
             boolean useSudoNopasswd = false;
 
-            // Variables for validation results
+            // Biến lưu kết quả xác thực
             String configCheck = "";
             String inventoryCheck = "";
             String pingCheck = "";
@@ -148,7 +148,7 @@ public class AnsibleConfigController {
 
                 // Tao backup va cleanup backup cu
                 if (pem != null && !pem.isBlank()) {
-                    // Create fixed backup (.bak)
+                    // Tạo bản sao lưu cố định (.bak)
                     execCommandWithSudoOptimization(target,
                             "bash -lc '[ -f /etc/ansible/ansible.cfg ] && cp -a /etc/ansible/ansible.cfg /etc/ansible/ansible.cfg.bak || true'",
                             useSudoNopasswd, 15000);
@@ -156,7 +156,7 @@ public class AnsibleConfigController {
                             "bash -lc '[ -f /etc/ansible/hosts ] && cp -a /etc/ansible/hosts /etc/ansible/hosts.bak || true'",
                             useSudoNopasswd, 15000);
                 } else {
-                    // Create fixed backup (.bak)
+                    // Tạo bản sao lưu cố định (.bak)
                     serverService.execCommand(target.getHost(),
                             target.getPort() != null ? target.getPort() : 22,
                             target.getUsername(), sudoPassword,
@@ -371,7 +371,7 @@ public class AnsibleConfigController {
                 response.put("success", true);
                 response.put("message", "Đã lưu cấu hình Ansible thành công và xác minh hợp lệ");
 
-                // Add validation results if available
+                // Bổ sung kết quả kiểm tra nếu thu được
                 if (configCheck != null && !configCheck.isEmpty()) {
                     Map<String, Object> validation = new HashMap<>();
                     validation.put("configCheck", configCheck);

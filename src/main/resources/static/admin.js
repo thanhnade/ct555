@@ -934,15 +934,61 @@ async function showClusterDetail(clusterId) {
         const originalText = e.target.innerHTML;
         e.target.innerHTML = `
           <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
-          Đang retry...
+          Đang thử lại...
         `;
         e.target.disabled = true;
 
         try {
-          // Reload cluster detail
-          await showClusterDetail(clusterId);
+          // Lấy thông tin node hiện tại để kiểm tra trạng thái
+          const detail = await fetchJSON(`/admin/clusters/${clusterId}/detail`).catch(() => null);
+          const node = detail?.nodes?.find(n => n.id === nodeId);
+          
+          // Kiểm tra node có offline không
+          const isOffline = !node?.isConnected || node?.status === 'OFFLINE';
+          
+          if (isOffline) {
+            // Thử check-status trước (có thể tự động connect bằng key nếu có)
+            try {
+              await fetchJSON('/admin/servers/check-status', { method: 'POST' });
+              const connected = await fetchJSON('/admin/servers/connected').catch(() => []);
+              const nodeIdNum = typeof nodeId === 'string' ? parseInt(nodeId, 10) : nodeId;
+              if (Array.isArray(connected) && (connected.includes(nodeIdNum) || connected.includes(nodeId))) {
+                // Đã kết nối thành công bằng key, reload cluster detail
+                await showClusterDetail(clusterId);
+                return;
+              }
+            } catch (_) {
+              // Ignore check-status errors
+            }
+            
+            // Nếu vẫn offline, yêu cầu password để reconnect
+            const pw = prompt('Node đang offline. Nhập mật khẩu SSH để kết nối lại:');
+            if (!pw) {
+              // User hủy, restore button
+              e.target.innerHTML = originalText;
+              e.target.disabled = false;
+              return;
+            }
+            
+            // Gọi API reconnect
+            try {
+              const nodeIdNum = typeof nodeId === 'string' ? parseInt(nodeId, 10) : nodeId;
+              await fetchJSON(`/admin/servers/${nodeIdNum}/reconnect`, { 
+                method: 'POST', 
+                body: JSON.stringify({ password: pw }) 
+              });
+              // Reconnect thành công, reload cluster detail
+              await showClusterDetail(clusterId);
+            } catch (err) {
+              alert(err.message || 'Không thể kết nối lại với node. Vui lòng kiểm tra mật khẩu và kết nối mạng.');
+            }
+          } else {
+            // Node đang online, chỉ reload cluster detail để refresh metrics
+            await showClusterDetail(clusterId);
+          }
         } catch (error) {
           console.error('Error retrying node:', error);
+          alert('Lỗi khi thử lại node: ' + (error.message || 'Unknown error'));
         } finally {
           // Restore button state
           e.target.innerHTML = originalText;
@@ -5962,7 +6008,7 @@ async function loadDeploymentRequests() {
   if (!tbody) return;
 
   try {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Đang tải...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Đang tải...</td></tr>';
     
     // Lấy filter status nếu có
     const statusFilter = document.getElementById('deployment-status-filter');
@@ -5994,6 +6040,8 @@ async function loadDeploymentRequests() {
         statusBadge = '<span class="badge bg-warning">⏳ Chờ xử lý</span>';
       } else if (req.status === 'RUNNING') {
         statusBadge = '<span class="badge bg-success">✅ Đang chạy</span>';
+      } else if (req.status === 'PAUSED') {
+        statusBadge = '<span class="badge bg-secondary text-dark">⏸️ Tạm dừng</span>';
       } else if (req.status === 'ERROR') {
         statusBadge = '<span class="badge bg-danger">❌ Lỗi</span>';
       } else if (req.status === 'REJECTED') {
@@ -6003,6 +6051,10 @@ async function loadDeploymentRequests() {
       } else {
         statusBadge = `<span class="badge bg-secondary">${req.status}</span>`;
       }
+
+      const currentReplicas = Number.isFinite(Number(req.replicas)) ? Number(req.replicas) : 1;
+      const hasRequestedReplicas = Number.isFinite(Number(req.replicasRequested));
+      const requestedReplicas = hasRequestedReplicas ? Number(req.replicasRequested) : currentReplicas;
 
       // Action buttons
       let actionBtn = '';
@@ -6017,19 +6069,22 @@ async function loadDeploymentRequests() {
         <button class="btn btn-sm btn-outline-secondary" onclick="rejectDeploymentRequest(${req.id})" title="Từ chối yêu cầu này">
           <i class="bi bi-x-circle"></i> Từ chối
         </button>`;
-      } else if (req.status === 'RUNNING') {
-        // Cho phép xử lý lại nếu cần
-        actionBtn = `<button class="btn btn-sm btn-warning" onclick="processDeploymentRequest(${req.id})" title="Xử lý lại yêu cầu này">
-          <i class="bi bi-arrow-clockwise"></i> Xử lý lại
+      } else if (req.status === 'RUNNING' || req.status === 'PAUSED') {
+        actionBtn = `
+        <button class="btn btn-sm btn-outline-success" onclick="promptScaleDeployment(${req.id}, ${requestedReplicas})" title="Điều chỉnh số replicas">
+          <i class="bi bi-sliders"></i> ${req.status === 'PAUSED' ? 'Resume / Scale' : 'Scale'}
         </button>`;
       } else if (req.status === 'ERROR') {
-        // Cho phép xử lý lại nếu có lỗi
-        actionBtn = `<button class="btn btn-sm btn-warning" onclick="processDeploymentRequest(${req.id})" title="Xử lý lại yêu cầu này">
-          <i class="bi bi-arrow-clockwise"></i> Xử lý lại
+        actionBtn = `<button class="btn btn-sm btn-warning" onclick="retryDeploymentRequest(${req.id})" title="Thử triển khai lại">
+          <i class="bi bi-arrow-repeat"></i> Retry
         </button>`;
       } else {
         actionBtn = `<button class="btn btn-sm btn-secondary" disabled>${req.status}</button>`;
       }
+
+      const diagnosticsBtn = `<button class="btn btn-sm btn-outline-dark" onclick="viewDeploymentDiagnostics(${req.id})" title="Thu thập diagnostics">
+        <i class="bi bi-activity"></i> Diagnostics
+      </button>`;
 
       const deleteBtn = `<button class="btn btn-sm btn-outline-danger" onclick="deleteDeploymentRequest(${req.id}, '${escapeHtml(req.appName || '')}', '${escapeHtml(req.k8sNamespace || '')}')" title="Delete deployment request and namespace">
         <i class="bi bi-trash"></i> Delete
@@ -6045,18 +6100,18 @@ async function loadDeploymentRequests() {
         accessUrlCell = `<td><a href="${fullUrl}" target="_blank" class="text-primary" title="${fullUrl}"><code>${fullUrl}</code> <i class="bi bi-box-arrow-up-right"></i></a></td>`;
       }
 
-      // Replicas và Port
-      const replicas = req.replicas != null ? req.replicas : 1;
-      const port = req.containerPort != null ? req.containerPort : 80;
+      const pendingActionNote = hasRequestedReplicas
+        ? `<div class="badge bg-info text-dark mt-1">User yêu cầu: ${currentReplicas} → ${requestedReplicas}</div>`
+        : '';
 
       tr.innerHTML = `
-        <td>${req.id}</td>
-        <td><strong>${escapeHtml(req.appName || 'N/A')}</strong></td>
+        <td>
+          <strong>${escapeHtml(req.appName || `#${req.id}`)}</strong>
+          ${pendingActionNote}
+        </td>
         <td><code>${escapeHtml(req.dockerImage || 'N/A')}</code></td>
         <td>${escapeHtml(req.username || 'Unknown')}</td>
         <td><code>${escapeHtml(req.k8sNamespace || 'N/A')}</code></td>
-        <td><span class="badge bg-info">${replicas}</span></td>
-        <td><code>${port}</code></td>
         <td>${statusBadge}</td>
         ${accessUrlCell}
         <td><small>${createdAt}</small></td>
@@ -6064,6 +6119,7 @@ async function loadDeploymentRequests() {
           <div class="d-flex gap-1 flex-wrap">
             ${actionBtn}
             ${viewLogsBtn}
+            ${diagnosticsBtn}
             ${deleteBtn}
           </div>
         </td>
@@ -6073,7 +6129,7 @@ async function loadDeploymentRequests() {
 
   } catch (error) {
     console.error('Error loading deployment requests:', error);
-    tbody.innerHTML = `<tr><td colspan="11" class="text-center text-danger">
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">
       Lỗi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}
     </td></tr>`;
     showAlert('danger', 'Không thể tải danh sách yêu cầu: ' + (error.message || 'Lỗi không xác định'));
@@ -6087,24 +6143,16 @@ async function processDeploymentRequest(id) {
   await processDeploymentRequestWithParams(id, {});
 }
 
-async function processDeploymentRequestWithParams(id, params = {}) {
-  const alertDiv = document.getElementById('deployment-alert');
-  const messageSpan = document.getElementById('deployment-message');
-
+async function processDeploymentRequestWithParams(id, params = {}, endpoint = 'process') {
   try {
-    // Show loading
-    if (alertDiv && messageSpan) {
-      alertDiv.className = 'alert alert-info alert-dismissible fade show';
-      alertDiv.style.display = 'block';
-      messageSpan.textContent = 'Đang xử lý yêu cầu...';
-    }
+    showAlert('info', `Đang xử lý yêu cầu #${id}...`);
 
     // Tự động xem logs cho deployment này
     viewDeploymentLogs(id);
     // Bắt đầu polling logs mỗi giây
     startPollingDeploymentLogs(id);
 
-    const response = await fetch(`/admin/deployment-requests/${id}/process`, {
+    const response = await fetch(`/admin/deployment-requests/${id}/${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -6132,17 +6180,11 @@ async function processDeploymentRequestWithParams(id, params = {}) {
       stopPollingDeploymentLogs();
     }
 
-    // Success
-    if (alertDiv && messageSpan) {
-      alertDiv.className = 'alert alert-success alert-dismissible fade show';
-      alertDiv.style.display = 'block';
-      messageSpan.innerHTML = `
-        <strong>✅ Xử lý thành công!</strong><br>
-        Ứng dụng #${data.applicationId} đã được triển khai.<br>
-        Trạng thái: <strong>${data.status}</strong><br>
-        ${data.message ? `<small>${escapeHtml(data.message)}</small>` : ''}
-      `;
-    }
+    showAlert('success', `
+      ✅ Ứng dụng #${data.applicationId} đã được xử lý.
+      <br>Trạng thái: <strong>${escapeHtml(data.status || '')}</strong>
+      ${data.message ? `<br><small>${escapeHtml(data.message)}</small>` : ''}
+    `);
 
     // Reload list
     await loadDeploymentRequests();
@@ -6150,11 +6192,74 @@ async function processDeploymentRequestWithParams(id, params = {}) {
   } catch (error) {
     console.error('Error processing deployment request:', error);
     stopPollingDeploymentLogs();
-    if (alertDiv && messageSpan) {
-      alertDiv.className = 'alert alert-danger alert-dismissible fade show';
-      alertDiv.style.display = 'block';
-      messageSpan.textContent = 'Lỗi: ' + (error.message || 'Không thể xử lý yêu cầu');
+    showAlert('danger', 'Không thể xử lý yêu cầu: ' + (error.message || 'Lỗi không xác định'));
+  }
+}
+
+async function retryDeploymentRequest(id) {
+  if (!confirm(`Retry triển khai cho yêu cầu #${id}?`)) {
+    return;
+  }
+  await processDeploymentRequestWithParams(id, {}, 'retry');
+}
+
+async function promptScaleDeployment(id, currentReplicas = 1) {
+  const input = prompt(`Nhập số replicas mới cho deployment #${id}:`, currentReplicas ?? 1);
+  if (input === null) return;
+
+  const replicas = Number.parseInt(input, 10);
+  if (!Number.isFinite(replicas) || replicas < 0) {
+    showAlert('danger', 'Số replicas phải là số nguyên >= 0');
+    return;
+  }
+
+  if (replicas === 0) {
+    const confirmPause = confirm('Bạn đang scale deployment về 0 replicas (tạm dừng toàn bộ pod). Tiếp tục?');
+    if (!confirmPause) return;
+  }
+
+  await scaleDeploymentRequest(id, replicas);
+}
+
+async function scaleDeploymentRequest(id, replicas) {
+  try {
+    showAlert('info', `Đang scale ứng dụng #${id} lên ${replicas} replicas...`);
+
+    const res = await fetch(`/admin/deployment-requests/${id}/scale`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replicas })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Scale thất bại');
     }
+
+    const scaleLabel = data.replicas === 0 ? '0 replicas (tạm dừng)' : `${data.replicas} replicas`;
+    showAlert('success', `✅ Đã scale ứng dụng #${data.applicationId} về ${scaleLabel}`);
+    await loadDeploymentRequests();
+  } catch (err) {
+    showAlert('danger', err.message || 'Scale thất bại');
+  }
+}
+
+async function viewDeploymentDiagnostics(id) {
+  try {
+    const resp = await fetch(`/admin/deployment-requests/${id}/diagnostics`);
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.message || data.error || 'Không thể lấy diagnostics');
+    }
+    stopPollingDeploymentLogs();
+    currentViewingDeploymentId = null;
+    const consoleEl = document.getElementById('deployment-logs-console');
+    if (consoleEl) {
+      consoleEl.innerHTML = `<div class="small mb-2">Deployment diagnostics cho #${id}</div><pre style="white-space: pre-wrap; font-size: 12px;">${escapeHtml(data.diagnostics || 'Không có dữ liệu')}</pre>`;
+      consoleEl.scrollTop = 0;
+    }
+    showAlert('info', 'Đã tải diagnostics cho deployment #' + id);
+  } catch (error) {
+    showAlert('danger', error.message || 'Không thể lấy diagnostics');
   }
 }
 async function viewDeploymentRequest(id) {
@@ -6617,16 +6722,8 @@ async function deleteDeploymentRequest(id, appName, namespace) {
     return;
   }
 
-  const alertDiv = document.getElementById('deployment-alert');
-  const messageSpan = document.getElementById('deployment-message');
-
   try {
-    // Show loading
-    if (alertDiv && messageSpan) {
-      alertDiv.className = 'alert alert-info';
-      alertDiv.style.display = 'block';
-      messageSpan.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Đang xóa yêu cầu và namespace...';
-    }
+    showAlert('info', `Đang xóa yêu cầu #${id} và dọn namespace...`);
 
     const response = await fetch(`/admin/deployment-requests/${id}`, {
       method: 'DELETE',
@@ -6638,11 +6735,6 @@ async function deleteDeploymentRequest(id, appName, namespace) {
     const data = await response.json();
 
     if (response.ok && data.success) {
-      // Show success
-      if (alertDiv && messageSpan) {
-        alertDiv.className = 'alert alert-success';
-        messageSpan.textContent = data.message || 'Đã xóa yêu cầu và namespace thành công!';
-      }
       showAlert('success', data.message || 'Đã xóa yêu cầu và namespace thành công!');
       
       // Reload deployment requests list
@@ -6653,21 +6745,12 @@ async function deleteDeploymentRequest(id, appName, namespace) {
         clearDeploymentLogs();
       }
     } else {
-      // Show error
       const errorMsg = data.message || data.error || 'Lỗi không xác định';
-      if (alertDiv && messageSpan) {
-        alertDiv.className = 'alert alert-danger';
-        messageSpan.textContent = '❌ Lỗi: ' + errorMsg;
-      }
       showAlert('danger', '❌ Lỗi xóa yêu cầu: ' + escapeHtml(errorMsg));
     }
   } catch (error) {
     console.error('Error deleting deployment request:', error);
     const errorMsg = error.message || 'Lỗi kết nối';
-    if (alertDiv && messageSpan) {
-      alertDiv.className = 'alert alert-danger';
-      messageSpan.textContent = '❌ Lỗi: ' + errorMsg;
-    }
     showAlert('danger', '❌ Lỗi xóa yêu cầu: ' + escapeHtml(errorMsg));
   }
 }

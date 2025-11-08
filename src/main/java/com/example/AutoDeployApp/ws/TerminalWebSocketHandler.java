@@ -69,7 +69,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
 
     private void handleInitialConnection(WebSocketSession ws, TextMessage message) throws Exception {
         try {
-            // Parse JSON configuration
+            // Phân tích cấu hình JSON
             @SuppressWarnings("unchecked")
             Map<String, Object> cfg = objectMapper.readValue(message.getPayload(), Map.class);
             String host = getStringValue(cfg, "host");
@@ -79,7 +79,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
             String passwordB64 = getStringValue(cfg, "passwordB64");
             Long serverId = getLongValue(cfg, "serverId");
 
-            // Decode base64 password if provided
+            // Giải mã mật khẩu base64 nếu client gửi kèm
             if (password == null && passwordB64 != null) {
                 try {
                     password = new String(Base64.getDecoder().decode(passwordB64), StandardCharsets.UTF_8);
@@ -88,18 +88,18 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
                 }
             }
 
-            // Try to get password from session cache
+            // Thử lấy mật khẩu từ cache trong session
             if ((password == null || password.isBlank()) && serverId != null) {
                 password = getPasswordFromSessionCache(ws, serverId);
             }
 
-            // Validate required parameters
+            // Kiểm tra các tham số bắt buộc
             if (host == null || username == null) {
                 sendErrorMessage(ws, "Missing host or username");
                 return;
             }
 
-            // Establish SSH connection
+            // Thiết lập kết nối SSH
             SshBinding binding = establishSshConnection(ws, host, port, username, password, serverId);
             if (binding != null) {
                 connectionMap.put(ws.getId(), binding);
@@ -136,7 +136,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         boolean connected = false;
 
         try {
-            // Try SSH key authentication first
+            // Ưu tiên xác thực bằng SSH key trước
             if (serverId != null) {
                 String pem = getServerPrivateKey(serverId);
                 if (pem != null && !pem.isBlank()) {
@@ -147,7 +147,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
                 }
             }
 
-            // Fallback to password authentication
+            // Nếu không được thì quay về xác thực mật khẩu
             if (!connected) {
                 if (password == null || password.isBlank()) {
                     sendErrorMessage(ws, "Missing password and SSH key not available");
@@ -162,7 +162,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
                 return null;
             }
 
-            // Create shell channel
+            // Tạo kênh shell
             ChannelShell channel = (ChannelShell) ssh.openChannel("shell");
             channel.setPty(true);
             channel.connect(3000);
@@ -214,12 +214,12 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void configureSshSession(Session session) throws JSchException {
-        // TODO: Implement proper host key verification for production
-        // For now, keeping the original behavior but with better logging
+        // TODO: Bổ sung kiểm tra host key chuẩn cho môi trường production
+        // Tạm thời giữ hành vi cũ nhưng bổ sung logging chi tiết hơn
         session.setConfig("StrictHostKeyChecking", "no");
         session.setConfig("UserKnownHostsFile", "/dev/null");
 
-        // Add timeout configurations
+        // Thêm cấu hình timeout để giữ kết nối ổn định
         session.setConfig("ServerAliveInterval", "60");
         session.setConfig("ServerAliveCountMax", "3");
     }
@@ -311,7 +311,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    // Helper methods for JSON parsing
+    // Các hàm hỗ trợ phân tích JSON
     private String getStringValue(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value != null ? String.valueOf(value) : null;
@@ -344,7 +344,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
                     try {
                         key = Long.parseLong(sKey);
                     } catch (NumberFormatException ignored) {
-                        // Continue to next entry
+                        // Nếu không parse được thì bỏ qua phần tử tiếp theo
                     }
                 }
                 if (key != null && key.equals(serverId) && entry.getValue() instanceof String password) {
@@ -382,7 +382,7 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    // Shutdown hook for graceful cleanup
+    // Hook dọn dẹp khi ứng dụng dừng
     public static void shutdown() {
         logger.info("Shutting down TerminalWebSocketHandler executor service");
         executorService.shutdown();

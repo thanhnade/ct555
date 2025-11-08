@@ -10,7 +10,7 @@ public class PageController {
 
     @GetMapping({ "/", "/login" })
     public String loginPage() {
-        return "login"; // resolves to resources/templates/login.html
+        return "login"; // ánh xạ tới resources/templates/login.html
     }
 
     @GetMapping("/home-user")

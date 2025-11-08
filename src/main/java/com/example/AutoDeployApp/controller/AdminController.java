@@ -75,20 +75,19 @@ public class AdminController {
 
     @DeleteMapping("/users/{id}")
     public ResponseEntity<?> deleteUser(@PathVariable Long id) {
-        // Cleanup all apps and namespace for this user across clusters, then delete
-        // user
+        // Dọn tất cả ứng dụng và namespace của người dùng này trên mọi cluster rồi mới xóa tài khoản
         User user = userService.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         String username = user.getUsername();
         String userNamespace = sanitizeUserNamespace(username);
 
-        // Find all applications of this user
+        // Lấy danh sách toàn bộ ứng dụng của người dùng
         List<Application> userApps = applicationService.getApplicationsByUserId(id);
 
         List<String> cleanupErrors = new ArrayList<>();
 
-        // First, delete K8s resources for each app (but not namespace)
+        // Bước 1: xóa tài nguyên K8s của từng ứng dụng (không xóa namespace)
         for (Application app : userApps) {
             try {
                 Long clusterId = app.getClusterId();
@@ -108,7 +107,7 @@ public class AdminController {
             }
         }
 
-        // Then, delete namespace on each distinct cluster used by the user
+        // Bước 2: xóa namespace trên từng cluster mà người dùng đã sử dụng
         userApps.stream()
                 .map(Application::getClusterId)
                 .filter(Objects::nonNull)
@@ -188,7 +187,7 @@ public class AdminController {
             jakarta.servlet.http.HttpServletRequest request) {
 
         try {
-            // Kiểm tra admin role (có thể thêm interceptor sau)
+            // Kiểm tra quyền admin (có thể thêm interceptor sau)
             var session = request.getSession(false);
             if (session == null) {
                 return ResponseEntity.status(401)
@@ -203,18 +202,18 @@ public class AdminController {
 
             List<Application> applications;
             if (status != null && !status.trim().isEmpty()) {
-                // Filter theo status nếu có
+                // Lọc theo trạng thái nếu có
                 String statusFilter = status.trim();
                 if ("PENDING".equalsIgnoreCase(statusFilter)) {
                     applications = applicationService.getPendingApplications();
                 } else {
-                    // Filter theo status khác (RUNNING, ERROR, etc.)
+                    // Lọc theo trạng thái khác (RUNNING, ERROR, ...)
                     applications = applicationService.getAllApplications().stream()
                             .filter(app -> statusFilter.equalsIgnoreCase(app.getStatus()))
                             .collect(Collectors.toList());
                 }
             } else {
-                // Lấy tất cả applications (không filter) - sắp xếp theo created_at DESC
+                // Lấy toàn bộ ứng dụng (không lọc) và sắp xếp created_at DESC
                 applications = applicationService.getAllApplications();
             }
 
@@ -224,10 +223,10 @@ public class AdminController {
                             .filter(Objects::nonNull)
                             .collect(Collectors.toSet()));
 
-            // Convert to DTO với username
+            // Chuyển về DTO kèm thông tin username
             List<Map<String, Object>> response = applications.stream()
                     .map(app -> {
-                        // Lấy username từ userId
+                        // Tra cứu username từ userId
                         String username = "Unknown";
                         if (app.getUserId() != null) {
                             User matchedUser = userLookup.get(app.getUserId());
@@ -252,6 +251,7 @@ public class AdminController {
                         map.put("memoryLimit", app.getMemoryLimit());
                         map.put("replicas", app.getReplicas());
                         map.put("containerPort", app.getContainerPort());
+                        map.put("replicasRequested", app.getReplicasRequested());
                         map.put("createdAt", app.getCreatedAt());
                         return map;
                     })
@@ -277,7 +277,7 @@ public class AdminController {
             jakarta.servlet.http.HttpServletRequest request) {
 
         try {
-            // Kiểm tra admin role
+            // Kiểm tra quyền admin
             var session = request.getSession(false);
             if (session == null) {
                 return ResponseEntity.status(401)
@@ -290,7 +290,7 @@ public class AdminController {
                         .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền xử lý"));
             }
 
-            // Parse optional clusterId from request body (admin có thể chọn thủ công)
+            // Đọc clusterId tùy chọn từ request body (admin có thể chọn thủ công)
             Long requestedClusterId = null;
             if (requestBody != null && requestBody.containsKey("clusterId")) {
                 Object clusterObj = requestBody.get("clusterId");
@@ -308,7 +308,7 @@ public class AdminController {
                 }
             }
 
-            // Load Application từ database
+            // Tải Application từ database
             Application application = applicationService.getApplicationById(id)
                     .orElseThrow(() -> new IllegalArgumentException("Application not found"));
 
@@ -321,7 +321,7 @@ public class AdminController {
                                         + ". Chỉ có thể retry khi status là ERROR."));
             }
 
-            // Nếu đang retry từ ERROR, cleanup resources cũ trước
+            // Nếu đang retry từ ERROR, dọn tài nguyên cũ trước
             boolean isRetry = "ERROR".equals(currentStatus);
             if (isRetry && application.getClusterId() != null
                     && application.getK8sDeploymentName() != null
@@ -338,7 +338,7 @@ public class AdminController {
                 } catch (Exception cleanupException) {
                     logger.warn("Failed to cleanup old K8s resources, will continue with new deployment",
                             cleanupException);
-                    // Continue anyway - resources might not exist or already deleted
+                    // Tiếp tục triển khai vì có thể tài nguyên đã không tồn tại hoặc bị xóa trước đó
                 }
             }
 
@@ -348,15 +348,14 @@ public class AdminController {
 
             String username = user.getUsername();
             String appName = application.getAppName();
-            // Namespace đã được gán khi tạo application (mỗi user 1 namespace), nên dùng
-            // trực tiếp
+            // Namespace đã được gán khi tạo application (mỗi user một namespace) nên dùng trực tiếp
             String namespace = application.getK8sNamespace();
             if (namespace == null || namespace.trim().isEmpty()) {
-                // Fallback: tạo theo username nếu namespace chưa có (legacy data)
+                // Phòng hờ: tạo namespace theo username nếu dữ liệu cũ chưa lưu
                 namespace = sanitizeUserNamespace(username);
             }
 
-            // Enforce: mỗi user chỉ có 1 namespace = sanitized(username)
+            // Áp đặt quy tắc: mỗi user chỉ có một namespace = sanitized(username)
             String expectedUserNamespace = sanitizeUserNamespace(username);
             if (!expectedUserNamespace.equals(namespace)) {
                 namespace = expectedUserNamespace;
@@ -396,12 +395,12 @@ public class AdminController {
                         clusterId);
             }
 
-            // Lưu clusterId ngay sau khi chọn cluster (trước khi tạo resources)
-            // Để có thể cleanup nếu deployment lỗi
+            // Lưu clusterId ngay sau khi chọn cluster (trước khi tạo tài nguyên)
+            // Để có thể dọn dẹp nếu deployment gặp lỗi
             application.setClusterId(clusterId);
             applicationService.updateApplication(application);
 
-            // Helper method để append log
+            // Hàm tiện ích dùng để nối log
             java.util.function.Consumer<String> appendLog = (logMessage) -> {
                 String currentLogs = application.getDeploymentLogs() != null ? application.getDeploymentLogs() : "";
                 String timestamp = java.time.LocalDateTime.now()
@@ -411,14 +410,14 @@ public class AdminController {
                 applicationService.updateApplication(application);
             };
 
-            // Clear old logs nếu đang retry
+            // Xóa log cũ nếu đang retry
             if (isRetry) {
                 application.setDeploymentLogs("");
                 applicationService.updateApplication(application);
                 appendLog.accept("🔄 Bắt đầu retry quá trình triển khai ứng dụng: " + appName);
                 appendLog.accept("🧹 Đã cleanup các K8s resources cũ (nếu có)");
             } else {
-                // Initialize logs cho lần deploy đầu tiên
+                // Khởi tạo log cho lần deploy đầu tiên
                 appendLog.accept("🚀 Bắt đầu quá trình triển khai ứng dụng: " + appName);
             }
 
@@ -441,19 +440,19 @@ public class AdminController {
                 appendLog.accept("🔗 Đang tạo kết nối đến Kubernetes cluster...");
                 appendLog.accept("✅ Đã tạo KubernetesClient thành công");
 
-                // 4. Ensure namespace exists
+                // 4. Đảm bảo namespace tồn tại
                 appendLog.accept("📦 Đang tạo namespace: " + namespace);
                 kubernetesService.ensureNamespace(namespace, clusterId);
                 appendLog.accept("✅ Namespace đã được tạo/kiểm tra: " + namespace);
 
-                // 5. Generate resource names
+                // 5. Sinh tên tài nguyên
                 String deploymentName = appName.toLowerCase().replaceAll("[^a-z0-9-]", "-") + "-" + application.getId();
                 String serviceName = "svc-" + deploymentName;
                 String ingressName = "ing-" + deploymentName;
                 appendLog.accept("📝 Tên resources: Deployment=" + deploymentName + ", Service=" + serviceName
                         + ", Ingress=" + ingressName);
 
-                // 5.5 Validate docker image exists (basic pre-check for Docker Hub)
+                // 5.5 Kiểm tra docker image tồn tại (pre-check đơn giản cho Docker Hub)
                 var imageCheck = validateDockerImageInternal(dockerImage);
                 if (!imageCheck.valid) {
                     appendLog.accept("❌ Image không hợp lệ: " + dockerImage + ". Lý do: " + imageCheck.message);
@@ -463,15 +462,15 @@ public class AdminController {
                                     "Docker image không tồn tại hoặc không truy cập được: " + imageCheck.message));
                 }
 
-                // 6. Create Deployment
+                // 6. Tạo Deployment
                 appendLog.accept("🔨 Đang tạo Deployment: " + deploymentName + " với image: " + dockerImage);
 
-                // Get parameters from request body, application entity, or use defaults
-                // Default values: Container Port=80, Replicas=1
+                // Lấy tham số từ request body, bản ghi application hoặc dùng mặc định
+                // Giá trị mặc định: Container Port=80, Replicas=1
                 int containerPort = application.getContainerPort() != null ? application.getContainerPort() : 80;
                 int replicas = application.getReplicas() != null ? application.getReplicas() : 1;
 
-                // Override with request body values if provided
+                // Ghi đè bằng giá trị từ request body nếu có
                 if (requestBody != null) {
                     if (requestBody.containsKey("containerPort")) {
                         Object portObj = requestBody.get("containerPort");
@@ -481,7 +480,7 @@ public class AdminController {
                             try {
                                 containerPort = Integer.parseInt((String) portObj);
                             } catch (NumberFormatException e) {
-                                // Keep existing value
+                                // Giữ giá trị hiện tại
                             }
                         }
                     }
@@ -493,21 +492,20 @@ public class AdminController {
                             try {
                                 replicas = Integer.parseInt((String) replicasObj);
                             } catch (NumberFormatException e) {
-                                // Keep existing value
+                                // Giữ giá trị hiện tại
                             }
                         }
                     }
                 }
 
-                // Get resource limits from request body or application, with defaults
-                // Default values: CPU Request=100m, CPU Limit=500m, Memory Request=128Mi,
-                // Memory Limit=256Mi
+                // Lấy cấu hình resource limit từ request hoặc từ application, có giá trị mặc định
+                // Mặc định: CPU Request=100m, CPU Limit=500m, Memory Request=128Mi, Memory Limit=256Mi
                 String cpuRequest = "100m";
                 String cpuLimit = "500m";
                 String memoryRequest = "128Mi";
                 String memoryLimit = "256Mi";
 
-                // Use values from application entity if available (not null/empty)
+                // Dùng giá trị trên entity nếu đã có (khác null/rỗng)
                 if (application.getCpuRequest() != null && !application.getCpuRequest().trim().isEmpty()) {
                     cpuRequest = application.getCpuRequest();
                 }
@@ -521,7 +519,7 @@ public class AdminController {
                     memoryLimit = application.getMemoryLimit();
                 }
 
-                // Override with request body values if provided (not null/empty)
+                // Ghi đè bằng giá trị từ request body nếu có (khác null/rỗng)
                 if (requestBody != null) {
                     if (requestBody.containsKey("cpuRequest")) {
                         String reqCpuRequest = (String) requestBody.get("cpuRequest");
@@ -549,7 +547,7 @@ public class AdminController {
                     }
                 }
 
-                // Parse env vars from request body
+                // Phân tích các biến môi trường từ request body
                 Map<String, String> envVars = null;
                 if (requestBody != null && requestBody.containsKey("envVars")) {
                     try {
@@ -576,7 +574,7 @@ public class AdminController {
                 application.setK8sDeploymentName(deploymentName);
                 applicationService.updateApplication(application);
 
-                // 7. Create Service
+                // 7. Tạo Service
                 appendLog.accept("🔌 Đang tạo Service: " + serviceName);
                 kubernetesService.createService(namespace, serviceName, deploymentName, 80, containerPort, clusterId);
                 appendLog.accept("✅ Service đã được tạo: " + serviceName);
@@ -584,7 +582,7 @@ public class AdminController {
                 application.setK8sServiceName(serviceName);
                 applicationService.updateApplication(application);
 
-                // 8. Create Ingress
+                // 8. Tạo Ingress
                 appendLog.accept("🌐 Đang tạo Ingress: " + ingressName);
                 kubernetesService.createIngress(namespace, ingressName, serviceName, 80, clusterId, appName);
                 appendLog.accept("✅ Ingress đã được tạo: " + ingressName);
@@ -592,31 +590,32 @@ public class AdminController {
                 application.setK8sIngressName(ingressName);
                 applicationService.updateApplication(application);
 
-                // 9. Wait for Deployment ready (timeout: 2 minutes)
+                // 9. Chờ Deployment sẵn sàng (timeout 2 phút)
                 appendLog.accept("⏳ Đang chờ Deployment sẵn sàng... (timeout: 2 phút)");
                 kubernetesService.waitForDeploymentReady(namespace, deploymentName, 2, clusterId);
                 appendLog.accept("✅ Deployment đã sẵn sàng: " + deploymentName);
 
-                // 10. Get Ingress URL from MetalLB
+                // 10. Lấy Ingress URL từ MetalLB
                 appendLog.accept("🔍 Đang lấy Ingress URL từ MetalLB...");
                 String accessUrl = kubernetesService.getIngressURL(namespace, ingressName, clusterId);
                 appendLog.accept("✅ Đã lấy Ingress URL: " + accessUrl);
 
-                // 11. Update Application with K8s metadata
+                // 11. Cập nhật metadata K8s vào Application
                 appendLog.accept("💾 Đang lưu thông tin deployment vào database...");
                 application.setStatus("RUNNING");
                 application.setK8sDeploymentName(deploymentName);
                 application.setK8sServiceName(serviceName);
                 application.setK8sIngressName(ingressName);
                 application.setAccessUrl(accessUrl);
+                application.setReplicas(replicas);
                 // clusterId đã được lưu sớm hơn (sau khi chọn cluster), không cần set lại
 
                 Application savedApplication = applicationService.updateApplication(application);
                 appendLog.accept("✅ Đã lưu tất cả thông tin deployment vào database");
                 appendLog.accept("🎉 Triển khai hoàn tất thành công!");
-                String appNameForLog = savedApplication.getAppName(); // For lambda
+                String appNameForLog = savedApplication.getAppName(); // Biến dùng trong lambda
 
-                // Log activity
+                // Ghi lại hoạt động
                 Object adminUsername = session.getAttribute("USER_USERNAME");
                 if (adminUsername != null) {
                     userService.findByUsername(adminUsername.toString()).ifPresent(admin -> {
@@ -626,7 +625,7 @@ public class AdminController {
                     });
                 }
 
-                // Return response
+                // Trả response
                 Map<String, Object> response = new HashMap<>();
                 response.put("success", true);
                 response.put("applicationId", savedApplication.getId());
@@ -644,8 +643,8 @@ public class AdminController {
                 return ResponseEntity.ok(response);
 
             } catch (Exception k8sException) {
-                // If K8s deployment fails, update status to ERROR and log error
-                // clusterId đã được lưu sớm hơn, nên có thể cleanup resources nếu cần
+                // Nếu triển khai K8s lỗi, cập nhật trạng thái ERROR và ghi log
+                // clusterId đã được lưu sẵn, nên có thể dọn tài nguyên nếu cần
                 String errorLog = "❌ LỖI: " + k8sException.getMessage();
                 if (application.getDeploymentLogs() != null) {
                     String currentLogs = application.getDeploymentLogs();
@@ -660,8 +659,7 @@ public class AdminController {
                                     + "] " + errorLog + "\n");
                 }
                 application.setStatus("ERROR");
-                // Giữ nguyên clusterId đã lưu để có thể cleanup sau (clusterId không bị thay
-                // đổi)
+                // Giữ nguyên clusterId đã lưu để dọn dẹp sau (clusterId không thay đổi)
                 applicationService.updateApplication(application);
 
                 logger.error("Failed to deploy to Kubernetes", k8sException);
@@ -674,6 +672,178 @@ public class AdminController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Bad Request", "message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Admin: Retry triển khai lại một deployment request (shortcut cho process)
+     */
+    @PostMapping("/deployment-requests/{id}/retry")
+    public ResponseEntity<?> retryDeploymentRequest(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> requestBody,
+            @RequestHeader(value = "X-Forwarded-For", required = false) String xff,
+            @RequestHeader(value = "X-Real-IP", required = false) String xri,
+            jakarta.servlet.http.HttpServletRequest request) {
+        return processDeploymentRequest(id, requestBody, xff, xri, request);
+    }
+
+    /**
+     * Admin: Scale số replicas của Deployment đã chạy
+     */
+    @PostMapping("/deployment-requests/{id}/scale")
+    public ResponseEntity<?> scaleDeploymentRequest(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body,
+            jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (session == null) {
+                return ResponseEntity.status(401)
+                        .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
+            }
+            String userRole = (String) session.getAttribute("USER_ROLE");
+            if (userRole == null || !userRole.equalsIgnoreCase("ADMIN")) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền scale ứng dụng"));
+            }
+
+            if (body == null || !body.containsKey("replicas")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Validation Error", "message", "Thiếu tham số replicas"));
+            }
+
+            int replicas;
+            Object replicaObj = body.get("replicas");
+            if (replicaObj instanceof Number) {
+                replicas = ((Number) replicaObj).intValue();
+            } else if (replicaObj instanceof String) {
+                try {
+                    replicas = Integer.parseInt(((String) replicaObj).trim());
+                } catch (NumberFormatException nfe) {
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Validation Error", "message", "replicas phải là số nguyên"));
+                }
+            } else {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Validation Error", "message", "replicas không hợp lệ"));
+            }
+
+            if (replicas < 0 || replicas > 200) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Validation Error",
+                                "message", "replicas phải nằm trong khoảng 0-200"));
+            }
+
+            Application application = applicationService.getApplicationById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Application not found"));
+
+            boolean canScale = "RUNNING".equalsIgnoreCase(application.getStatus())
+                    || "PAUSED".equalsIgnoreCase(application.getStatus());
+            if (!canScale) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid State",
+                                "message", "Chỉ có thể scale ứng dụng khi đang RUNNING hoặc PAUSED"));
+            }
+
+            Long clusterId = application.getClusterId();
+            String namespace = application.getK8sNamespace();
+            String deploymentName = application.getK8sDeploymentName();
+
+            if (clusterId == null || namespace == null || namespace.isBlank()
+                    || deploymentName == null || deploymentName.isBlank()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid Deployment",
+                                "message", "Ứng dụng chưa được triển khai đầy đủ để scale"));
+            }
+
+            kubernetesService.scaleDeployment(clusterId, namespace, deploymentName, replicas);
+
+            application.setReplicas(replicas);
+            if (replicas == 0) {
+                application.setStatus("PAUSED");
+            } else if (!"RUNNING".equalsIgnoreCase(application.getStatus())) {
+                application.setStatus("RUNNING");
+            }
+            application.setReplicasRequested(null);
+
+            String currentLogs = application.getDeploymentLogs() != null ? application.getDeploymentLogs() : "";
+            String timestamp = java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
+            application.setDeploymentLogs(
+                    currentLogs + "[" + timestamp + "] 🔁 Scale deployment về " + replicas + " replicas\n");
+
+            applicationService.updateApplication(application);
+
+            Object adminUsername = session.getAttribute("USER_USERNAME");
+            if (adminUsername != null) {
+                userService.findByUsername(adminUsername.toString()).ifPresent(admin -> {
+                    String ip = request.getHeader("X-Forwarded-For");
+                    if (ip == null) {
+                        ip = request.getHeader("X-Real-IP");
+                    }
+                    userService.logActivity(admin, "DEPLOY_SCALE",
+                            "Scale ứng dụng " + application.getAppName() + " lên " + replicas + " replicas", ip);
+                });
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "applicationId", application.getId(),
+                    "replicas", replicas));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Validation Error", "message", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Failed to scale deployment request {}", id, e);
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Admin: xem chẩn đoán deployment (pods/logs) để debug lỗi
+     */
+    @GetMapping("/deployment-requests/{id}/diagnostics")
+    public ResponseEntity<?> getDeploymentDiagnostics(
+            @PathVariable Long id,
+            jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (session == null) {
+                return ResponseEntity.status(401)
+                        .body(Map.of("error", "Unauthorized", "message", "Vui lòng đăng nhập"));
+            }
+            String userRole = (String) session.getAttribute("USER_ROLE");
+            if (userRole == null || !userRole.equalsIgnoreCase("ADMIN")) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền truy cập"));
+            }
+
+            Application application = applicationService.getApplicationById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Application not found"));
+
+            Long clusterId = application.getClusterId();
+            String namespace = application.getK8sNamespace();
+            String deploymentName = application.getK8sDeploymentName();
+            if (clusterId == null || namespace == null || namespace.isBlank()
+                    || deploymentName == null || deploymentName.isBlank()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid Deployment",
+                                "message", "Ứng dụng chưa có thông tin triển khai để thu thập diagnostics"));
+            }
+
+            String diagnostics = kubernetesService.collectDeploymentDiagnostics(namespace, deploymentName, clusterId,
+                    80);
+            return ResponseEntity.ok(Map.of(
+                    "applicationId", application.getId(),
+                    "diagnostics", diagnostics));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Validation Error", "message", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500)
                     .body(Map.of("error", "Internal Server Error", "message", e.getMessage()));
@@ -719,37 +889,37 @@ public class AdminController {
         }
     }
 
-    // Very basic validator focusing on Docker Hub public images
+    // Trình kiểm tra cơ bản cho Docker Hub (public image)
     private ImageValidation validateDockerImageInternal(String image) {
         try {
             if (image == null || image.trim().isEmpty()) {
                 return new ImageValidation(false, "Chuỗi image rỗng");
             }
             String ref = image.trim();
-            // Extract tag
+            // Tách phần tag
             String namePart = ref;
             String tag = "latest";
             int idx = ref.lastIndexOf(':');
-            if (idx > 0 && ref.indexOf('/') < idx) { // has tag
+            if (idx > 0 && ref.indexOf('/') < idx) { // có tag
                 namePart = ref.substring(0, idx);
                 tag = ref.substring(idx + 1);
             }
 
-            // Detect registry
+            // Xác định registry
             String registry = "docker.io";
             String path = namePart;
             int slashIdx = namePart.indexOf('/');
             if (slashIdx > 0
                     && (namePart.contains(".") || namePart.contains(":") || namePart.startsWith("localhost"))) {
-                // Explicit registry provided
+                // Đã chỉ định registry rõ ràng
                 int firstSlash = namePart.indexOf('/');
                 registry = namePart.substring(0, firstSlash);
                 path = namePart.substring(firstSlash + 1);
             }
 
             if ("docker.io".equals(registry) || "registry-1.docker.io".equals(registry)) {
-                // Docker Hub: map to hub API
-                // If no namespace, assume library/
+                // Docker Hub: chuyển đổi sang API của hub
+                // Không có namespace thì mặc định là library/
                 if (!path.contains("/")) {
                     path = "library/" + path;
                 }
@@ -762,7 +932,7 @@ public class AdminController {
                 return new ImageValidation(false, "Không xác minh được (HTTP " + code + ")");
             }
 
-            // Generic registry check (unauth HEAD to v2 manifest) - best effort
+            // Kiểm tra registry bất kỳ (gửi HEAD chưa xác thực tới manifest v2) - best effort
             String manifestUrl = "https://" + registry + "/v2/" + path + "/manifests/" + tag;
             int code = httpHead(manifestUrl, "application/vnd.docker.distribution.manifest.v2+json");
             if (code == 200)
@@ -775,7 +945,7 @@ public class AdminController {
 
     private int httpHeadOrGet(String url) throws Exception {
         int code = httpHead(url, null);
-        if (code == 405 || code == 403) { // fallback GET when HEAD not allowed
+        if (code == 405 || code == 403) { // fallback GET khi HEAD không được phép
             return httpGet(url);
         }
         return code;
@@ -830,7 +1000,7 @@ public class AdminController {
 
             return applicationService.getApplicationById(id)
                     .map(app -> {
-                        // Get username from userId
+                        // Lấy username từ userId
                         String username = "Unknown";
                         if (app.getUserId() != null) {
                             username = userService.findById(app.getUserId())
@@ -853,6 +1023,7 @@ public class AdminController {
                         map.put("memoryLimit", app.getMemoryLimit());
                         map.put("replicas", app.getReplicas());
                         map.put("containerPort", app.getContainerPort());
+                        map.put("replicasRequested", app.getReplicasRequested());
                         map.put("createdAt", app.getCreatedAt());
                         map.put("updatedAt", app.getUpdatedAt());
                         return ResponseEntity.ok(map);
@@ -902,13 +1073,13 @@ public class AdminController {
             String memoryRequest = body.getOrDefault("memoryRequest", app.getMemoryRequest());
             String memoryLimit = body.getOrDefault("memoryLimit", app.getMemoryLimit());
 
-            // Update replicas and containerPort if provided
+            // Cập nhật replicas và containerPort nếu client gửi lên
             if (body.containsKey("replicas")) {
                 try {
                     int replicas = Integer.parseInt(body.get("replicas"));
                     app.setReplicas(replicas);
                 } catch (NumberFormatException e) {
-                    // Invalid number, keep existing value
+                    // Số không hợp lệ, giữ nguyên giá trị cũ
                 }
             }
             if (body.containsKey("containerPort")) {
@@ -916,7 +1087,7 @@ public class AdminController {
                     int containerPort = Integer.parseInt(body.get("containerPort"));
                     app.setContainerPort(containerPort);
                 } catch (NumberFormatException e) {
-                    // Invalid number, keep existing value
+                    // Số không hợp lệ, giữ nguyên giá trị cũ
                 }
             }
 
@@ -1024,11 +1195,11 @@ public class AdminController {
                         .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền truy cập"));
             }
 
-            // Load Application từ database
+            // Đọc Application từ database
             Application application = applicationService.getApplicationById(id)
                     .orElseThrow(() -> new IllegalArgumentException("Application not found"));
 
-            // Return logs
+            // Trả về log
             Map<String, Object> response = new HashMap<>();
             response.put("logs", application.getDeploymentLogs() != null ? application.getDeploymentLogs() : "");
             response.put("status", application.getStatus());
@@ -1067,7 +1238,7 @@ public class AdminController {
                         .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền xóa"));
             }
 
-            // Load Application từ database
+            // Đọc Application từ database
             Application application = applicationService.getApplicationById(id)
                     .orElseThrow(() -> new IllegalArgumentException("Application not found"));
 

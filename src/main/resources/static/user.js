@@ -466,17 +466,27 @@ function loadProjects() {
       
       // Add applications
       if (applications && Array.isArray(applications)) {
-        allProjects = applications.map(app => ({
-          id: app.id,
-          name: app.appName || app.name || 'Unnamed',
-          status: mapStatus(app.status),
-          url: app.accessUrl || '',
-          dockerImage: app.dockerImage || '',
-          framework: 'Docker Image', // Vì form chỉ hỗ trợ Docker image
-          createdAt: app.createdAt || new Date().toISOString(),
-          updatedAt: app.updatedAt || app.createdAt || new Date().toISOString(),
-          type: 'application'
-        }));
+        allProjects = applications.map(app => {
+          const replicas = Number.isFinite(Number(app.replicas)) ? Number(app.replicas) : 1;
+          const rawStatus = (app.status || 'PENDING').toUpperCase();
+          const effectiveStatus = rawStatus === 'RUNNING' && replicas === 0 ? 'PAUSED' : rawStatus;
+          const pendingInfo = extractPendingScaleInfo(app.replicasRequested, replicas);
+          return {
+            id: app.id,
+            name: app.appName || app.name || 'Unnamed',
+            status: mapStatus(effectiveStatus),
+            url: app.accessUrl || '',
+            dockerImage: app.dockerImage || '',
+            framework: 'Docker Image', // Vì form chỉ hỗ trợ Docker image
+            createdAt: app.createdAt || new Date().toISOString(),
+            updatedAt: app.updatedAt || app.createdAt || new Date().toISOString(),
+            type: 'application',
+            rawStatus: rawStatus,
+            replicas,
+            pendingActionLabel: pendingInfo.label,
+            pendingActionTarget: pendingInfo.target
+          };
+        });
       }
       
       renderProjectsList(allProjects);
@@ -498,6 +508,8 @@ function loadProjects() {
 }
 
 function mapStatus(status) {
+  if (!status) return 'pending';
+  const normalized = status.toUpperCase();
   const statusMap = {
     'UPLOADING': 'building',
     'EXTRACTING': 'building',
@@ -507,9 +519,21 @@ function mapStatus(status) {
     'RUNNING': 'running',
     'STOPPED': 'stopped',
     'ERROR': 'error',
-    'PENDING': 'pending'
+    'PENDING': 'pending',
+    'PAUSED': 'paused'
   };
-  return statusMap[status] || status.toLowerCase();
+  return statusMap[normalized] || normalized.toLowerCase();
+}
+
+function extractPendingScaleInfo(replicasRequested, fallbackReplicas) {
+  if (!Number.isFinite(Number(replicasRequested))) {
+    return { label: '', target: null };
+  }
+  const target = Number(replicasRequested);
+  const label = target === 0
+    ? `Đã yêu cầu tạm dừng (0 → ${fallbackReplicas})`
+    : `Đã yêu cầu scale: ${fallbackReplicas} → ${target}`;
+  return { label, target };
 }
 
 function renderProjectsList(projects) {
@@ -545,6 +569,7 @@ function renderProjectsList(projects) {
     switch (status) {
       case 'running': return '#10b981';
       case 'stopped': return '#64748b';
+      case 'paused': return '#f97316';
       case 'building': return '#2563eb';
       case 'pending': return '#f59e0b';
       case 'error': return '#dc2626';
@@ -556,6 +581,7 @@ function renderProjectsList(projects) {
     switch (status) {
       case 'running': return 'Đang chạy';
       case 'stopped': return 'Đã dừng';
+      case 'paused': return 'Tạm dừng';
       case 'building': return 'Đang xây dựng';
       case 'pending': return 'Chờ phê duyệt';
       case 'error': return 'Lỗi';
@@ -623,6 +649,12 @@ function renderProjectsList(projects) {
                   <span class="status-dot" style="background-color: ${getStatusColor(project.status)}"></span>
                   ${getStatusLabel(project.status)}
                 </span>
+                ${project.pendingActionLabel ? `
+                  <span class="project-status" style="background-color: #fef9c3; color: #92400e;">
+                    <span class="status-dot" style="background-color: #facc15;"></span>
+                    ${escapeHtml(project.pendingActionLabel)}
+                  </span>
+                ` : ''}
               </div>
             </div>
 
@@ -663,16 +695,25 @@ function renderProjectsList(projects) {
                   <svg viewBox="0 0 24 24" fill="none">
                     <rect x="6" y="6" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
                   </svg>
-                  Dừng
+                  Yêu cầu tạm dừng
                 </button>
-              ` : project.status === 'stopped' ? `
+              ` : ''}
+
+              ${(project.status === 'paused' || project.status === 'stopped') ? `
                 <button class="action-btn start-btn" onclick="handleStartProject('${project.id}')">
                   <svg viewBox="0 0 24 24" fill="none">
                     <polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/>
                   </svg>
-                  Khởi động
+                  Yêu cầu khởi động
                 </button>
               ` : ''}
+
+              <button class="action-btn" onclick="handleCustomScale('${project.id}', ${project.replicas ?? 1})">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M4 12h16M4 6h8M12 18h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                Yêu cầu chỉnh replicas
+              </button>
               
               ${project.type !== 'request' ? `
                 <button class="action-btn delete-btn" onclick="handleDeleteProject('${project.id}')">
@@ -752,13 +793,27 @@ function renderPagination(totalPages, currentPage) {
 
 // Project actions
 async function handleStopProject(projectId) {
-  console.log('Stop project:', projectId);
-  loadProjects();
+  const confirmPause = confirm('Bạn muốn tạm dừng ứng dụng này (scale về 0 replicas)? Yêu cầu sẽ gửi tới admin.');
+  if (!confirmPause) return;
+  await submitScaleRequest(projectId, 0, 'Đã gửi yêu cầu tạm dừng. Vui lòng chờ admin phê duyệt.');
 }
 
 async function handleStartProject(projectId) {
-  console.log('Start project:', projectId);
-  loadProjects();
+  await submitScaleRequest(projectId, 1, 'Đã gửi yêu cầu khởi động. Vui lòng chờ admin phê duyệt.');
+}
+
+async function handleCustomScale(projectId, currentReplicas = 1) {
+  const input = prompt('Nhập số replicas mong muốn (0 để tạm dừng):', currentReplicas ?? 1);
+  if (input === null) return;
+  const replicas = Number.parseInt(input, 10);
+  if (!Number.isFinite(replicas) || replicas < 0) {
+    showNotification('Số replicas phải là số nguyên >= 0', 'danger');
+    return;
+  }
+  const message = replicas === 0
+    ? 'Đã gửi yêu cầu tạm dừng ứng dụng.'
+    : `Đã gửi yêu cầu scale ứng dụng lên ${replicas} replicas.`;
+  await submitScaleRequest(projectId, replicas, message);
 }
 
 async function handleDeleteProject(projectId) {
@@ -784,19 +839,41 @@ async function handleDeleteProject(projectId) {
   }
 }
 
- 
+async function submitScaleRequest(projectId, replicas, successMessage) {
+  try {
+    const response = await fetch(`/api/applications/${projectId}/actions/scale`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replicas })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || data.error || 'Không thể gửi yêu cầu scale');
+    }
+    showNotification(successMessage || data.message || 'Đã gửi yêu cầu tới admin', 'success');
+    loadProjects();
+  } catch (error) {
+    console.error('Scale request error:', error);
+    showNotification(error.message || 'Không thể gửi yêu cầu scale', 'danger');
+  }
+}
+
 
 // Legacy loadApplications function for compatibility
 async function loadApplications() {
   loadProjects();
 }
 
- 
-
 function showNotification(message, type = 'info') {
+  const colors = {
+    success: '#10b981',
+    danger: '#dc2626',
+    warning: '#f59e0b',
+    info: '#2563eb'
+  };
   const toast = document.createElement('div');
-  toast.style.cssText = `position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px; padding: 16px 20px; border-radius: 8px; color: white; background: ${type === 'success' ? '#10b981' : '#dc2626'}; box-shadow: 0 4px 12px rgba(0,0,0,0.15);`;
-  toast.textContent = message;
+  toast.style.cssText = `position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px; padding: 16px 20px; border-radius: 8px; color: white; background: ${colors[type] || colors.info}; box-shadow: 0 4px 12px rgba(0,0,0,0.15);`;
+  toast.innerHTML = message;
   document.body.appendChild(toast);
 
   setTimeout(() => toast.remove(), 5000);

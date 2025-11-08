@@ -94,11 +94,10 @@ public class ServerService {
                         "Không thể kết nối tới server, vui lòng kiểm tra host/port/username/password");
             }
         } else {
-            // KEY mode: tạm thời bỏ qua kiểm tra SSH do chưa giải mã private key trên
-            // server
+            // Ở chế độ KEY: tạm bỏ qua bước kiểm tra SSH do chưa giải mã private key trên server
             canSsh = false;
         }
-        // Reject if duplicate (host, port, username) already exists globally
+        // Từ chối nếu đã tồn tại bản ghi trùng host/port/username trên toàn hệ thống
         if (serverRepository.existsByHostAndPortAndUsername(host, resolvedPort, username)) {
             throw new IllegalArgumentException(
                     "Máy chủ đã tồn tại trong hệ thống. Vui lòng sử dụng máy chủ khác hoặc liên hệ admin để được hỗ trợ.");
@@ -135,10 +134,10 @@ public class ServerService {
         } else {
             s.setStatus(Server.ServerStatus.OFFLINE);
         }
-        // Save first to get ID
+        // Lưu trước để có được ID
         s = serverRepository.saveAndFlush(s);
 
-        // Auto-generate SSH key on first successful password login (no key selected)
+        // Tự tạo SSH key khi lần đầu đăng nhập bằng mật khẩu thành công (khi chưa chọn key)
         if (authType == Server.AuthType.PASSWORD && (s.getSshKey() == null)) {
             try {
                 SshKey created = generateAndInstallSshKey(host, resolvedPort, username, rawPassword);
@@ -150,7 +149,7 @@ public class ServerService {
                     s = serverRepository.saveAndFlush(s);
                 }
             } catch (Exception ignored) {
-                // Ignore key setup failure; password flow still works
+                // Nếu tạo key thất bại thì bỏ qua, phiên đăng nhập bằng mật khẩu vẫn hoạt động
             }
         }
         return s;
@@ -163,21 +162,21 @@ public class ServerService {
         Server s = serverRepository.findById(id).orElseThrow();
         Long addedBy = s.getAddedBy();
         if (host != null && !host.isBlank() && port != null && username != null && !username.isBlank()) {
-            // Check if another server (different ID) already uses this host/port/username
+            // Kiểm tra có server khác (ID khác) đang dùng cùng host/port/username không
             boolean dup = serverRepository.existsByHostAndPortAndUsernameAndAddedByAndIdNot(host, port, username,
                     addedBy, id);
             if (dup) {
                 throw new IllegalArgumentException("Máy chủ đã tồn tại (host/port/username trùng)");
             }
 
-            // Also check global uniqueness (across all users)
+            // Đồng thời đảm bảo tính duy nhất trên toàn bộ người dùng
             Optional<Server> existingServer = serverRepository.findByHostAndUsername(host, username);
             if (existingServer.isPresent() && !existingServer.get().getId().equals(id)) {
                 throw new IllegalArgumentException(
                         "Máy chủ đã tồn tại trong hệ thống. Vui lòng sử dụng máy chủ khác hoặc liên hệ admin để được hỗ trợ.");
             }
         }
-        // Build effective connection params (new values or existing)
+        // Xây dựng bộ thông số kết nối cuối cùng (giữa giá trị mới và giá trị cũ)
         String effHost = (host != null && !host.isBlank()) ? host : s.getHost();
         Integer effPort = (port != null) ? port : (s.getPort() != null ? s.getPort() : 22);
         String effUser = (username != null && !username.isBlank()) ? username : s.getUsername();
@@ -190,7 +189,7 @@ public class ServerService {
         boolean keyWorked = false;
         boolean usedPassword = false;
         if (connectionFieldChanged || suppliedNewPassword) {
-            // Prefer KEY trước nếu đã có key
+            // Ưu tiên dùng KEY trước nếu đã lưu key
             if (s.getSshKey() != null && s.getSshKey().getEncryptedPrivateKey() != null
                     && !s.getSshKey().getEncryptedPrivateKey().isBlank()) {
                 String pem = s.getSshKey().getEncryptedPrivateKey();
@@ -210,7 +209,7 @@ public class ServerService {
             }
         }
 
-        // Apply updates only after successful SSH
+        // Chỉ cập nhật vào DB sau khi SSH thành công
         if (host != null && !host.isBlank())
             s.setHost(host);
         if (port != null)
@@ -246,12 +245,12 @@ public class ServerService {
                 System.out.println(
                         "DEBUG: Set cluster to " + (c != null ? c.getId() : "null") + " for server " + s.getId());
             } else {
-                // sentinel (<0) means clear cluster assignment
+                // Giá trị sentinel (<0) nghĩa là xóa liên kết cluster
                 s.setCluster(null);
                 System.out.println("DEBUG: Cleared cluster (sentinel) for server " + s.getId());
             }
         } else {
-            // clusterId = null từ request body means clear cluster assignment
+            // clusterId = null trong request body nghĩa là xóa liên kết cluster
             s.setCluster(null);
             System.out.println("DEBUG: Cleared cluster (null) for server " + s.getId());
         }
@@ -348,7 +347,7 @@ public class ServerService {
                 if (channel.isClosed())
                     break;
                 if (System.currentTimeMillis() > deadline) {
-                    // hard timeout
+                    // timeout cứng
                     break;
                 }
                 try {
@@ -380,7 +379,7 @@ public class ServerService {
         com.jcraft.jsch.ChannelExec channel = null;
         try {
             JSch jsch = new JSch();
-            // Load key from PEM string
+            // Nạp key từ chuỗi PEM
             byte[] prv = privateKeyPem.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             jsch.addIdentity("inmem-key", prv, null, null);
             session = jsch.getSession(username, host, port);
@@ -405,7 +404,7 @@ public class ServerService {
                 if (channel.isClosed())
                     break;
                 if (System.currentTimeMillis() > deadline) {
-                    // hard timeout
+                    // timeout cứng
                     break;
                 }
                 try {
@@ -463,9 +462,8 @@ public class ServerService {
         Session session = null;
         try {
             JSch jsch = new JSch();
-            // Load key from PEM string via in-memory temporary file approach
-            // JSch supports in-memory identity with byte[] using addIdentity(name, prvkey,
-            // pubkey, passphrase)
+            // Nạp key từ chuỗi PEM bằng cách giữ trong bộ nhớ
+            // JSch hỗ trợ danh tính trong bộ nhớ bằng addIdentity(name, prvkey, pubkey, passphrase)
             byte[] prv = privateKeyPem.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             jsch.addIdentity("inmem-key", prv, null, null);
             session = jsch.getSession(username, host, port);
@@ -486,15 +484,15 @@ public class ServerService {
 
     public boolean tryConnectPreferKey(Server s, String fallbackPassword, int timeoutMs) {
         int port = s.getPort() != null ? s.getPort() : 22;
-        // 1) Try key if exists
+        // 1) Thử dùng key nếu có
         if (s.getSshKey() != null && s.getSshKey().getEncryptedPrivateKey() != null
                 && !s.getSshKey().getEncryptedPrivateKey().isBlank()) {
-            String pem = s.getSshKey().getEncryptedPrivateKey(); // currently stored plaintext PEM
+            String pem = s.getSshKey().getEncryptedPrivateKey(); // hiện đang lưu PEM thuần
             if (testSshWithKey(s.getHost(), port, s.getUsername(), pem, timeoutMs)) {
                 return true;
             }
         }
-        // 2) Fallback to password if provided
+        // 2) Nếu không thành công thì dùng mật khẩu (nếu có)
         if (fallbackPassword != null && !fallbackPassword.isBlank()) {
             return testSsh(s.getHost(), port, s.getUsername(), fallbackPassword, timeoutMs);
         }
@@ -570,7 +568,7 @@ public class ServerService {
     private SshKey generateAndInstallSshKey(String host, int port, String username, String rawPassword)
             throws Exception {
         JSch jsch = new JSch();
-        // 1) Generate RSA 2048 key
+        // 1) Sinh cặp khóa RSA 2048
         KeyPair kpair = KeyPair.genKeyPair(jsch, KeyPair.RSA, 2048);
         String comment = username + "@" + host;
         ByteArrayOutputStream pubOut = new ByteArrayOutputStream();
@@ -581,7 +579,7 @@ public class ServerService {
         String privateKeyPem = prvOut.toString(StandardCharsets.UTF_8);
         kpair.dispose();
 
-        // 2) Install public key into ~/.ssh/authorized_keys
+        // 2) Cài public key vào ~/.ssh/authorized_keys
         Session session = jsch.getSession(username, host, port);
         session.setConfig("StrictHostKeyChecking", "no");
         session.setPassword(rawPassword);
@@ -608,7 +606,7 @@ public class ServerService {
             session.disconnect();
         }
 
-        // 4) Persist key metadata
+        // 4) Lưu metadata khóa
         SshKey entity = new SshKey();
         entity.setKeyType(SshKey.KeyType.RSA);
         entity.setKeyLength(2048);
@@ -670,12 +668,12 @@ public class ServerService {
             String verifyResult = execSimple(session, verifyCmd, 3000).trim();
             System.out.println("[VERIFY] Ket qua: " + verifyResult);
 
-            // Debug: Kiem tra file sudoers co ton tai khong
+            // Ghi log debug: kiểm tra file sudoers có tồn tại không
             String debugCmd = "ls -la /etc/sudoers.d/" + username + " && cat /etc/sudoers.d/" + username;
             String debugResult = execSimple(session, debugCmd, 3000);
             System.out.println("[DEBUG] File sudoers: " + debugResult);
 
-            // Debug: Kiem tra quyen sudo hien tai
+            // Ghi log debug: kiểm tra quyền sudo hiện tại
             String sudoCheckCmd = "sudo -l 2>/dev/null | grep -i nopasswd || echo 'NO_NOPASSWD_FOUND'";
             String sudoCheckResult = execSimple(session, sudoCheckCmd, 3000);
             System.out.println("[DEBUG] Quyen sudo hien tai: " + sudoCheckResult);
@@ -724,7 +722,7 @@ public class ServerService {
         com.jcraft.jsch.ChannelExec channel = null;
         try {
             JSch jsch = new JSch();
-            // Load key from PEM string
+            // Nạp key từ chuỗi PEM
             byte[] prv = privateKeyPem.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             jsch.addIdentity("inmem-key", prv, null, null);
 
@@ -860,10 +858,10 @@ public class ServerService {
             return command; // Không có sudo password, chạy lệnh bình thường
         }
 
-        // Escape special characters trong password
+        // Thoát các ký tự đặc biệt trong password
         String escapedPassword = sudoPassword.replace("'", "'\"'\"'");
 
-        // Tạo lệnh với echo password và sudo -S
+        // Tạo lệnh dùng echo password kết hợp sudo -S
         return String.format("echo '%s' | sudo -S %s", escapedPassword, command);
     }
 

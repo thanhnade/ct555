@@ -81,7 +81,7 @@ public class AuthController {
         @GetMapping("/users")
         @ResponseBody
         public ResponseEntity<?> listUsers() {
-                // Return id, username, role only
+        // Chỉ trả về id, username và role
                 List<Map<String, Object>> users = userService.findAll().stream()
                                 .map(u -> Map.<String, Object>of(
                                                 "id", u.getId(),

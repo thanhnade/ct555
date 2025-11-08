@@ -40,8 +40,8 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(@NonNull WebSocketHandlerRegistry registry) {
         HttpSessionHandshakeInterceptor httpSessionInterceptor = new HttpSessionHandshakeInterceptor();
-        try { // copy all HTTP session attributes into WS attributes so handler can read
-              // SERVER_PW_CACHE
+        try { // sao chép toàn bộ thuộc tính session HTTP sang session WebSocket để
+              // handler có thể đọc SERVER_PW_CACHE
             java.lang.reflect.Method m = HttpSessionHandshakeInterceptor.class.getMethod("setCopyAllAttributes",
                     boolean.class);
             m.invoke(httpSessionInterceptor, true);

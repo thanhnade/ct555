@@ -242,13 +242,8 @@ public class Application {
         this.memoryLimit = memoryLimit != null && !memoryLimit.trim().isEmpty() ? memoryLimit.trim() : "256Mi";
     }
 
-    public Integer getReplicas() {
-        return replicas != null ? replicas : 1;
-    }
-
-    public void setReplicas(Integer replicas) {
-        this.replicas = (replicas != null && replicas > 0) ? replicas : 1;
-    }
+    @Column(name = "replicas_req")
+    private Integer replicasRequested;
 
     public Integer getContainerPort() {
         return containerPort != null ? containerPort : 80;
@@ -258,4 +253,27 @@ public class Application {
         this.containerPort = (containerPort != null && containerPort > 0 && containerPort <= 65535) ? containerPort
                 : 80;
     }
+
+    public Integer getReplicasRequested() {
+        return replicasRequested;
+    }
+
+    public void setReplicasRequested(Integer replicasRequested) {
+        this.replicasRequested = replicasRequested;
+    }
+
+    public Integer getReplicas() {
+        return replicas != null ? replicas : 1;
+    }
+
+    public void setReplicas(Integer replicas) {
+        if (replicas == null) {
+            this.replicas = 1;
+        } else if (replicas >= 0) {
+            this.replicas = replicas;
+        } else {
+            this.replicas = 1;
+        }
+    }
+
 }

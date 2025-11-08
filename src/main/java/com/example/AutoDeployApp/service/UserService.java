@@ -35,7 +35,7 @@ public class UserService {
         User user = new User();
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(rawPassword));
-        // Role defaults to CLIENT by entity default
+        // Role mặc định là CLIENT theo cấu hình entity
         User saved = userRepository.saveAndFlush(user);
         return saved;
     }

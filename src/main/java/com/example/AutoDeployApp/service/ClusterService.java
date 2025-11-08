@@ -56,8 +56,7 @@ public class ClusterService {
                     .map(s -> s.getHost()).findFirst().orElse("");
             int workerCount = (int) servers.stream()
                     .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER).count();
-            // naive status: if any server OFFLINE -> WARNING, if none servers -> ERROR else
-            // HEALTHY
+            // Đánh giá trạng thái đơn giản: có server OFFLINE => WARNING, không có server nào => ERROR, còn lại HEALTHY
             String status;
             if (servers.isEmpty())
                 status = "ERROR";
@@ -74,7 +73,7 @@ public class ClusterService {
 
     @Transactional
     public void deleteCluster(Long id) {
-        // detach servers then delete cluster
+        // Gỡ liên kết server trước rồi mới xóa cluster
         var servers = serverRepository.findByCluster_Id(id);
         for (var s : servers) {
             s.setCluster(null);
