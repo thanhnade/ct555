@@ -21,7 +21,7 @@ async function loadPlaybooks(clusterIdOverride) {
     console.error('No cluster selected');
     return;
   }
-  
+
   try {
     // Lưu lại override nếu có
     if (clusterIdOverride) {
@@ -31,10 +31,10 @@ async function loadPlaybooks(clusterIdOverride) {
     if (!response.ok) {
       throw new Error('Failed to load playbooks');
     }
-    
+
     const playbooks = await response.json();
     const playbookList = document.getElementById('playbook-list');
-    
+
     if (playbooks.length === 0) {
       playbookList.innerHTML = '<div class="list-group-item text-center text-muted">Chưa có playbook nào</div>';
     } else {
@@ -81,20 +81,20 @@ async function loadPlaybooks(clusterIdOverride) {
 window.loadPlaybook = async function (filename) {
   const cid = getClusterId();
   if (!cid || !filename) return;
-  
+
   try {
     const response = await fetch(`/api/ansible-playbook/read/${cid}/${filename}`);
     if (!response.ok) {
       throw new Error('Failed to load playbook');
     }
-    
+
     const data = await response.json();
     document.getElementById('playbook-filename').value = filename.replace('.yml', '');
     document.getElementById('playbook-editor').value = data.content;
-    
+
     // Hiển thị view nội dung và ẩn view thực thi
     showPlaybookContentView();
-    
+
   } catch (error) {
     console.error('Error loading playbook:', error);
     showAlert('error', 'Lỗi tải playbook: ' + error.message);
@@ -105,15 +105,15 @@ window.loadPlaybook = async function (filename) {
 window.savePlaybook = async function () {
   const cid = getClusterId();
   if (!cid) return;
-  
+
   const filename = document.getElementById('playbook-filename')?.value;
   const content = document.getElementById('playbook-editor')?.value;
-  
+
   if (!filename || !content) {
     showAlert('error', 'Vui lòng nhập tên file và nội dung');
     return;
   }
-  
+
   try {
     const response = await fetch(`/api/ansible-playbook/save/${cid}`, {
       method: 'POST',
@@ -122,15 +122,15 @@ window.savePlaybook = async function () {
       },
       body: `filename=${encodeURIComponent(filename)}&content=${encodeURIComponent(content)}`
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi lưu playbook');
     }
-    
+
     showAlert('success', 'Đã lưu playbook thành công');
     await loadPlaybooks(); // Cập nhật danh sách
-    
+
   } catch (error) {
     console.error('Error saving playbook:', error);
     showAlert('error', 'Lỗi lưu playbook: ' + error.message);
@@ -141,22 +141,22 @@ window.savePlaybook = async function () {
 window.deletePlaybook = async function (filename) {
   const cid = getClusterId();
   if (!cid || !filename) return;
-  
+
   if (!confirm(`Xóa playbook "${filename}"?`)) return;
-  
+
   try {
     const response = await fetch(`/api/ansible-playbook/delete/${cid}/${filename}`, {
       method: 'DELETE'
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi xóa playbook');
     }
-    
+
     showAlert('success', `Đã xóa playbook "${filename}" thành công `);
     await loadPlaybooks(); // Cập nhật danh sách
-    
+
   } catch (error) {
     console.error('Error deleting playbook:', error);
     showAlert('error', 'Lỗi xóa playbook: ' + error.message);
@@ -167,11 +167,11 @@ window.deletePlaybook = async function (filename) {
 window.executePlaybook = async function (filename, extraVars = '') {
   const cid = getClusterId();
   if (!cid || !filename) return;
-  
+
   try {
     // Hiển thị thực thi và ẩn nội dung
     showPlaybookExecutionView();
-    
+
     const response = await fetch(`/api/ansible-playbook/execute/${cid}`, {
       method: 'POST',
       headers: {
@@ -179,20 +179,20 @@ window.executePlaybook = async function (filename, extraVars = '') {
       },
       body: `filename=${encodeURIComponent(filename)}&extraVars=${encodeURIComponent(extraVars)}`
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi thực thi playbook');
     }
-    
+
     const result = await response.json();
     showAlert('success', `Đã bắt đầu thực thi playbook: ${filename}`);
-    
+
     // Bắt đầu theo dõi trạng thái thực thi
     if (result.taskId) {
       monitorPlaybookExecution(result.taskId);
     }
-    
+
     return result;
   } catch (error) {
     console.error('Error executing playbook:', error);
@@ -207,42 +207,42 @@ async function monitorPlaybookExecution(taskId) {
   const outputElement = document.getElementById('ansible-output');
   const progressElement = document.getElementById('execution-progress');
   const spinnerElement = document.getElementById('execution-spinner');
-  
+
   if (!outputElement || !progressElement || !spinnerElement) {
     console.error('Execution elements not found');
     return;
   }
-  
+
   // Xóa output trước
   outputElement.innerHTML = '';
-  
+
   // Hiển thị progress và spinner
   progressElement.style.display = 'block';
   spinnerElement.style.display = 'inline-block';
-  
+
   const checkStatus = async () => {
     try {
       const response = await fetch(`/api/ansible-playbook/status/${getClusterId()}/${taskId}`);
       if (!response.ok) {
         throw new Error('Failed to check status');
       }
-      
+
       const status = await response.json();
-      
+
       // Cập nhật progress bar
       const progressBar = progressElement.querySelector('.progress-bar');
       if (progressBar) {
         progressBar.style.width = `${status.progress || 0}%`;
         progressBar.setAttribute('aria-valuenow', status.progress || 0);
       }
-      
+
       // Cập nhật output
       if (status.output && status.output.length > 0) {
         const newOutput = status.output.slice(outputElement.children.length);
         newOutput.forEach(line => {
           const lineElement = document.createElement('div');
           lineElement.className = 'output-line';
-          
+
           // Mã hóa màu cho các loại output khác nhau
           if (line.includes('TASK') || line.includes('PLAY')) {
             lineElement.className += ' task-header';
@@ -253,54 +253,54 @@ async function monitorPlaybookExecution(taskId) {
           } else if (line.includes('skipping:')) {
             lineElement.className += ' warning';
           }
-          
+
           lineElement.textContent = line;
           outputElement.appendChild(lineElement);
         });
-        
+
         // Cuộn xuống cuối
         outputElement.scrollTop = outputElement.scrollHeight;
       }
-      
+
       if (status.status === 'running') {
         setTimeout(checkStatus, 1000);
       } else {
         // Ẩn spinner
         spinnerElement.style.display = 'none';
-        
+
         // Hiển thị thông báo hoàn thành
-         const summaryElement = document.createElement('div');
-         summaryElement.className = 'text-success mt-3 border-top pt-2';
-         
-         const titleElement = document.createElement('div');
-         titleElement.className = 'fw-bold';
+        const summaryElement = document.createElement('div');
+        summaryElement.className = 'text-success mt-3 border-top pt-2';
+
+        const titleElement = document.createElement('div');
+        titleElement.className = 'fw-bold';
         titleElement.textContent = 'Hoàn thành thực thi playbook!';
-         
-         const timeElement = document.createElement('div');
-         timeElement.className = 'small text-white';
-         timeElement.textContent = `Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s`;
-         
-         summaryElement.appendChild(titleElement);
-         summaryElement.appendChild(timeElement);
-         outputElement.appendChild(summaryElement);
+
+        const timeElement = document.createElement('div');
+        timeElement.className = 'small text-white';
+        timeElement.textContent = `Thời gian thực thi: ${Math.round((status.endTime - status.startTime) / 1000)}s`;
+
+        summaryElement.appendChild(titleElement);
+        summaryElement.appendChild(timeElement);
+        outputElement.appendChild(summaryElement);
       }
-      
+
     } catch (error) {
       console.error('Lỗi theo dõi thực thi:', error);
       spinnerElement.style.display = 'none';
-      
-       const errorElement = document.createElement('div');
-       errorElement.className = 'text-danger mt-3';
-       
-       const errorTitle = document.createElement('div');
-       errorTitle.className = 'fw-bold';
+
+      const errorElement = document.createElement('div');
+      errorElement.className = 'text-danger mt-3';
+
+      const errorTitle = document.createElement('div');
+      errorTitle.className = 'fw-bold';
       errorTitle.textContent = 'Lỗi kiểm tra trạng thái thực thi';
-       
-       errorElement.appendChild(errorTitle);
-       outputElement.appendChild(errorElement);
+
+      errorElement.appendChild(errorTitle);
+      outputElement.appendChild(errorElement);
     }
   };
-  
+
   checkStatus();
 }
 
@@ -336,7 +336,7 @@ async function checkPlaybookExists(filename) {
 window.uploadPlaybook = async function (file) {
   const cid = getClusterId();
   if (!cid || !file) return;
-  
+
   try {
     // Kiểm tra xem file đã tồn tại chưa
     const originalFilename = file.name;
@@ -356,24 +356,24 @@ window.uploadPlaybook = async function (file) {
 
     const formData = new FormData();
     formData.append('file', file);
-    
+
     const response = await fetch(`/api/ansible-playbook/upload/${cid}`, {
       method: 'POST',
       body: formData
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Lỗi tải lên playbook');
     }
-    
+
     const result = await response.json();
     showAlert('success', `Đã tải lên playbook: ${result.filename}`);
     await loadPlaybooks(); // Cập nhật danh sách
-    
+
     // Tải nội dung playbook đã tải lên
     await loadPlaybook(result.filename);
-    
+
   } catch (error) {
     console.error('Lỗi tải lên playbook:', error);
     showAlert('error', 'Lỗi tải lên playbook: ' + error.message);
@@ -386,7 +386,7 @@ async function generateK8sPlaybookFromTemplate(template) {
   if (!getClusterId()) {
     throw new Error('Vui lòng chọn cluster trước');
   }
-  
+
   const templates = {
     '01-update-hosts-hostname': `---
 - name: Update /etc/hosts and hostname for entire cluster
@@ -2385,7 +2385,7 @@ async function generateK8sPlaybookFromTemplate(template) {
   if (!playbookContent) {
     throw new Error('Template không tồn tại');
   }
-  
+
   const filename = actualTemplate + '.yml';
 
   // Check if playbook already exists
@@ -2431,7 +2431,7 @@ async function generateK8sPlaybookFromTemplate(template) {
   if (getClusterId() && playbookContent.includes('{{ cluster_id | default(1) }}')) {
     finalPlaybookContent = playbookContent.replace('{{ cluster_id | default(1) }}', getClusterId());
   }
-  
+
   try {
     const result = await fetch(`/api/ansible-playbook/save/${getClusterId()}`, {
       method: 'POST',
@@ -2440,12 +2440,12 @@ async function generateK8sPlaybookFromTemplate(template) {
       },
       body: `filename=${encodeURIComponent(filename)}&content=${encodeURIComponent(finalPlaybookContent)}`
     });
-    
+
     if (!result.ok) {
       const errorData = await result.json();
       throw new Error(errorData.error || 'Lỗi tạo playbook');
     }
-    
+
     return await result.json();
   } catch (error) {
     console.error('Lỗi tạo playbook K8s:', error);
@@ -2457,7 +2457,7 @@ async function generateK8sPlaybookFromTemplate(template) {
 function showPlaybookContentView() {
   const contentArea = document.getElementById('playbook-content-area');
   const executionArea = document.getElementById('playbook-execution-status');
-  
+
   if (contentArea) contentArea.style.display = 'block';
   if (executionArea) executionArea.style.display = 'none';
 }
@@ -2466,7 +2466,7 @@ function showPlaybookContentView() {
 function showPlaybookExecutionView() {
   const contentArea = document.getElementById('playbook-content-area');
   const executionArea = document.getElementById('playbook-execution-status');
-  
+
   if (contentArea) contentArea.style.display = 'none';
   if (executionArea) executionArea.style.display = 'block';
 }
@@ -2475,11 +2475,11 @@ function showPlaybookExecutionView() {
 function searchPlaybooks(query) {
   const items = document.querySelectorAll('#playbook-list .playbook-item');
   const searchTerm = query.toLowerCase().trim();
-  
+
   items.forEach(item => {
     const playbookName = item.textContent.toLowerCase();
     const shouldShow = playbookName.includes(searchTerm);
-    
+
     const listItem = item.closest('.list-group-item');
     if (listItem) {
       listItem.style.display = shouldShow ? 'flex' : 'none';
@@ -2494,7 +2494,7 @@ window.refreshPlaybooks = async function () {
     refreshBtn.disabled = true;
     refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải...';
   }
-  
+
   try {
     await loadPlaybooks();
   } catch (error) {
