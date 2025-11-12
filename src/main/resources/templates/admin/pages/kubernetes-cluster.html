@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="vi" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+      <h1 class="m-0">☸️ Kubernetes Cluster</h1>
+      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
+    </div>
+
+    <div class="card mb-3" id="k8s-list">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <h2 class="h6 m-0">Danh sách Cluster</h2>
+          <div class="d-flex align-items-center gap-2">
+            <input id="cluster-search" class="form-control form-control-sm" placeholder="Tìm theo tên...">
+            <select id="cluster-status-filter" class="form-select form-select-sm">
+              <option value="">Tất cả trạng thái</option>
+              <option value="HEALTHY">Healthy</option>
+              <option value="WARNING">Warning</option>
+              <option value="ERROR">Error</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-responsive table-fixed max-h-50vh">
+          <table class="table table-sm align-middle">
+            <thead>
+            <tr>
+              <th>ID</th>
+              <th>Cluster Name</th>
+              <th>Master Node</th>
+              <th>Số Worker</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+            </thead>
+            <tbody id="clusters-tbody"></tbody>
+          </table>
+        </div>
+        <!-- Pagination -->
+        <div id="clusters-pagination" class="mt-3"></div>
+      </div>
+    </div>
+
+    <div class="card mb-3" id="k8s-create">
+      <div class="card-body">
+        <h2 class="h6">Tạo Cluster</h2>
+        <form id="create-cluster-form" class="row g-2 mt-2">
+          <div class="col-12 col-md-3"><input class="form-control" name="name" placeholder="Tên cluster" required></div>
+          <div class="col-12 col-md-6"><input class="form-control" name="description" placeholder="Mô tả (tuỳ chọn)"></div>
+          <div class="col-12 col-md-3"><button class="btn btn-success w-100" type="submit">Tạo</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card mb-3" id="k8s-assign">
+      <div class="card-body">
+        <h2 class="h6">Gán máy chủ vào Cluster</h2>
+        <div class="row g-2 align-items-end mb-2">
+          <div class="col-12 col-md-3">
+            <label class="form-label">Chọn Cluster</label>
+            <select class="form-select" id="k8s-cluster-select"></select>
+          </div>
+          <div class="col-12 col-md-2">
+            <label class="form-label">Role trong Cluster</label>
+            <select class="form-select" id="k8s-role-select">
+              <option value="WORKER">WORKER</option>
+              <option value="MASTER">MASTER</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-7 text-md-end">
+            <button class="btn btn-primary me-2" id="btn-assign-selected">Gán vào Cluster</button>
+            <button class="btn btn-success me-2" id="btn-update-role-selected">Cập nhật Role</button>
+            <button class="btn btn-outline-danger" id="btn-remove-selected">Bỏ khỏi Cluster</button>
+          </div>
+        </div>
+        <div class="table-responsive max-h-60vh">
+          <table class="table table-sm align-middle">
+            <thead>
+            <tr>
+              <th style="width:36px;"><input type="checkbox" id="k8s-check-all"></th>
+              <th>ID</th>
+              <th>Host</th>
+              <th>Port</th>
+              <th>Username</th>
+              <th>Cluster</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Hành động</th>
+            </tr>
+            </thead>
+            <tbody id="k8s-servers-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-3 d-none" id="k8s-detail">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <h2 class="h6 m-0">Chi tiết Cluster: <span id="cd-name"></span></h2>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary" id="cd-reload">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới Cluster
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" id="cd-back">Quay lại danh sách</button>
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-3"><div class="form-control">Master: <strong id="cd-master"></strong></div></div>
+          <div class="col-6 col-md-2"><div class="form-control">Workers: <strong id="cd-workers"></strong></div></div>
+          <div class="col-6 col-md-2"><div class="form-control">Status: <strong id="cd-status"></strong></div></div>
+          <div class="col-12 col-md-5"><div class="form-control">K8s Version: <strong id="cd-version"></strong></div></div>
+        </div>
+
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <h3 class="h6 m-0">Danh sách Node</h3>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-success" id="cd-add-node" data-bs-toggle="modal" data-bs-target="#addNodeModal">Thêm Node</button>
+          </div>
+        </div>
+        <div class="table-responsive max-h-50vh">
+          <table class="table table-sm align-middle">
+            <thead>
+            <tr>
+              <th>Node IP</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>CPU (Cores / Load)</th>
+              <th>RAM (Used/Total)</th>
+              <th>Disk (%)</th>
+              <th>Actions</th>
+            </tr>
+            </thead>
+            <tbody id="cd-nodes-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="card mb-3">
+          <div class="card-header">
+            <div class="d-flex align-items-center justify-content-between">
+              <div>
+                <h4 class="h6 m-0"><i class="bi bi-terminal text-primary"></i> Ansible</h4>
+                <div class="text-muted small">Quản lý Ansible cho cụm: kiểm tra trạng thái, khởi tạo, cấu hình và playbook</div>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-info" id="cd-check-ansible">
+                  <i class="bi bi-search"></i> Kiểm tra trạng thái
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="ansible-summary">
+              <span class="badge bg-secondary" id="ansible-summary-install">Chưa kiểm tra</span>
+              <span class="badge bg-light text-dark border" id="ansible-summary-version">Phiên bản: -</span>
+              <span class="badge bg-light text-dark border" id="ansible-summary-master">MASTER: -</span>
+              <div class="ms-auto" id="ansible-summary-actions"></div>
+            </div>
+            <div class="alert alert-light border mb-3 p-2">
+              <div class="small fw-semibold mb-1"><i class="bi bi-list-check"></i> Hướng dẫn nhanh</div>
+              <ul class="small mb-0 ps-3">
+                <li><span class="fw-semibold">Khởi tạo</span>: tạo cấu trúc, ghi cấu hình mặc định, đảm bảo SSH key và ping nodes.</li>
+                <li><span class="fw-semibold">Cấu hình</span>: xem/sửa ansible.cfg, hosts, group_vars/all.yml.</li>
+                <li><span class="fw-semibold">Playbook</span>: quản lý file, chạy playbook, theo dõi output.</li>
+              </ul>
+              <div class="small text-muted mt-2">Lưu ý: Sau khi thêm node mới, cần cập nhật cấu hình Ansible trước khi chạy playbook.</div>
+            </div>
+            <div id="ansible-status-display" class="mb-3"></div>
+          </div>
+          <div class="card-footer">
+            <div class="btn-toolbar w-100 justify-content-between" role="toolbar" aria-label="Ansible toolbar">
+              <div class="btn-group" role="group" aria-label="Primary">
+                <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#initAnsibleModal">
+                  <i class="bi bi-lightning"></i> Khởi tạo
+                </button>
+              </div>
+              <div class="btn-group" role="group" aria-label="Secondary">
+                <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#ansibleConfigModal">
+                  <i class="bi bi-gear"></i> Cấu hình
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#playbookManagerModal">
+                  <i class="bi bi-files"></i> Playbook & K8s
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Kubernetes Resources Management Section -->
+      <div class="card mb-3" id="k8s-resources-detail">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h3 class="h6 m-0">
+              <i class="bi bi-diagram-3 text-primary"></i> Quản lý tài nguyên Kubernetes
+            </h3>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" id="refresh-k8s-resources">
+                <i class="bi bi-arrow-clockwise"></i> Làm mới
+              </button>
+            </div>
+          </div>
+
+          <!-- Resource Tabs -->
+          <ul class="nav nav-tabs" id="k8s-resource-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="pods-tab" data-bs-toggle="tab" data-bs-target="#pods-content"
+                type="button" role="tab" aria-controls="pods-content" aria-selected="true">
+                <i class="bi bi-box"></i> Pods
+                <span class="badge bg-secondary ms-1" id="pods-count">0</span>
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="namespaces-tab" data-bs-toggle="tab" data-bs-target="#namespaces-content"
+                type="button" role="tab" aria-controls="namespaces-content" aria-selected="false">
+                <i class="bi bi-collection"></i> Namespaces
+                <span class="badge bg-secondary ms-1" id="namespaces-count">0</span>
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="workloads-tab" data-bs-toggle="tab" data-bs-target="#workloads-content"
+                type="button" role="tab" aria-controls="workloads-content" aria-selected="false">
+                <i class="bi bi-gear"></i> Workloads
+                <span class="badge bg-secondary ms-1" id="workloads-count">0</span>
+              </button>
+            </li>
+          </ul>
+
+          <!-- Tab Content -->
+          <div class="tab-content" id="k8s-resource-tab-content">
+            <!-- Pods Tab -->
+            <div class="tab-pane fade show active" id="pods-content" role="tabpanel" aria-labelledby="pods-tab">
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">Danh sách Pods</h6>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" style="width: 200px;" id="pods-search"
+                      placeholder="Tìm kiếm pod...">
+                    <select class="form-select form-select-sm" style="width: 150px;" id="pods-namespace-filter">
+                      <option value="">Tất cả namespace</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table table-sm table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Namespace</th>
+                        <th>Name</th>
+                        <th>Node</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="pods-tbody">
+                      <tr>
+                        <td colspan="5" class="text-center text-muted py-3">
+                          <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Namespaces Tab -->
+            <div class="tab-pane fade" id="namespaces-content" role="tabpanel" aria-labelledby="namespaces-tab">
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">Danh sách Namespaces</h6>
+                  <input type="text" class="form-control form-control-sm" style="width: 200px;" id="namespaces-search"
+                    placeholder="Tìm kiếm namespace...">
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table table-sm table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="namespaces-tbody">
+                      <tr>
+                        <td colspan="3" class="text-center text-muted py-3">
+                          <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Workloads Tab -->
+            <div class="tab-pane fade" id="workloads-content" role="tabpanel" aria-labelledby="workloads-tab">
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">Danh sách Workloads</h6>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" style="width: 200px;" id="workloads-search"
+                      placeholder="Tìm kiếm workload...">
+                    <select class="form-select form-select-sm" style="width: 150px;" id="workloads-type-filter">
+                      <option value="">Tất cả loại</option>
+                      <option value="deployment">Deployments</option>
+                      <option value="statefulset">StatefulSets</option>
+                      <option value="daemonset">DaemonSets</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table table-sm table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Type</th>
+                        <th>Namespace</th>
+                        <th>Name</th>
+                        <th>Ready/Total</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="workloads-tbody">
+                      <tr>
+                        <td colspan="5" class="text-center text-muted py-3">
+                          <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Networking Section -->
+      <div class="card mb-3" id="networking-resources-detail">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h3 class="h6 m-0">
+              <i class="bi bi-router text-primary"></i> Networking
+            </h3>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" id="refresh-networking-resources">
+                <i class="bi bi-arrow-clockwise"></i> Làm mới
+              </button>
+            </div>
+          </div>
+
+          <!-- Networking Tabs -->
+          <ul class="nav nav-tabs mb-3" id="networking-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="services-tab" data-bs-toggle="tab" data-bs-target="#services-content"
+                type="button" role="tab" aria-controls="services-content" aria-selected="true">
+                <i class="bi bi-plug"></i> Services
+                <span class="badge bg-secondary ms-1" id="services-count">0</span>
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="ingress-tab" data-bs-toggle="tab" data-bs-target="#ingress-content"
+                type="button" role="tab" aria-controls="ingress-content" aria-selected="false">
+                <i class="bi bi-door-open"></i> Ingress
+                <span class="badge bg-secondary ms-1" id="ingress-count">0</span>
+              </button>
+            </li>
+          </ul>
+
+          <!-- Tab Content -->
+          <div class="tab-content" id="networking-tab-content">
+            <!-- Services Tab -->
+            <div class="tab-pane fade show active" id="services-content" role="tabpanel" aria-labelledby="services-tab">
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">Danh sách Services</h6>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" style="width: 200px;" id="services-search"
+                      placeholder="Tìm kiếm service...">
+                    <select class="form-select form-select-sm" style="width: 150px;" id="services-namespace-filter">
+                      <option value="">Tất cả namespace</option>
+                    </select>
+                    <select class="form-select form-select-sm" style="width: 150px;" id="services-type-filter">
+                      <option value="">Tất cả loại</option>
+                      <option value="ClusterIP">ClusterIP</option>
+                      <option value="NodePort">NodePort</option>
+                      <option value="LoadBalancer">LoadBalancer</option>
+                      <option value="ExternalName">ExternalName</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table table-sm table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Namespace</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Cluster-IP</th>
+                        <th>External-IP</th>
+                        <th>Port(s)</th>
+                        <th>Age</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="services-tbody">
+                      <tr>
+                        <td colspan="8" class="text-center text-muted py-3">
+                          <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ingress Tab -->
+            <div class="tab-pane fade" id="ingress-content" role="tabpanel" aria-labelledby="ingress-tab">
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">Danh sách Ingress</h6>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" style="width: 200px;" id="ingress-search"
+                      placeholder="Tìm kiếm ingress...">
+                    <select class="form-select form-select-sm" style="width: 150px;" id="ingress-namespace-filter">
+                      <option value="">Tất cả namespace</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table table-sm table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Namespace</th>
+                        <th>Name</th>
+                        <th>Class</th>
+                        <th>Host</th>
+                        <th>Address</th>
+                        <th>Ports</th>
+                        <th>Age</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="ingress-tbody">
+                      <tr>
+                        <td colspan="8" class="text-center text-muted py-3">
+                          <i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals specific to Kubernetes page -->
+    <!-- Note: Some modals are created dynamically by JavaScript (playbook-manager.js, k8sClusters.js) -->
+    
+    <!-- Add Node Modal -->
+    <div class="modal fade" id="addNodeModal" tabindex="-1" aria-labelledby="addNodeModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="addNodeModalLabel">Thêm Node vào Cluster: <span id="add-node-cluster-name"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <!-- Tabs Navigation -->
+            <ul class="nav nav-tabs" id="addNodeTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="select-existing-tab" data-bs-toggle="tab" data-bs-target="#select-existing" type="button" role="tab" aria-controls="select-existing" aria-selected="true">
+                  <i class="bi bi-list-check"></i> Chọn Node có sẵn
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="add-new-tab" data-bs-toggle="tab" data-bs-target="#add-new" type="button" role="tab" aria-controls="add-new" aria-selected="false">
+                  <i class="bi bi-plus-circle"></i> Thêm Node mới
+                </button>
+              </li>
+            </ul>
+
+            <!-- Tab Content -->
+            <div class="tab-content" id="addNodeTabContent">
+              <!-- Select Existing Nodes Tab -->
+              <div class="tab-pane fade show active" id="select-existing" role="tabpanel" aria-labelledby="select-existing-tab">
+                <div class="mt-3">
+                  <p class="text-muted small">Chọn các server có sẵn để thêm vào cluster:</p>
+                  <div class="table-responsive max-h-40vh">
+                    <table class="table table-sm">
+                      <thead>
+                        <tr>
+                          <th style="width:36px;"><input type="checkbox" id="existing-nodes-check-all"></th>
+                          <th>ID</th>
+                          <th>Host</th>
+                          <th>Port</th>
+                          <th>Username</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody id="existing-nodes-tbody">
+                        <tr><td colspan="6" class="text-center text-muted">Đang tải...</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Add New Node Tab -->
+              <div class="tab-pane fade" id="add-new" role="tabpanel" aria-labelledby="add-new-tab">
+                <form id="add-node-form" class="mt-3">
+                  <input type="hidden" id="add-node-cluster-id" name="clusterId">
+                  <div class="mb-3">
+                    <label for="add-node-host" class="form-label">Host/IP <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="add-node-host" name="host" placeholder="192.168.1.100" required>
+                  </div>
+                  <div class="mb-3">
+                    <label for="add-node-port" class="form-label">Port <span class="text-danger">*</span></label>
+                    <input type="number" class="form-control" id="add-node-port" name="port" value="22" min="1" max="65535" required>
+                  </div>
+                  <div class="mb-3">
+                    <label for="add-node-username" class="form-label">Username <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="add-node-username" name="username" placeholder="root" required>
+                  </div>
+                  <div class="mb-3">
+                    <label for="add-node-password" class="form-label">Password <span class="text-danger">*</span></label>
+                    <input type="password" class="form-control" id="add-node-password" name="password" placeholder="Password" required>
+                  </div>
+                  <div class="mb-3">
+                    <label for="add-node-role" class="form-label">Role <span class="text-danger">*</span></label>
+                    <select class="form-select" id="add-node-role" name="role" required>
+                      <option value="WORKER" selected>WORKER</option>
+                      <option value="MASTER">MASTER</option>
+                    </select>
+                    <div class="form-text">Chọn MASTER nếu là master node, WORKER cho worker nodes</div>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <!-- Messages -->
+            <div id="add-node-msg" class="small mt-3"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+            <button type="button" class="btn btn-success d-none-initial" id="add-existing-nodes-btn">
+              <i class="bi bi-list-check"></i> Thêm Node đã chọn
+            </button>
+            <button type="submit" form="add-node-form" class="btn btn-success" id="add-node-submit-btn">
+              <i class="bi bi-plus-circle"></i> Thêm Node mới
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End Add Node Modal -->
+
+    <!-- Init Ansible Modal -->
+    <div class="modal fade" id="initAnsibleModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-lightning"></i> Khởi tạo Ansible</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <!-- Shared Output Console (top) -->
+            <div class="card mb-3">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Kết quả</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="init-output-clear-btn">
+                  <i class="bi bi-trash"></i> Xóa log
+                </button>
+              </div>
+              <div class="card-body p-0">
+                <div id="init-ansible-console" class="bg-dark text-light p-3" style="height: 320px; overflow: auto; font-family: monospace; font-size: 12px;">
+                </div>
+              </div>
+            </div>
+
+            <!-- Single consolidated guide -->
+            <div class="card border-0 bg-light">
+              <div class="card-body py-3">
+                <div class="small mb-2 fw-semibold"><i class="bi bi-list-check"></i> Hướng dẫn nhanh (4 bước):</div>
+                <ol class="small mb-3 ps-3">
+                  <li class="mb-1">
+                    <span class="fw-semibold">Tạo cấu trúc</span>: /etc/ansible, group_vars, host_vars, ~/.ansible.
+                    Hệ thống sẽ xác minh và báo OK/FAIL.
+                  </li>
+                  <li class="mb-1">
+                    <span class="fw-semibold">Ghi cấu hình</span>: tạo/ghi đè ansible.cfg và hosts dựa trên cluster
+                    (nhóm master/workers và all:vars), sau đó kiểm tra hợp lệ (ansible-inventory).
+                  </li>
+                  <li class="mb-1">
+                    <span class="fw-semibold">SSH key</span>: đảm bảo MASTER có id_rsa/id_rsa.pub và tự ủy quyền
+                    vào authorized_keys (đăng nhập không mật khẩu).
+                  </li>
+                  <li class="mb-1">
+                    <span class="fw-semibold">Ping nodes</span>: kiểm tra kết nối tất cả hosts bằng inventory vừa tạo.
+                  </li>
+                </ol>
+                <div class="small text-muted">
+                  Mẹo: Nhấn "Khởi tạo" để chạy lần lượt 4 bước. Nếu tài khoản có <code>sudo NOPASSWD</code> sẽ không cần mật khẩu; nếu không, hệ thống sẽ yêu cầu nhập.
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <div class="btn-toolbar w-100 justify-content-between" role="toolbar" aria-label="Init toolbar">
+              <div class="btn-group" role="group" aria-label="Primary action">
+                <button type="button" class="btn btn-success" id="init-all-btn" title="Thực hiện toàn bộ 4 bước">
+                  <i class="bi bi-lightning"></i> Khởi tạo
+                </button>
+              </div>
+              <div class="btn-group" role="group" aria-label="Secondary actions">
+                <button type="button" class="btn btn-outline-success btn-sm" id="init-structure-btn" title="Tạo cấu trúc thư mục Ansible">
+                  <i class="bi bi-folder-plus"></i> Tạo cấu trúc
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="init-config-btn" title="Ghi ansible.cfg và hosts mặc định">
+                  <i class="bi bi-file-earmark-text"></i> Config mặc định
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="init-sshkey-btn" title="Tạo SSH key cho MASTER">
+                  <i class="bi bi-key"></i> SSH key
+                </button>
+                <button type="button" class="btn btn-outline-info btn-sm" id="init-ping-btn" title="Kiểm tra kết nối các node">
+                  <i class="bi bi-broadcast"></i> Ping nodes
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" title="Đóng cửa sổ">Đóng</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End Init Ansible Modal -->
+
+    <!-- Ansible Config Modal -->
+    <div class="modal fade" id="ansibleConfigModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-gear"></i> Cấu hình Ansible</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-header bg-light border-bottom">
+            <div class="d-flex justify-content-between align-items-center w-100">
+              <div>
+                <strong>Cluster:</strong> <span id="current-cluster-name" class="text-primary">Đang tải...</span>
+              </div>
+              <div class="text-muted small">
+                <i class="bi bi-info-circle"></i> Cấu hình sẽ được áp dụng cho server MASTER
+              </div>
+            </div>
+          </div>
+          <div class="modal-body">
+            <!-- Status Information Panel -->
+            <div class="mb-3">
+              <div class="alert alert-info d-flex align-items-center" id="config-status-panel" role="alert">
+                <i class="bi bi-info-circle me-2"></i>
+                <div class="flex-grow-1">
+                  <strong>Trạng thái cấu hình:</strong>
+                  <span id="config-status-text">Chưa kiểm tra</span>
+                </div>
+                <div class="ms-2">
+                  <small class="text-muted" id="config-last-check">-</small>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab Navigation -->
+            <ul class="nav nav-tabs mb-3" id="configTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-ansible-cfg" data-bs-toggle="tab"
+                  data-bs-target="#tab-pane-ansible-cfg" type="button" role="tab" aria-controls="tab-pane-ansible-cfg"
+                  aria-selected="true">
+                  <i class="bi bi-file-text"></i> ansible.cfg
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-inventory" data-bs-toggle="tab" data-bs-target="#tab-pane-inventory"
+                  type="button" role="tab" aria-controls="tab-pane-inventory" aria-selected="false">
+                  <i class="bi bi-server"></i> Inventory (hosts)
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-variables" data-bs-toggle="tab" data-bs-target="#tab-pane-variables"
+                  type="button" role="tab" aria-controls="tab-pane-variables" aria-selected="false">
+                  <i class="bi bi-gear"></i> Variables (group_vars/all.yml)
+                </button>
+              </li>
+            </ul>
+
+            <!-- Tab Contents -->
+            <div class="tab-content" id="configTabContent">
+              <!-- ansible.cfg Tab -->
+              <div class="tab-pane fade show active" id="tab-pane-ansible-cfg" role="tabpanel"
+                aria-labelledby="tab-ansible-cfg">
+                <div class="mb-3">
+                  <h6 class="mb-3">ansible.cfg</h6>
+                  <textarea id="ansible-cfg-editor" class="form-control" rows="15"
+                    placeholder="[defaults]\ninventory=/etc/ansible/hosts\n..."></textarea>
+                </div>
+              </div>
+
+              <!-- Inventory Tab -->
+              <div class="tab-pane fade" id="tab-pane-inventory" role="tabpanel" aria-labelledby="tab-inventory">
+                <div class="mb-3">
+                  <h6 class="mb-3">Inventory (hosts)</h6>
+                  <textarea id="ansible-inventory-editor" class="form-control" rows="15"
+                    placeholder="[master]\n127.0.0.1 ansible_connection=local\n..."></textarea>
+                </div>
+              </div>
+
+              <!-- Variables Tab -->
+              <div class="tab-pane fade" id="tab-pane-variables" role="tabpanel" aria-labelledby="tab-variables">
+                <div class="mb-3">
+                  <h6 class="mb-3">Variables (group_vars/all.yml)</h6>
+                  <textarea id="ansible-vars-editor" class="form-control" rows="15"
+                    placeholder="key: value\n..."></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            <button type="button" class="btn btn-info" id="reload-config-btn">
+              <i class="bi bi-arrow-clockwise"></i> Tải lại
+            </button>
+            <button type="button" class="btn btn-success" id="verify-ansible-btn">
+              <i class="bi bi-check-circle"></i> Xác minh
+            </button>
+            <button type="button" class="btn btn-warning" id="rollback-config-btn">
+              <i class="bi bi-arrow-counterclockwise"></i> Rollback
+            </button>
+            <button type="button" class="btn btn-primary" id="save-ansible-config-btn">
+              <i class="bi bi-save"></i> Lưu cấu hình
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End Ansible Config Modal -->
+
+    <!-- Playbook Manager Modal -->
+    <div class="modal fade" id="playbookManagerModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-files"></i> Quản lý playbook & cài đặt K8s</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="d-flex justify-content-between mb-3">
+              <div>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="create-playbook-btn"><i
+                    class="bi bi-plus-circle"></i> Tạo playbook</button>
+                <button type="button" class="btn btn-sm btn-outline-success" id="generate-from-template-btn"><i
+                    class="bi bi-magic"></i> Tạo từ template</button>
+                <label class="btn btn-sm btn-outline-secondary mb-0">
+                  <i class="bi bi-upload"></i> Tải lên <input type="file" id="upload-playbook-input"
+                    accept=".yml,.yaml" hidden>
+                </label>
+                <button type="button" class="btn btn-sm btn-outline-info" id="refresh-playbooks-btn"
+                  onclick="refreshPlaybooks()"><i class="bi bi-arrow-clockwise"></i> Làm mới</button>
+              </div>
+              <div class="input-group input-group-sm" style="max-width: 320px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="text" id="search-playbook-input" class="form-control" placeholder="Tìm playbook...">
+              </div>
+            </div>
+            <hr>
+            <!-- Filename and Template in same row -->
+            <div class="row g-3 mb-3">
+              <div class="col-6">
+                <label class="form-label">Tên file playbook</label>
+                <div class="input-group">
+                  <input type="text" id="playbook-filename" class="form-control" placeholder="example" required>
+                  <span class="input-group-text">.yml</span>
+                </div>
+                <small class="text-muted">Extension .yml sẽ được thêm tự động</small>
+              </div>
+              <div class="col-6">
+                <label class="form-label">Template K8s (tùy chọn)</label>
+                <select id="playbook-template-select" class="form-select form-select-sm">
+                  <option value="">-- Chọn template K8s --</option>
+                  <optgroup label="I. Chuẩn bị môi trường">
+                    <option value="update-hosts-hostname">01 📝 Cập nhật hosts & hostname</option>
+                    <option value="kernel-sysctl">02 ⚙️ Cấu hình kernel & sysctl</option>
+                    <option value="install-containerd">03 🐳 Cài đặt containerd</option>
+                    <option value="install-kubernetes">04 ☸️ Cài đặt kubeadm/kubelet/kubectl</option>
+                  </optgroup>
+                  <optgroup label="II. Triển khai cluster">
+                    <option value="init-master">05 🚀 Khởi tạo master node</option>
+                    <option value="install-cni">06 🌐 Cài đặt Calico CNI</option>
+                    <option value="install-flannel">06 🌐 Cài đặt Flannel CNI</option>
+                    <option value="join-workers">07 🔗 Thêm worker nodes</option>
+                  </optgroup>
+                  <optgroup label="III. Kiểm tra & Tùy chọn mở rộng">
+                    <option value="verify-cluster">08 🧩 Xác minh trạng thái cụm</option>
+                    <option value="install-ingress">09 🌍 Cài đặt Nginx Ingress</option>
+                    <option value="install-metallb">10 ⚖️ Cài đặt MetalLB LoadBalancer</option>
+                    <option value="install-helm">11 📦 Cài đặt Helm 3</option>
+                    <option value="setup-storage">12 💾 Thiết lập Storage</option>
+                    <option value="prepare-and-join-worker">13 🔗 Chuẩn bị & Join Worker (02→03→04→07)</option>
+                  </optgroup>
+                  <optgroup label="IV. Triển khai toàn bộ">
+                    <option value="deploy-full-cluster">🚀 Triển khai toàn bộ cluster (0-8, Calico)</option>
+                    <option value="deploy-full-cluster-flannel">🚀 Triển khai toàn bộ cluster (0-8, Flannel)</option>
+                  </optgroup>
+                  <optgroup label="V. Bảo trì & Reset">
+                    <option value="reset-cluster">🧹 Reset toàn bộ cluster</option>
+                  </optgroup>
+                </select>
+                <small class="text-muted">Chọn template để tự động tạo nội dung playbook</small>
+              </div>
+            </div>
+            <hr>
+            <!-- Content sections -->
+            <div id="playbook-content-section">
+              <div class="row g-3">
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Danh sách playbook</label>
+                  <div class="list-group small" id="playbook-list" style="overflow-y: auto;">
+                    <div class="list-group-item text-center text-muted">
+                      <i class="bi bi-folder"></i> Đang tải...
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12 col-md-8">
+                  <div id="playbook-content-area">
+                    <label class="form-label">Nội dung playbook</label>
+                    <textarea id="playbook-editor" class="form-control" rows="18"
+                      placeholder="---\n- name: Example\n  hosts: all\n  tasks:\n    - debug: msg=\"hello\"\n"></textarea>
+                  </div>
+                  <!-- Execution status -->
+                  <div id="playbook-execution-status" class="d-none-initial"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <div class="d-flex justify-content-between w-100">
+              <div>
+                <button type="button" class="btn btn-outline-danger d-none-initial" id="delete-playbook-btn">
+                  <i class="bi bi-trash"></i> Xóa
+                </button>
+              </div>
+              <div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                <button type="button" class="btn btn-success d-none-initial" id="execute-playbook-btn">
+                  <i class="bi bi-play-circle"></i> Thực thi
+                </button>
+                <button type="button" class="btn btn-primary" id="save-playbook-btn">
+                  <i class="bi bi-save"></i> Lưu
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End Playbook Manager Modal -->
+
+    <!-- Ansible Installation Modal -->
+    <div class="modal fade" id="ansibleInstallModal" tabindex="-1" aria-labelledby="ansibleInstallModalLabel"
+      aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="ansibleInstallModalLabel">
+              <i class="bi bi-download"></i> Cài đặt Ansible - Real-time Monitoring
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <!-- Sudo Password Input Section (Single Master) -->
+            <div id="sudo-password-section" class="mb-4">
+              <h6 class="mb-3">Nhập mật khẩu sudo:</h6>
+              <div id="sudo-password-inputs" class="row">
+                <!-- Sẽ được populate bằng JavaScript -->
+              </div>
+              <div class="d-flex justify-content-end mt-3">
+                <button type="button" class="btn btn-primary" id="start-ansible-install-btn">
+                  <i class="bi bi-play-fill"></i> Bắt đầu cài đặt
+                </button>
+              </div>
+            </div>
+
+            <!-- Real-time Output Section -->
+            <div id="ansible-output-section" class="d-none">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0">Tiến trình cài đặt:</h6>
+                <div class="d-flex gap-2">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" id="clear-output-btn">
+                    <i class="bi bi-trash"></i> Xóa log
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-primary" id="download-log-btn">
+                    <i class="bi bi-download"></i> Tải log
+                  </button>
+                </div>
+              </div>
+
+              <!-- Progress Bar -->
+              <div class="progress mb-3 h-25">
+                <div id="ansible-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                  role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                  <span id="progress-text">Chuẩn bị...</span>
+                </div>
+              </div>
+
+              <!-- Server Status (optional, single master) -->
+              <div id="server-status-cards" class="row mb-3 d-none">
+                <!-- Ẩn mặc định vì chỉ dùng 1 MASTER; có thể hiển thị lại khi cần -->
+              </div>
+
+              <!-- Real-time Output Console -->
+              <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <h6 class="mb-0">Output Console</h6>
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="auto-scroll-switch" checked>
+                    <label class="form-check-label" for="auto-scroll-switch">Auto-scroll</label>
+                  </div>
+                </div>
+                <div class="card-body p-0">
+                  <div id="ansible-output-console" class="bg-dark text-light p-3" style="height: 400px; overflow: auto; font-family: monospace; font-size: 12px;">
+                    <!-- Output sẽ được hiển thị ở đây -->
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            <button type="button" class="btn btn-success d-none" id="ansible-complete-btn">
+              <i class="bi bi-check-circle"></i> Hoàn thành
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End Ansible Installation Modal -->
+
+    <!-- K8s Output Modal (for describe operations) -->
+    <div class="modal fade" id="k8s-output-modal" tabindex="-1" aria-labelledby="k8s-output-modalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="k8s-output-modalLabel">
+              <i class="bi bi-info-circle"></i> <span id="k8s-output-title">Chi tiết Kubernetes Resource</span>
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body p-0">
+            <pre class="bg-dark text-light p-3 mb-0" style="max-height: 70vh; overflow: auto; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-wrap: break-word;"><code id="k8s-output-content"></code></pre>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              <i class="bi bi-x-circle"></i> Đóng
+            </button>
+            <button type="button" class="btn btn-outline-primary" id="k8s-output-copy-btn">
+              <i class="bi bi-clipboard"></i> Sao chép
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End K8s Output Modal -->
+
+    <!-- Scale Workload Modal -->
+    <div class="modal fade" id="scale-workload-modal" tabindex="-1" aria-labelledby="scale-workload-modalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="scale-workload-modalLabel">
+              <i class="bi bi-arrows-angle-expand"></i> Scale Workload
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="scale-workload-info" class="form-label">Workload:</label>
+              <div id="scale-workload-info" class="alert alert-info mb-0">
+                <strong id="scale-workload-name">-</strong>
+                <br>
+                <small class="text-muted">Type: <span id="scale-workload-type">-</span> | Namespace: <span id="scale-workload-namespace">-</span></small>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label for="scale-replicas-input" class="form-label">Số replicas mới:</label>
+              <input type="number" class="form-control" id="scale-replicas-input" min="0" value="1" required>
+              <div class="form-text">Nhập số replicas mong muốn (0 để tạm dừng workload)</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              <i class="bi bi-x-circle"></i> Hủy
+            </button>
+            <button type="button" class="btn btn-primary" id="scale-workload-confirm-btn">
+              <i class="bi bi-check-circle"></i> Xác nhận Scale
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- End Scale Workload Modal -->
+  </div>
+</div>
+<script src="/js/modules/k8sResources.js"></script>
+<script src="/js/modules/ansibleConfig.js"></script>
+<script src="/js/modules/ansibleWebSocket.js"></script>
+<script src="/js/modules/k8sClusters.js"></script>
+<script src="/js/modules/k8s/playbook-manager.js"></script>
+</body>
+</html>
+
+

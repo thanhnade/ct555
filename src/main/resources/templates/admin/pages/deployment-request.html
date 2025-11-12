@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="vi" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+      <h1 class="m-0">🚀 Deployment Requests</h1>
+      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h2 class="h6 m-0">📋 Danh sách yêu cầu triển khai</h2>
+          <div class="d-flex gap-2">
+            <select id="deployment-status-filter" class="form-select form-select-sm" onchange="loadDeploymentRequests()">
+              <option value="">Tất cả</option>
+              <option value="PENDING">⏳ Chờ xử lý</option>
+              <option value="RUNNING">✅ Đang chạy</option>
+              <option value="ERROR">❌ Lỗi</option>
+            </select>
+            <button class="btn btn-sm btn-outline-primary" onclick="loadDeploymentRequests()">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive table-fixed max-h-60vh">
+          <table class="table table-sm align-middle">
+            <thead>
+            <tr>
+              <th>Ứng dụng</th>
+              <th>Docker Image</th>
+              <th>Người dùng</th>
+              <th>Namespace</th>
+              <th>Trạng thái</th>
+              <th>Access URL</th>
+              <th>Ngày tạo</th>
+              <th>Hành động</th>
+            </tr>
+            </thead>
+            <tbody id="deployment-requests-tbody">
+            <tr>
+              <td colspan="8" class="text-center text-muted">Đang tải...</td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="h6 m-0">📋 Logs triển khai</h2>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-secondary" id="clear-deployment-logs-btn" onclick="clearDeploymentLogs()">
+            <i class="bi bi-trash"></i> Xóa log
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div id="deployment-logs-console" class="bg-dark text-light p-3 h-400px monospace-12 overflow-auto pre-wrap">
+          <div class="text-muted text-center">Chọn một deployment request để xem logs...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- App Modals -->
+    <div class="modal fade" id="appFormModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Ứng dụng</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form id="app-form" class="row g-2">
+              <input type="hidden" id="app-id">
+              <div class="col-md-4">
+                <label class="form-label small">Tên</label>
+                <input id="app-name" class="form-control form-control-sm" placeholder="my-app">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Chart</label>
+                <input id="app-chart" class="form-control form-control-sm" placeholder="bitnami/nginx">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Chart Version</label>
+                <input id="app-chart-version" class="form-control form-control-sm" placeholder="">
+              </div>
+              <div class="col-md-5">
+                <label class="form-label small">Image Repository</label>
+                <input id="app-image-repo" class="form-control form-control-sm" placeholder="nginx">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Image Tag</label>
+                <input id="app-image-tag" class="form-control form-control-sm" placeholder="1.27.2">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small">Namespace</label>
+                <input id="app-namespace" class="form-control form-control-sm" placeholder="default">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Cluster</label>
+                <select id="app-cluster-id" class="form-select form-select-sm">
+                  <option value="">-- Chọn Cluster --</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Release Name</label>
+                <input id="app-release-name" class="form-control form-control-sm" placeholder="my-app">
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            <button type="button" class="btn btn-primary" onclick="saveApp()">Lưu</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="appDeployModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Triển khai Ứng dụng</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="deploy-app-id">
+            <div class="row g-2 mb-2">
+              <div class="col-md-4">
+                <label class="form-label small">Phiên bản (image tag)</label>
+                <input id="deploy-version" class="form-control form-control-sm" placeholder="1.2.3">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Chiến lược</label>
+                <select id="deploy-strategy" class="form-select form-select-sm">
+                  <option value="ROLLING">ROLLING</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Sudo Password (nếu cần)</label>
+                <input id="deploy-sudo" class="form-control form-control-sm" type="password" placeholder="••••••">
+              </div>
+              <div class="col-12">
+                <label class="form-label small">Values override (tùy chọn)</label>
+                <textarea id="deploy-values" class="form-control form-control-sm" rows="3" placeholder="key=value hoặc YAML"></textarea>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="small">Log triển khai</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="clearDeployLog()">Xóa log</button>
+              </div>
+              <div class="card-body p-0">
+                <pre id="deploy-log" class="m-0 p-3 bg-dark text-light h-280px monospace-12 overflow-auto"></pre>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            <button type="button" class="btn btn-success" onclick="startDeployWS()">Triển khai</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/deploymentRequests.js"></script>
+</body>
+</html>
+
+

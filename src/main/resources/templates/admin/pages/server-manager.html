@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="vi" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+      <h1 class="m-0">🖥️ Quản lý Server</h1>
+      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
+    </div>
+
+    <div class="card mb-3" id="server-crud">
+      <div class="card-body">
+        <h2 class="h6">Thêm máy chủ</h2>
+        <form id="create-server-form" class="row g-2 mt-2">
+          <div class="col-12 col-md-3">
+            <input class="form-control" name="host" placeholder="Host/IP" required>
+          </div>
+          <div class="col-6 col-md-1">
+            <input class="form-control" type="number" name="port" value="22" min="1" max="65535">
+          </div>
+          <div class="col-6 col-md-2">
+            <input class="form-control" name="username" placeholder="Username" required>
+          </div>
+          <div class="col-12 col-md-3">
+            <input class="form-control" type="password" name="password" placeholder="Password" required>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-success" type="submit">Thêm máy chủ</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card mb-3" id="server-list">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h2 class="h6 m-0">Servers đang kết nối</h2>
+          <div class="btn-group">
+            <button class="btn btn-sm btn-outline-primary" id="btn-check-status">Kiểm tra trạng thái</button>
+          </div>
+        </div>
+        <div class="table-responsive table-fixed mb-4 max-h-40vh">
+          <table class="table table-sm align-middle">
+            <thead>
+            <tr>
+              <th>ID</th>
+              <th>Host</th>
+              <th>Port</th>
+              <th>Username</th>
+              <th>Status</th>
+              <th>Last Connected</th>
+              <th>Hành động</th>
+            </tr>
+            </thead>
+            <tbody id="servers-connected-tbody"></tbody>
+          </table>
+        </div>
+
+        <h2 class="h6" id="servers-history-title">Servers đã từng kết nối</h2>
+        <div class="table-responsive table-fixed max-h-40vh">
+          <table class="table table-sm align-middle">
+            <thead>
+            <tr>
+              <th>ID</th>
+              <th>Host</th>
+              <th>Port</th>
+              <th>Username</th>
+              <th>Status</th>
+              <th>Last Connected</th>
+              <th>Hành động</th>
+            </tr>
+            </thead>
+            <tbody id="servers-history-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terminal Modal -->
+    <div class="modal fade" id="terminalModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Terminal - <span id="terminal-title">Server</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-2 mb-2">
+              <div class="col-12 col-md-3"><input id="term-host" class="form-control form-control-sm" placeholder="Host" readonly></div>
+              <div class="col-6 col-md-2"><input id="term-port" type="number" class="form-control form-control-sm" placeholder="Port" readonly></div>
+              <div class="col-6 col-md-3"><input id="term-user" class="form-control form-control-sm" placeholder="Username" readonly></div>
+              <div class="col-12 col-md-4"><input id="term-pass" type="password" class="form-control form-control-sm" placeholder="Password (nhập khi cần)"></div>
+            </div>
+            <div id="term-output" class="p-2 terminal-box"></div>
+          </div>
+          <div class="modal-footer">
+            <button id="term-connect-btn" type="button" class="btn btn-success me-2">Kết nối</button>
+            <form id="term-input-form" class="flex-grow-1">
+              <div class="input-group">
+                <input id="term-input" class="form-control" placeholder="Nhập lệnh và Enter để gửi">
+                <button class="btn btn-primary" type="submit">Gửi</button>
+              </div>
+            </form>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/servers.js"></script>
+</body>
+</html>
+
+

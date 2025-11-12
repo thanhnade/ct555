@@ -2381,8 +2381,8 @@ async function checkAnsibleStatus(clusterId) {
     // Gọi API kiểm tra trạng thái Ansible
     const ansibleStatus = await fetchJSON(`/admin/clusters/${clusterId}/ansible-status`);
 
-    // Update status table
-    updateAnsibleStatusTable(ansibleStatus);
+    // Update summary badges (and remove table usage)
+    updateAnsibleSummary(ansibleStatus);
 
   } catch (error) {
     // Hiển thị lỗi chi tiết hơn
@@ -2424,8 +2424,9 @@ async function checkAnsibleStatus(clusterId) {
     `;
     statusDisplay.classList.remove('d-none');
 
-    // Hide status table on error
-    statusTable.classList.add('d-none');
+    // Hide table (if exists) on error and reset summary
+    if (statusTable) statusTable.classList.add('d-none');
+    setAnsibleSummaryBadges({ state: 'unknown' });
 
   } finally {
     checkBtn.disabled = false;
@@ -2433,121 +2434,138 @@ async function checkAnsibleStatus(clusterId) {
   }
 }
 
-
-function updateAnsibleStatusTable(ansibleStatus) {
-  const tbody = document.getElementById('ansible-status-tbody');
+function updateAnsibleSummary(ansibleStatus) {
   const statusDisplay = document.getElementById('ansible-status-display');
-  const statusTable = document.getElementById('ansible-status-table');
-  
-  if (!tbody || !statusDisplay || !statusTable) {
-    return;
-  }
-  
-  tbody.innerHTML = '';
-
-  // Escape HTML helper function
+  const badgeInstall = document.getElementById('ansible-summary-install');
+  const badgeVersion = document.getElementById('ansible-summary-version');
+  const badgeMaster = document.getElementById('ansible-summary-master');
+  const actions = document.getElementById('ansible-summary-actions');
   const escapeHtml = (text) => {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    const div = document.createElement('div'); div.textContent = text || ''; return div.innerHTML;
   };
 
-  // Kiểm tra nếu MASTER server offline
-  if (ansibleStatus?.masterOffline === true) {
-    const masterHost = ansibleStatus.masterHost || 'MASTER';
-    statusDisplay.innerHTML = `
-      <div class="alert alert-warning">
-        <i class="bi bi-server"></i> <strong>Không tìm thấy máy chủ</strong><br>
-        <small>MASTER server (${escapeHtml(masterHost)}) đang offline. Vui lòng kiểm tra kết nối máy chủ trước khi kiểm tra Ansible.</small>
-      </div>
-    `;
-    statusDisplay.classList.remove('d-none');
-    statusTable.classList.add('d-none');
-    return;
-  }
+  if (!badgeInstall || !badgeVersion || !badgeMaster) return;
+  if (actions) actions.innerHTML = '';
 
-  // Kiểm tra ansibleStatus có tồn tại và có dữ liệu không
-  if (!ansibleStatus) {
-    statusDisplay.innerHTML = `
-      <div class="alert alert-warning">
-        <i class="bi bi-exclamation-triangle"></i> Không nhận được phản hồi từ server.
-      </div>
-    `;
-    statusDisplay.classList.remove('d-none');
-    statusTable.classList.add('d-none');
-    return;
-  }
-
-  // Kiểm tra ansibleStatus property
-  const ansibleStatusMap = ansibleStatus.ansibleStatus;
-  if (!ansibleStatusMap || typeof ansibleStatusMap !== 'object') {
-    statusDisplay.innerHTML = `
-      <div class="alert alert-warning">
-        <i class="bi bi-exclamation-triangle"></i> Không tìm thấy thông tin Ansible. 
-        ${ansibleStatus?.recommendation ? escapeHtml(ansibleStatus.recommendation) : 'Vui lòng kiểm tra lại cluster có MASTER server không.'}
-      </div>
-    `;
-    statusDisplay.classList.remove('d-none');
-    statusTable.classList.add('d-none');
-    return;
-  }
-
-  // Kiểm tra nếu Map rỗng
-  const statusKeys = Object.keys(ansibleStatusMap);
-  if (statusKeys.length === 0) {
-    statusDisplay.innerHTML = `
-      <div class="alert alert-warning">
-        <i class="bi bi-exclamation-triangle"></i> Không tìm thấy thông tin Ansible. 
-        ${ansibleStatus?.recommendation ? escapeHtml(ansibleStatus.recommendation) : 'Vui lòng kiểm tra lại cluster có MASTER server không.'}
-      </div>
-    `;
-    statusDisplay.classList.remove('d-none');
-    statusTable.classList.add('d-none');
-    return;
-  }
-
-  // Có dữ liệu, hiển thị table
+  // Defaults
+  setAnsibleSummaryBadges({ state: 'unknown' });
   statusDisplay.classList.add('d-none');
-  statusTable.classList.remove('d-none');
 
-  Object.entries(ansibleStatus.ansibleStatus).forEach(([host, status]) => {
-    // Kiểm tra status object có hợp lệ không
-    if (!status) {
-      console.warn(`Invalid status for host: ${host}`);
-      return;
+  if (!ansibleStatus) {
+    setAnsibleSummaryBadges({ state: 'error', message: 'Không nhận được phản hồi từ server.' });
+    return;
+  }
+
+  if (ansibleStatus.masterOffline === true) {
+    setAnsibleSummaryBadges({
+      state: 'offline',
+      master: ansibleStatus.masterHost || 'MASTER',
+      message: 'MASTER offline'
+    });
+    if (actions) {
+      actions.innerHTML = `
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" disabled title="MASTER offline">Cài đặt</button>
+        </div>
+      `;
     }
-
-    const tr = document.createElement('tr');
-    tr.className = status.installed ? 'table-success' : 'table-danger';
-
-    tr.innerHTML = `
-      <td><strong>${escapeHtml(host)}</strong></td>
-      <td>
-        <span class="badge bg-${status.role === 'MASTER' ? 'primary' : 'secondary'}">
-          ${escapeHtml(status.role || 'UNKNOWN')}
-        </span>
-      </td>
-      <td>
-        <span class="badge bg-${status.installed ? 'success' : 'danger'}">
-          <i class="bi bi-${status.installed ? 'check-circle' : 'x-circle'}"></i>
-          ${status.installed ? 'Đã cài đặt' : 'Chưa cài đặt'}
-        </span>
-      </td>
-      <td>${status.installed ? `<code>${escapeHtml(status.version || 'N/A')}</code>` : 'N/A'}</td>
-      <td>
-        ${status.installed ? `
-          <div class="btn-group btn-group-sm" role="group">
-            <button class="btn btn-outline-warning" onclick="reinstallAnsibleOnServer('${escapeHtml(host)}')">Cài đặt lại</button>
-            <button class="btn btn-outline-danger" onclick="uninstallAnsibleOnServer('${escapeHtml(host)}')">Gỡ cài đặt</button>
-          </div>` :
-        `<button class="btn btn-sm btn-outline-primary" onclick="installAnsibleOnServer('${escapeHtml(host)}')">Cài đặt</button>`
-      }
-      </td>
+    statusDisplay.innerHTML = `
+      <div class="alert alert-warning"><i class="bi bi-server"></i> MASTER (${escapeHtml(ansibleStatus.masterHost || 'MASTER')}) đang offline.</div>
     `;
+    statusDisplay.classList.remove('d-none');
+    return;
+  }
 
-    tbody.appendChild(tr);
+  const map = ansibleStatus.ansibleStatus || {};
+  const entries = Object.entries(map);
+  if (entries.length === 0) {
+    setAnsibleSummaryBadges({
+      state: 'empty',
+      message: escapeHtml(ansibleStatus.recommendation || 'Không tìm thấy thông tin Ansible.')
+    });
+    return;
+  }
+
+  // Find master entry
+  let masterHost = '-';
+  let masterInstalled = false;
+  let masterVersion = '-';
+  for (const [host, st] of entries) {
+    if (st && st.role === 'MASTER') {
+      masterHost = host;
+      masterInstalled = !!st.installed;
+      masterVersion = st.installed ? (st.version || '-') : '-';
+      break;
+    }
+  }
+
+  setAnsibleSummaryBadges({
+    state: masterInstalled ? 'installed' : 'not_installed',
+    version: masterVersion,
+    master: masterHost
   });
+
+  // Render quick actions for install/reinstall
+  if (actions) {
+    if (masterHost && masterHost !== '-') {
+      if (masterInstalled) {
+        actions.innerHTML = `
+          <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-warning" title="Cài đặt lại Ansible trên MASTER" onclick="reinstallAnsibleOnServer('${escapeHtml(masterHost)}')">
+              <i class="bi bi-arrow-repeat"></i> Cài đặt lại
+            </button>
+            <button class="btn btn-outline-danger" title="Gỡ Ansible khỏi MASTER" onclick="uninstallAnsibleOnServer('${escapeHtml(masterHost)}')">
+              <i class="bi bi-trash"></i> Gỡ cài đặt
+            </button>
+          </div>
+        `;
+      } else {
+        actions.innerHTML = `
+          <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-primary" title="Cài đặt Ansible trên MASTER" onclick="installAnsibleOnServer('${escapeHtml(masterHost)}')">
+              <i class="bi bi-download"></i> Cài đặt
+            </button>
+          </div>
+        `;
+      }
+    }
+  }
+}
+
+function setAnsibleSummaryBadges({ state, version, master, message }) {
+  const badgeInstall = document.getElementById('ansible-summary-install');
+  const badgeVersion = document.getElementById('ansible-summary-version');
+  const badgeMaster = document.getElementById('ansible-summary-master');
+  if (!badgeInstall || !badgeVersion || !badgeMaster) return;
+
+  switch (state) {
+    case 'installed':
+      badgeInstall.className = 'badge bg-success';
+      badgeInstall.innerHTML = '<i class="bi bi-check-circle"></i> Đã cài đặt';
+      break;
+    case 'not_installed':
+      badgeInstall.className = 'badge bg-danger';
+      badgeInstall.innerHTML = '<i class="bi bi-x-circle"></i> Chưa cài đặt';
+      break;
+    case 'offline':
+      badgeInstall.className = 'badge bg-warning text-dark';
+      badgeInstall.innerHTML = '<i class="bi bi-wifi-off"></i> MASTER offline';
+      break;
+    case 'error':
+      badgeInstall.className = 'badge bg-danger';
+      badgeInstall.innerHTML = `<i class="bi bi-exclamation-triangle"></i> Lỗi${message ? `: ${message}` : ''}`;
+      break;
+    case 'empty':
+      badgeInstall.className = 'badge bg-secondary';
+      badgeInstall.innerHTML = `<i class="bi bi-info-circle"></i> ${message || 'Không có dữ liệu'}`;
+      break;
+    default:
+      badgeInstall.className = 'badge bg-secondary';
+      badgeInstall.textContent = 'Chưa kiểm tra';
+  }
+
+  badgeVersion.textContent = `Phiên bản: ${version || '-'}`;
+  badgeMaster.textContent = `MASTER: ${master || '-'}`;
 }
 
 // Install Ansible on single server
@@ -2841,7 +2859,6 @@ function connectAnsibleWebSocket() {
 
   ansibleWebSocket.onopen = function (event) {
     addLogMessage('success', '✅ Kết nối WebSocket thành công');
-    addLogMessage('info', '🔗 WebSocket connected');
 
     // Send installation start command after connection is established
     sendInstallationStartCommand();
@@ -2923,7 +2940,7 @@ function sendInstallationStartCommand() {
 function handleAnsibleMessage(data) {
   switch (data.type) {
     case 'connected':
-      addLogMessage('info', '🔗 ' + data.message);
+      // Server đã thông báo trạng thái kết nối; bỏ qua để tránh trùng lặp với log onopen
       break;
 
     case 'start':
@@ -2941,7 +2958,8 @@ function handleAnsibleMessage(data) {
       break;
 
     case 'server_success':
-      addLogMessage('success', `✅ ${data.message}`);
+      // Server đã bao gồm biểu tượng/tiền tố trong message nếu cần; hiển thị nguyên văn để tránh trùng lặp
+      addLogMessage('success', `${data.message}`);
       (function () {
         let successMsg = 'Thành công';
         const m = (data && data.message) ? String(data.message).toLowerCase() : '';
@@ -2977,7 +2995,8 @@ function handleAnsibleMessage(data) {
       break;
 
     case 'complete':
-      addLogMessage('success', '🎉 ' + data.message);
+      // Server đã bao gồm biểu tượng/tiền tố trong message nếu cần; hiển thị nguyên văn để tránh trùng lặp
+      addLogMessage('success', data.message);
       updateProgress(100, 'Hoàn thành!');
       document.getElementById('ansible-complete-btn').classList.remove('d-none');
       break;
@@ -3455,6 +3474,13 @@ document.addEventListener('DOMContentLoaded', function () {
     initPingBtn.dataset.bound = '1';
     initPingBtn.addEventListener('click', () => runInitActionWS('init_ping', 'init-ansible-console'));
   }
+  
+  // Nút khởi tạo tất cả (structure + config + sshkey + ping)
+  const initAllBtn = document.getElementById('init-all-btn');
+  if (initAllBtn && !initAllBtn.dataset.bound) {
+    initAllBtn.dataset.bound = '1';
+    initAllBtn.addEventListener('click', () => runInitActionWS('init_all', 'init-ansible-console'));
+  }
 
   // Helpers for Init Ansible console
   function appendInitLogTo(consoleId, line) {
@@ -3541,7 +3567,7 @@ document.addEventListener('DOMContentLoaded', function () {
           }
         } else {
           // Có sudo NOPASSWD, không cần mật khẩu
-          appendInitLogTo(consoleId, '✅ Sử dụng sudo NOPASSWD - không cần mật khẩu cho MASTER');
+          //appendInitLogTo(consoleId, '✅ Sử dụng sudo NOPASSWD - không cần mật khẩu cho MASTER');
         }
       } catch (error) {
         // Fallback: yêu cầu mật khẩu nếu không kiểm tra được
@@ -3558,7 +3584,6 @@ document.addEventListener('DOMContentLoaded', function () {
     initActionsWS = new WebSocket(`${protocol}://${location.host}/ws/ansible`);
 
     initActionsWS.onopen = () => {
-      appendInitLogTo(consoleId, '🔗 WebSocket connected');
       const payload = { action, clusterId: currentClusterId, host };
       if (needSudo) payload.sudoPassword = sudoPassword;
       if (action === 'init_sshkey' && needSudo && sudoPassword) {

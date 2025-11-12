@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="vi" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+      <h1 class="m-0" th:text="#{admin.user.title}">👤 User Management</h1>
+      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
+    </div>
+
+    <div class="card mb-4" id="user-list">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h2 class="h6 m-0" th:text="#{admin.user.list.title}">📋 Danh sách người dùng</h2>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary" id="refresh-users-btn">
+              <i class="bi bi-arrow-clockwise"></i> <span th:text="#{common.refresh}">Làm mới</span>
+            </button>
+            <button class="btn btn-sm btn-outline-success" id="export-users-btn">
+              <i class="bi bi-download"></i> <span th:text="#{admin.user.export}">Xuất danh sách</span>
+            </button>
+          </div>
+        </div>
+        <div class="table-responsive table-fixed max-h-60vh">
+          <table class="table table-sm align-middle">
+            <thead>
+            <tr>
+              <th th:text="#{admin.user.id}">ID</th>
+              <th th:text="#{admin.user.username}">Username</th>
+              <th th:text="#{admin.user.role}">Role</th>
+              <th th:text="#{admin.user.dataLimit}">Quota (MB)</th>
+              <th th:text="#{admin.user.pathOnServer}">Đường dẫn</th>
+              <th th:text="#{common.actions}">Hành động</th>
+            </tr>
+            </thead>
+            <tbody id="users-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4" id="user-create">
+      <div class="card-body">
+        <h2 class="h6" th:text="#{admin.user.create.title}">➕ Thêm người dùng mới</h2>
+        <form id="create-user-form" class="row g-2 align-items-end">
+          <div class="col-md-2">
+            <label class="form-label small">Tên đăng nhập <span class="text-danger">*</span></label>
+            <input class="form-control form-control-sm" name="username" th:placeholder="#{admin.user.username}" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small">Mật khẩu <span class="text-danger">*</span></label>
+            <input class="form-control form-control-sm" type="password" name="password" placeholder="password" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small">Vai trò <span class="text-danger">*</span></label>
+            <select class="form-select form-select-sm" name="role" required>
+              <option value="">-- Chọn --</option>
+              <option value="ADMIN" th:text="#{role.admin}">ADMIN</option>
+              <option value="CLIENT" th:text="#{role.client}">CLIENT</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small" th:text="#{admin.user.dataLimit}">Quota (MB)</label>
+            <input class="form-control form-control-sm" type="number" name="dataLimitMb" value="1024" min="100" step="1">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small" th:text="#{admin.user.pathOnServer}">Đường dẫn</label>
+            <input class="form-control form-control-sm" name="pathOnServer" th:placeholder="#{admin.user.pathOnServer}">
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-success btn-sm" type="submit">
+              <i class="bi bi-person-plus me-1"></i> <span th:text="#{common.save}">Thêm</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Activity Modal -->
+    <div th:replace="~{::#activityModal}"></div>
+    <div class="modal fade" id="activityModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="activity-title" th:text="#{admin.user.history}">📈 Lịch sử hoạt động</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{common.close}"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="list-group" id="activity-list"></ul>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.close}">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/users.js"></script>
+</body>
+</html>
+
+

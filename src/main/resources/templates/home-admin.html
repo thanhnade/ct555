@@ -62,7 +62,7 @@
               </button>
             </div>
           </div>
-          <div class="table-responsive table-fixed" style="max-height: 60vh;">
+          <div class="table-responsive table-fixed max-h-60vh">
             <table class="table table-sm align-middle">
               <thead>
                 <tr>
@@ -86,7 +86,7 @@
         <div class="card-body">
           <h2 class="h6">➕ Thêm người dùng mới</h2>
           <!-- Alert Messages -->
-          <div id="create-user-alert" class="alert alert-dismissible fade" role="alert" style="display: none;">
+          <div id="create-user-alert" class="alert alert-dismissible fade d-none-initial" role="alert">
             <span id="create-user-message"></span>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
           </div>
@@ -187,7 +187,7 @@
             </div>
           </div>
           <div id="server-save-msg" class="small mb-2" aria-live="polite"></div>
-          <div class="table-responsive table-fixed mb-4" style="max-height: 40vh;">
+          <div class="table-responsive table-fixed mb-4 max-h-40vh">
             <table class="table table-sm align-middle">
               <thead>
                 <tr>
@@ -205,7 +205,7 @@
           </div>
 
           <h2 class="h6" id="servers-history-title">Servers đã từng kết nối</h2>
-          <div class="table-responsive table-fixed" style="max-height: 40vh;">
+          <div class="table-responsive table-fixed max-h-40vh">
             <table class="table table-sm align-middle">
               <thead>
                 <tr>
@@ -243,8 +243,7 @@
                 <div class="col-12 col-md-4"><input id="term-pass" type="password" class="form-control form-control-sm"
                     placeholder="Password (nhập khi cần)"></div>
               </div>
-              <div id="term-output" class="p-2"
-                style="background:#0b1020;color:#e5e7eb;overflow:hidden;border:1px solid #dee2e6;border-radius:.5rem;margin:0;">
+              <div id="term-output" class="p-2 terminal-box">
               </div>
             </div>
             <div class="modal-footer">
@@ -306,7 +305,7 @@
             </div>
           </div>
           <div id="clusters-msg" class="small mb-2" aria-live="polite"></div>
-          <div class="table-responsive table-fixed" style="max-height: 50vh;">
+          <div class="table-responsive table-fixed max-h-50vh">
             <table class="table table-sm align-middle">
               <thead>
                 <tr>
@@ -359,7 +358,7 @@
             </div>
           </div>
           <div id="k8s-assign-msg" class="mt-2 small" aria-live="polite"></div>
-          <div class="table-responsive" style="max-height: 60vh;">
+          <div class="table-responsive max-h-60vh">
             <table class="table table-sm align-middle">
               <thead>
                 <tr>
@@ -414,7 +413,7 @@
             </div>
           </div>
           <div id="cd-msg" class="small mb-2" aria-live="polite"></div>
-          <div class="table-responsive" style="max-height: 50vh;">
+          <div class="table-responsive max-h-50vh">
             <table class="table table-sm align-middle">
               <thead>
                 <tr>
@@ -435,9 +434,12 @@
           <div class="card mb-3">
             <div class="card-header">
               <div class="d-flex align-items-center justify-content-between">
-                <h4 class="h6 m-0">
-                  <i class="bi bi-download text-primary"></i> Cài đặt Ansible
-                </h4>
+                <div>
+                  <h4 class="h6 m-0">
+                    <i class="bi bi-terminal text-primary"></i> Ansible
+                  </h4>
+                  <div class="text-muted small">Quản lý Ansible cho cụm: kiểm tra trạng thái, khởi tạo, cấu hình và playbook</div>
+                </div>
                 <div class="d-flex gap-2">
                   <button class="btn btn-sm btn-outline-info" id="cd-check-ansible"
                     onclick="checkAnsibleStatus(currentClusterId)">
@@ -447,48 +449,49 @@
               </div>
             </div>
             <div class="card-body">
-              <div id="ansible-status-display" class="mb-3">
-                <div class="text-muted text-center py-3">
-                  <i class="bi bi-info-circle"></i> Click "Kiểm tra trạng thái" để xem thông tin Ansible trên các MASTER
-                  servers
+              <!-- Overview summary -->
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="ansible-summary">
+                <span class="badge bg-secondary" id="ansible-summary-install">Chưa kiểm tra</span>
+                <span class="badge bg-light text-dark border" id="ansible-summary-version">Phiên bản: -</span>
+                <span class="badge bg-light text-dark border" id="ansible-summary-master">MASTER: -</span>
+                <div class="ms-auto" id="ansible-summary-actions"></div>
+              </div>
+
+              <!-- Quick guide for actions -->
+              <div class="alert alert-light border mb-3 p-2">
+                <div class="small fw-semibold mb-1"><i class="bi bi-list-check"></i> Hướng dẫn nhanh</div>
+                <ul class="small mb-0 ps-3">
+                  <li><span class="fw-semibold">Khởi tạo</span>: tạo cấu trúc, ghi cấu hình mặc định, đảm bảo SSH key và ping nodes.</li>
+                  <li><span class="fw-semibold">Cấu hình</span>: xem/sửa ansible.cfg, hosts, group_vars/all.yml.</li>
+                  <li><span class="fw-semibold">Playbook</span>: quản lý file, chạy playbook, theo dõi output.</li>
+                </ul>
+                <div class="small text-muted mt-2">
+                  Lưu ý: Sau khi thêm node mới vào cluster, cần cập nhật lại cấu hình Ansible (ghi lại <code>hosts</code>) trước khi chạy playbook.
                 </div>
               </div>
 
-              <!-- Ansible Status Table -->
-              <div id="ansible-status-table" class="d-none">
-                <h6 class="mb-2">Chi tiết server:</h6>
-                <div class="table-responsive">
-                  <table class="table table-sm">
-                    <thead>
-                      <tr>
-                        <th>Server</th>
-                        <th>Role</th>
-                        <th>Trạng thái Ansible</th>
-                        <th>Phiên bản</th>
-                        <th>Hành động</th>
-                      </tr>
-                    </thead>
-                    <tbody id="ansible-status-tbody">
-                      <!-- Sẽ được populate bằng JavaScript -->
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <div id="ansible-status-display" class="mb-3"></div>
+
+              <!-- Ansible quick status table was removed; use summary badges above for fast display -->
             </div>
             <div class="card-footer">
-              <div class="d-flex flex-wrap gap-2 justify-content-end">
-                <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal"
-                  data-bs-target="#initAnsibleModal">
-                  <i class="bi bi-lightning"></i> Khởi tạo Ansible
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
-                  data-bs-target="#ansibleConfigModal">
-                  <i class="bi bi-gear"></i> Cấu hình Ansible
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal"
-                  data-bs-target="#playbookManagerModal">
-                  <i class="bi bi-files"></i> Quản lý playbook & Cài đặt K8s
-                </button>
+              <div class="btn-toolbar w-100 justify-content-between" role="toolbar" aria-label="Ansible toolbar">
+                <div class="btn-group" role="group" aria-label="Primary">
+                  <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal"
+                    data-bs-target="#initAnsibleModal" title="Thực hiện toàn bộ 4 bước khởi tạo">
+                    <i class="bi bi-lightning"></i> Khởi tạo
+                  </button>
+                </div>
+                <div class="btn-group" role="group" aria-label="Secondary">
+                  <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal"
+                    data-bs-target="#ansibleConfigModal" title="Xem và chỉnh sửa ansible.cfg, hosts">
+                    <i class="bi bi-gear"></i> Cấu hình
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal"
+                    data-bs-target="#playbookManagerModal" title="Quản lý và chạy Ansible playbooks">
+                    <i class="bi bi-files"></i> Playbook & K8s
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -542,14 +545,14 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0">Danh sách Pods</h6>
                   <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="pods-search"
-                      placeholder="Tìm kiếm pod..." style="width: 200px;">
-                    <select class="form-select form-select-sm" id="pods-namespace-filter" style="width: 150px;">
+                    <input type="text" class="form-control form-control-sm w-200" id="pods-search"
+                      placeholder="Tìm kiếm pod...">
+                    <select class="form-select form-select-sm w-150" id="pods-namespace-filter">
                       <option value="">Tất cả namespace</option>
                     </select>
                   </div>
                 </div>
-                <div class="table-responsive" style="max-height: 400px;">
+                <div class="table-responsive max-h-400px">
                   <table class="table table-sm table-hover">
                     <thead class="table-light sticky-top">
                       <tr>
@@ -577,10 +580,10 @@
               <div class="mt-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0">Danh sách Namespaces</h6>
-                  <input type="text" class="form-control form-control-sm" id="namespaces-search"
-                    placeholder="Tìm kiếm namespace..." style="width: 200px;">
+                  <input type="text" class="form-control form-control-sm w-200" id="namespaces-search"
+                    placeholder="Tìm kiếm namespace...">
                 </div>
-                <div class="table-responsive" style="max-height: 400px;">
+                <div class="table-responsive max-h-400px">
                   <table class="table table-sm table-hover">
                     <thead class="table-light sticky-top">
                       <tr>
@@ -607,9 +610,9 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0">Danh sách Workloads</h6>
                   <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="workloads-search"
-                      placeholder="Tìm kiếm workload..." style="width: 200px;">
-                    <select class="form-select form-select-sm" id="workloads-type-filter" style="width: 150px;">
+                    <input type="text" class="form-control form-control-sm w-200" id="workloads-search"
+                      placeholder="Tìm kiếm workload...">
+                    <select class="form-select form-select-sm w-150" id="workloads-type-filter">
                       <option value="">Tất cả loại</option>
                       <option value="deployment">Deployments</option>
                       <option value="statefulset">StatefulSets</option>
@@ -617,7 +620,7 @@
                     </select>
                   </div>
                 </div>
-                <div class="table-responsive" style="max-height: 400px;">
+                <div class="table-responsive max-h-400px">
                   <table class="table table-sm table-hover">
                     <thead class="table-light sticky-top">
                       <tr>
@@ -683,12 +686,12 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0">Danh sách Services</h6>
                   <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="services-search"
-                      placeholder="Tìm kiếm service..." style="width: 200px;">
-                    <select class="form-select form-select-sm" id="services-namespace-filter" style="width: 150px;">
+                    <input type="text" class="form-control form-control-sm w-200" id="services-search"
+                      placeholder="Tìm kiếm service...">
+                    <select class="form-select form-select-sm w-150" id="services-namespace-filter">
                       <option value="">Tất cả namespace</option>
                     </select>
-                    <select class="form-select form-select-sm" id="services-type-filter" style="width: 150px;">
+                    <select class="form-select form-select-sm w-150" id="services-type-filter">
                       <option value="">Tất cả loại</option>
                       <option value="ClusterIP">ClusterIP</option>
                       <option value="NodePort">NodePort</option>
@@ -697,7 +700,7 @@
                     </select>
                   </div>
                 </div>
-                <div class="table-responsive" style="max-height: 400px;">
+                <div class="table-responsive max-h-400px">
                   <table class="table table-sm table-hover">
                     <thead class="table-light sticky-top">
                       <tr>
@@ -729,14 +732,14 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0">Danh sách Ingress</h6>
                   <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="ingress-search"
-                      placeholder="Tìm kiếm ingress..." style="width: 200px;">
-                    <select class="form-select form-select-sm" id="ingress-namespace-filter" style="width: 150px;">
+                    <input type="text" class="form-control form-control-sm w-200" id="ingress-search"
+                      placeholder="Tìm kiếm ingress...">
+                    <select class="form-select form-select-sm w-150" id="ingress-namespace-filter">
                       <option value="">Tất cả namespace</option>
                     </select>
                   </div>
                 </div>
-                <div class="table-responsive" style="max-height: 400px;">
+                <div class="table-responsive max-h-400px">
                   <table class="table table-sm table-hover">
                     <thead class="table-light sticky-top">
                       <tr>
@@ -890,7 +893,7 @@
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-              <button type="button" class="btn btn-success" id="add-existing-nodes-btn" style="display: none;">
+              <button type="button" class="btn btn-success d-none-initial" id="add-existing-nodes-btn">
                 <i class="bi bi-list-check"></i> Thêm Node đã chọn
               </button>
               <button type="submit" form="add-node-form" class="btn btn-success" id="add-node-submit-btn">
@@ -942,7 +945,7 @@
                 </div>
 
                 <!-- Progress Bar -->
-                <div class="progress mb-3" style="height: 25px;">
+                <div class="progress mb-3 h-25">
                   <div id="ansible-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
                     role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
                     <span id="progress-text">Chuẩn bị...</span>
@@ -964,8 +967,7 @@
                     </div>
                   </div>
                   <div class="card-body p-0">
-                    <div id="ansible-output-console" class="bg-dark text-light p-3"
-                      style="height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px;">
+                  <div id="ansible-output-console" class="bg-dark text-light p-3 h-400px monospace-12 overflow-auto">
                       <!-- Output sẽ được hiển thị ở đây -->
                     </div>
                   </div>
@@ -1002,156 +1004,60 @@
                   </button>
                 </div>
                 <div class="card-body p-0">
-                  <div id="init-ansible-console" class="bg-dark text-light p-3"
-                    style="height: 320px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px;">
+                  <div id="init-ansible-console" class="bg-dark text-light p-3 h-320px monospace-12 overflow-auto">
                   </div>
                 </div>
               </div>
 
-              <!-- Tabs Navigation (below) -->
-              <ul class="nav nav-tabs mb-3" id="initAnsibleTabs" role="tablist">
-                <li class="nav-item" role="presentation">
-                  <button class="nav-link active" id="tab-structure" data-bs-toggle="tab"
-                    data-bs-target="#tab-pane-structure" type="button" role="tab" aria-controls="tab-pane-structure"
-                    aria-selected="true">
-                    <i class="bi bi-folder-plus"></i> Tạo cấu trúc
-                  </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                  <button class="nav-link" id="tab-config" data-bs-toggle="tab" data-bs-target="#tab-pane-config"
-                    type="button" role="tab" aria-controls="tab-pane-config" aria-selected="false">
-                    <i class="bi bi-file-earmark-text"></i> Config mặc định
-                  </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                  <button class="nav-link" id="tab-sshkey" data-bs-toggle="tab" data-bs-target="#tab-pane-sshkey"
-                    type="button" role="tab" aria-controls="tab-pane-sshkey" aria-selected="false">
-                    <i class="bi bi-key"></i> SSH key
-                  </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                  <button class="nav-link" id="tab-ping" data-bs-toggle="tab" data-bs-target="#tab-pane-ping"
-                    type="button" role="tab" aria-controls="tab-pane-ping" aria-selected="false">
-                    <i class="bi bi-broadcast"></i> Ping nodes
-                  </button>
-                </li>
-              </ul>
-              <!-- Tab Contents -->
-              <div class="tab-content" id="initAnsibleTabContent">
-                <!-- Structure tab: action button only -->
-                <div class="tab-pane fade show active" id="tab-pane-structure" role="tabpanel"
-                  aria-labelledby="tab-structure">
-                  <div class="container-fluid px-0">
-                    <div class="row g-3">
-                      <div class="col-12">
-                        <!-- Hàng 1: nút thực thi -->
-
-                        <div class="mt-3">
-                          <div class="alert alert-secondary py-2 mb-2 small">
-                            Danh mục sẽ được tạo và mục đích:
-                          </div>
-                          <ul class="small mb-0">
-                            <li><code>/etc/ansible</code>: Thư mục chính chứa cấu hình Ansible và inventory.</li>
-                            <li><code>/etc/ansible/group_vars</code>: Biến dùng chung cho từng nhóm hosts.</li>
-                            <li><code>/etc/ansible/host_vars</code>: Biến riêng cho từng máy (host) cụ thể.</li>
-                            <li><code>~/.ansible</code>: Thư mục làm việc/cache của Ansible cho user hiện tại.</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Tab: Config (ansible.cfg & hosts) -->
-                <div class="tab-pane fade" id="tab-pane-config" role="tabpanel" aria-labelledby="tab-config">
-                  <div class="container-fluid px-0">
-                    <div class="row g-3">
-                      <div class="col-12">
-                        <!-- Hàng 1: nút thực thi -->
-
-                        <div class="card border-0 bg-light">
-                          <div class="card-body py-2">
-                            <div class="small mb-2">Hệ thống sẽ tạo/ghi đè các file:</div>
-                            <ul class="small mb-2">
-                              <li><code>/etc/ansible/ansible.cfg</code>: cấu hình mặc định (inventory,
-                                host_key_checking, callbacks...).</li>
-                              <li><code>/etc/ansible/hosts</code>: inventory động theo CSDL (nhóm <code>[master]</code>,
-                                <code>[workers]</code>, và <code>[all:vars]</code>).
-                              </li>
-                            </ul>
-                            <div class="small text-muted">Inventory được sinh dựa trên các node MASTER/WORKER của
-                              cluster hiện tại, tự động điền <code>ansible_user</code> và <code>ansible_ssh_port</code>.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                </div>
-                <!-- Tab: SSH key -->
-                <div class="tab-pane fade" id="tab-pane-sshkey" role="tabpanel" aria-labelledby="tab-sshkey">
-                  <div class="container-fluid px-0">
-                    <div class="row g-3">
-                      <div class="col-12">
-                        <!-- Hàng 1: nút thực thi -->
-
-                        <div class="card border-0 bg-light">
-                          <div class="card-body py-2">
-                            <div class="small mb-2">Hệ thống sẽ:</div>
-                            <ul class="small mb-2">
-                              <li>Tạo thư mục <code>~/.ssh</code> (nếu chưa có) và đặt quyền <code>700</code>.</li>
-                              <li>Tạo cặp khóa <code>~/.ssh/id_rsa</code> và <code>~/.ssh/id_rsa.pub</code> không mật
-                                khẩu nếu chưa tồn tại.</li>
-                            </ul>
-                            <div class="small text-muted">Khóa công khai có thể được phân phối tới các node khác để
-                              thiết lập kết nối SSH không mật khẩu.</div>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                </div>
-                <!-- Tab: Ping nodes -->
-                <div class="tab-pane fade" id="tab-pane-ping" role="tabpanel" aria-labelledby="tab-ping">
-                  <div class="container-fluid px-0">
-                    <div class="row g-3">
-                      <div class="col-12">
-                        <!-- Hàng 1: nút thực thi -->
-
-                        <div class="card border-0 bg-light">
-                          <div class="card-body py-2">
-                            <div class="small mb-2">Thực thi lệnh:</div>
-                            <pre class="small mb-2"
-                              style="white-space: pre-wrap;">ansible all -m ping -i /etc/ansible/hosts</pre>
-                            <div class="small text-muted">Dùng inventory tại <code>/etc/ansible/hosts</code> để kiểm tra
-                              kết nối của tất cả hosts. Kết quả hiển thị theo thời gian thực ở phần "Kết quả".</div>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
+              <!-- Single consolidated guide -->
+              <div class="card border-0 bg-light">
+                <div class="card-body py-3">
+                  <div class="small mb-2 fw-semibold"><i class="bi bi-list-check"></i> Hướng dẫn nhanh (4 bước):</div>
+                  <ol class="small mb-3 ps-3">
+                    <li class="mb-1">
+                      <span class="fw-semibold">Tạo cấu trúc</span>: /etc/ansible, group_vars, host_vars, ~/.ansible.
+                      Hệ thống sẽ xác minh và báo OK/FAIL.
+                    </li>
+                    <li class="mb-1">
+                      <span class="fw-semibold">Ghi cấu hình</span>: tạo/ghi đè ansible.cfg và hosts dựa trên cluster
+                      (nhóm master/workers và all:vars), sau đó kiểm tra hợp lệ (ansible-inventory).
+                    </li>
+                    <li class="mb-1">
+                      <span class="fw-semibold">SSH key</span>: đảm bảo MASTER có id_rsa/id_rsa.pub và tự ủy quyền
+                      vào authorized_keys (đăng nhập không mật khẩu).
+                    </li>
+                    <li class="mb-1">
+                      <span class="fw-semibold">Ping nodes</span>: kiểm tra kết nối tất cả hosts bằng inventory vừa tạo.
+                    </li>
+                  </ol>
+                  <div class="small text-muted">
+                    Mẹo: Nhấn “Khởi tạo” để chạy lần lượt 4 bước. Nếu tài khoản có <code>sudo NOPASSWD</code> sẽ không cần mật khẩu; nếu không, hệ thống sẽ yêu cầu nhập.
                   </div>
                 </div>
               </div>
             </div>
-            <div class="modal-footer d-flex flex-wrap gap-2 justify-content-between">
-              <div class="text-muted small">Thao tác:</div>
-              <div class="d-flex flex-wrap gap-2">
-                <button type="button" class="btn btn-outline-success" id="init-structure-btn">
-                  <i class="bi bi-folder-plus"></i> Tạo cấu trúc
-                </button>
-                <button type="button" class="btn btn-outline-primary" id="init-config-btn">
-                  <i class="bi bi-file-earmark-text"></i> Config mặc định
-                </button>
-                <button type="button" class="btn btn-outline-secondary" id="init-sshkey-btn">
-                  <i class="bi bi-key"></i> Tạo SSH key
-                </button>
-                <button type="button" class="btn btn-outline-info" id="init-ping-btn">
-                  <i class="bi bi-broadcast"></i> Ping nodes
-                </button>
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            <div class="modal-footer">
+              <div class="btn-toolbar w-100 justify-content-between" role="toolbar" aria-label="Init toolbar">
+                <div class="btn-group" role="group" aria-label="Primary action">
+                  <button type="button" class="btn btn-success" id="init-all-btn" title="Thực hiện toàn bộ 4 bước">
+                    <i class="bi bi-lightning"></i> Khởi tạo
+                  </button>
+                </div>
+                <div class="btn-group" role="group" aria-label="Secondary actions">
+                  <button type="button" class="btn btn-outline-success btn-sm" id="init-structure-btn" title="Tạo cấu trúc thư mục Ansible">
+                    <i class="bi bi-folder-plus"></i> Tạo cấu trúc
+                  </button>
+                  <button type="button" class="btn btn-outline-primary btn-sm" id="init-config-btn" title="Ghi ansible.cfg và hosts mặc định">
+                    <i class="bi bi-file-earmark-text"></i> Config mặc định
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="init-sshkey-btn" title="Tạo SSH key cho MASTER">
+                    <i class="bi bi-key"></i> SSH key
+                  </button>
+                  <button type="button" class="btn btn-outline-info btn-sm" id="init-ping-btn" title="Kiểm tra kết nối các node">
+                    <i class="bi bi-broadcast"></i> Ping nodes
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" title="Đóng cửa sổ">Đóng</button>
+                </div>
               </div>
             </div>
           </div>
@@ -1288,7 +1194,7 @@
                   <button type="button" class="btn btn-sm btn-outline-info" id="refresh-playbooks-btn"
                     onclick="refreshPlaybooks()"><i class="bi bi-arrow-clockwise"></i> Làm mới</button>
                 </div>
-                <div class="input-group input-group-sm" style="max-width: 320px;">
+                <div class="input-group input-group-sm mw-320">
                   <span class="input-group-text"><i class="bi bi-search"></i></span>
                   <input type="text" id="search-playbook-input" class="form-control" placeholder="Tìm playbook...">
                 </div>
@@ -1361,7 +1267,7 @@
                     </div>
 
                     <!-- Execution status - nằm cùng vị trí với nội dung playbook -->
-                    <div id="playbook-execution-status" style="display: none;"></div>
+                    <div id="playbook-execution-status" class="d-none-initial"></div>
                   </div>
                 </div>
               </div>
@@ -1369,13 +1275,13 @@
             <div class="modal-footer">
               <div class="d-flex justify-content-between w-100">
                 <div>
-                  <button type="button" class="btn btn-outline-danger" id="delete-playbook-btn" style="display: none;">
+                  <button type="button" class="btn btn-outline-danger d-none-initial" id="delete-playbook-btn">
                     <i class="bi bi-trash"></i> Xóa
                   </button>
                 </div>
                 <div>
                   <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                  <button type="button" class="btn btn-success" id="execute-playbook-btn" style="display: none;">
+                  <button type="button" class="btn btn-success d-none-initial" id="execute-playbook-btn">
                     <i class="bi bi-play-circle"></i> Thực thi
                   </button>
                   <button type="button" class="btn btn-primary" id="save-playbook-btn">
@@ -1594,8 +1500,7 @@
           </div>
         </div>
         <div class="card-body p-0">
-          <div id="deployment-logs-console" class="bg-dark text-light p-3"
-            style="height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">
+          <div id="deployment-logs-console" class="bg-dark text-light p-3 h-400px monospace-12 overflow-auto pre-wrap">
             <div class="text-muted text-center">Chọn một deployment request để xem logs...</div>
           </div>
         </div>

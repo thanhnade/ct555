@@ -85,6 +85,11 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
             streamInitConfig(session, clusterId, host, sudoPassword);
+        } else if ("init_all".equals(action)) {
+            Long clusterId = toLongSafe(request.get("clusterId"));
+            String host = (String) request.get("host");
+            String sudoPassword = (String) request.get("sudoPassword");
+            streamInitAll(session, clusterId, host, sudoPassword);
         } else if ("init_sshkey".equals(action)) {
             Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
@@ -249,6 +254,145 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     }
 
     // ================= Nhóm thao tác khởi tạo nhanh (Realtime) =================
+    private void streamInitAll(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                var servers = serverService.findByClusterId(clusterId);
+                com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
+                if (target == null) {
+                    sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
+                    return;
+                }
+                // Thông báo bắt đầu
+                sendMessage(session, String.format("{\"type\":\"start\",\"message\":\"Khởi tạo toàn bộ Ansible trên %s...\"}", target.getHost()));
+
+                // 1) Structure
+                sendMessage(session, String.format("{\"type\":\"info\",\"message\":\"Bước 1/4: Khởi tạo cấu trúc...\"}"));
+                executeCommandWithTerminalOutput(session, target,
+                        "mkdir -p /etc/ansible/{playbooks,roles,group_vars,host_vars}", sudoPassword, 15000);
+                executeCommandWithTerminalOutput(session, target, "mkdir -p ~/.ansible", sudoPassword, 8000);
+                executeCommandWithTerminalOutput(session, target, "chmod -R 755 /etc/ansible", sudoPassword, 8000);
+                String verifyStruct = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc 'for d in /etc/ansible /etc/ansible/group_vars /etc/ansible/host_vars /etc/ansible/playbooks /etc/ansible/roles; do [ -d \"$d\" ] || { echo MISSING:$d; exit 1; }; done; echo OK'",
+                        sudoPassword, 8000);
+                if (verifyStruct == null || !verifyStruct.contains("OK")) {
+                    sendMessage(session, String.format("{\"type\":\"error\",\"message\":\"Xác minh cấu trúc thất bại trên %s\"}", target.getHost()));
+                    return;
+                }
+
+                // 2) Config (ansible.cfg + hosts)
+                sendMessage(session, String.format("{\"type\":\"info\",\"message\":\"Bước 2/4: Ghi ansible.cfg và hosts...\"}"));
+                String cfg = "[defaults]\n" +
+                        "inventory      = /etc/ansible/hosts\n" +
+                        "roles_path     = /etc/ansible/roles\n" +
+                        "remote_user    = " + (target.getUsername() != null ? target.getUsername() : "root") + "\n" +
+                        "host_key_checking = False\n" +
+                        "retry_files_enabled = False\n" +
+                        "timeout = 45\n" +
+                        "nocows = 1\n" +
+                        "forks = 10\n" +
+                        "interpreter_python = /usr/bin/python3\n" +
+                        "\n" +
+                        "# Hiển thị log rõ ràng, có thời gian từng task\n" +
+                        "stdout_callback = yaml\n" +
+                        "callbacks_enabled = timer, profile_tasks\n" +
+                        "\n" +
+                        "# Tự động kết thúc nếu gặp lỗi nghiêm trọng\n" +
+                        "any_errors_fatal = True\n" +
+                        "\n" +
+                        "# Ẩn cảnh báo \"deprecation\" khi chạy các module builtin\n" +
+                        "deprecation_warnings = False\n";
+                String cmdCfg = "tee /etc/ansible/ansible.cfg > /dev/null <<'EOF'\n" + cfg + "\nEOF";
+                executeCommandWithTerminalOutput(session, target, "mkdir -p /etc/ansible", sudoPassword, 8000);
+                executeCommandWithTerminalOutput(session, target, cmdCfg, sudoPassword, 20000);
+                String verifyCfg = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc '[ -s /etc/ansible/ansible.cfg ] && echo OK || echo FAIL'",
+                        sudoPassword, 6000);
+                if (verifyCfg == null || !verifyCfg.contains("OK")) {
+                    sendMessage(session, String.format("{\"type\":\"error\",\"message\":\"Không xác minh được ansible.cfg trên %s\"}", target.getHost()));
+                    return;
+                }
+                StringBuilder hosts = new StringBuilder();
+                hosts.append("[master]\n");
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                        String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
+                        hosts.append(hostname)
+                                .append(" ansible_host=").append(s.getHost())
+                                .append(" ansible_user=").append(s.getUsername() != null ? s.getUsername() : "root");
+                        if (s.getPort() != null) hosts.append(" ansible_ssh_port=").append(s.getPort());
+                        hosts.append("\n");
+                    }
+                }
+                hosts.append("\n[workers]\n");
+                for (var s : servers) {
+                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER) {
+                        String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
+                        hosts.append(hostname)
+                                .append(" ansible_host=").append(s.getHost())
+                                .append(" ansible_user=").append(s.getUsername() != null ? s.getUsername() : "root");
+                        if (s.getPort() != null) hosts.append(" ansible_ssh_port=").append(s.getPort());
+                        hosts.append("\n");
+                    }
+                }
+                hosts.append("\n[all:vars]\n")
+                        .append("ansible_python_interpreter=/usr/bin/python3\n")
+                        .append("ansible_ssh_private_key_file=/home/")
+                        .append(target.getUsername() != null ? target.getUsername() : "root")
+                        .append("/.ssh/id_rsa\n");
+                String cmdHosts = "tee /etc/ansible/hosts > /dev/null <<'EOF'\n" + hosts + "EOF";
+                executeCommandWithTerminalOutput(session, target, cmdHosts, sudoPassword, 20000);
+                String verifyHosts = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo FAIL'", sudoPassword, 6000);
+                if (verifyHosts == null || !verifyHosts.contains("OK")) {
+                    sendMessage(session, String.format("{\"type\":\"error\",\"message\":\"Không xác minh được hosts trên %s\"}", target.getHost()));
+                    return;
+                }
+
+                // 3) SSH key ensure + self auth
+                sendMessage(session, String.format("{\"type\":\"info\",\"message\":\"Bước 3/4: Đảm bảo SSH key trên MASTER...\"}"));
+                executeCommandWithTerminalOutput(session, target,
+                        "bash -lc 'mkdir -p ~/.ssh; chmod 700 ~/.ssh'",
+                        sudoPassword,
+                        8000);
+                executeCommandWithTerminalOutput(session, target,
+                        "bash -lc '[ -f ~/.ssh/id_rsa.pub ] || ssh-keygen -t rsa -b 2048 -N \"\" -f ~/.ssh/id_rsa -q'",
+                        sudoPassword, 20000);
+                String masterPub = executeCommandWithTerminalOutput(session, target,
+                        "bash -lc 'cat ~/.ssh/id_rsa.pub'", sudoPassword, 8000);
+                if (masterPub == null || masterPub.isBlank()) {
+                    sendMessage(session, String.format("{\"type\":\"error\",\"message\":\"Không đọc được public key trên %s\"}", target.getHost()));
+                    return;
+                }
+                try {
+                    String[] partsCore = masterPub.split(" ", 3);
+                    String core = (partsCore.length > 1 ? partsCore[1] : masterPub.trim());
+                    String matchTokenMaster = escapeShellForSingleQuotes(core);
+                    String fullKeyMaster = escapeShellForSingleQuotes(masterPub.trim());
+                    String ensureSelfAuth = "bash -lc \"mkdir -p $HOME/.ssh && chmod 700 $HOME/.ssh && touch $HOME/.ssh/authorized_keys && chmod 600 $HOME/.ssh/authorized_keys; "
+                            + "if grep -Fq " + matchTokenMaster
+                            + " $HOME/.ssh/authorized_keys; then echo EXIST; else printf '%s\\n' " + fullKeyMaster
+                            + " | tee -a $HOME/.ssh/authorized_keys >/dev/null; fi\"";
+                    executeCommandWithTerminalOutput(session, target, ensureSelfAuth, sudoPassword, 15000);
+                } catch (Exception ignored) {
+                }
+
+                // 4) Ping inventory
+                sendMessage(session, String.format("{\"type\":\"info\",\"message\":\"Bước 4/4: Kiểm tra kết nối Ansible (ping)...\"}"));
+                String pingCmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'";
+                executeCommandWithTerminalOutput(session, target, pingCmd, sudoPassword, 30000);
+
+                // Complete
+                sendMessage(session, String.format(
+                        "{\"type\":\"complete\",\"message\":\"Hoàn tất khởi tạo toàn bộ Ansible trên %s\"}",
+                        target.getHost()));
+
+            } catch (Exception e) {
+                sendMessage(session,
+                        String.format("{\"type\":\"error\",\"message\":\"%s\"}", escapeJsonString(e.getMessage())));
+            }
+        });
+    }
     private void streamInitStructure(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
@@ -1141,10 +1285,6 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         } else if (needsSudo && hasSudoNopasswd) {
             // Có sudo NOPASSWD thì chỉ cần thêm sudo vào câu lệnh
             finalCommand = "sudo " + command;
-            sendMessage(session,
-                    String.format(
-                            "{\"type\":\"info\",\"server\":\"%s\",\"message\":\"Sử dụng sudo NOPASSWD cho %s\"}",
-                            host, username));
         }
 
         // Thực thi câu lệnh và lấy output

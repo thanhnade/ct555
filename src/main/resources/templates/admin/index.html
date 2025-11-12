@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="vi" xmlns:th="http://www.thymeleaf.org" th:replace="~{admin/layout :: layout(~{::content})}">
+  <div th:fragment="content">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+      <h1 class="m-0" th:text="#{admin.dashboard.title}">Admin Dashboard</h1>
+      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6 col-lg-3">
+        <a class="text-decoration-none" th:href="@{/admin/user}">
+          <div class="card h-100 border-0 shadow-sm hover-shadow transition">
+            <div class="card-body text-center">
+              <div class="display-4 mb-2">👤</div>
+              <div class="h5 mb-1" th:text="#{admin.user.title}">Users</div>
+              <div class="text-muted small" th:text="#{admin.user.list.title}">Quản lý người dùng</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <a class="text-decoration-none" th:href="@{/admin/server}">
+          <div class="card h-100 border-0 shadow-sm hover-shadow transition">
+            <div class="card-body text-center">
+              <div class="display-4 mb-2">🖥️</div>
+              <div class="h5 mb-1" th:text="#{admin.server.title}">Servers</div>
+              <div class="text-muted small" th:text="#{admin.server.list.title}">Quản lý máy chủ</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <a class="text-decoration-none" th:href="@{/admin/k8s}">
+          <div class="card h-100 border-0 shadow-sm hover-shadow transition">
+            <div class="card-body text-center">
+              <div class="display-4 mb-2">☸️</div>
+              <div class="h5 mb-1" th:text="#{admin.k8s.title}">Kubernetes</div>
+              <div class="text-muted small" th:text="#{admin.k8s.list.title}">Cụm Kubernetes</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <a class="text-decoration-none" th:href="@{/admin/deployments}">
+          <div class="card h-100 border-0 shadow-sm hover-shadow transition">
+            <div class="card-body text-center">
+              <div class="display-4 mb-2">🚀</div>
+              <div class="h5 mb-1" th:text="#{admin.deployment.title}">Deployments</div>
+              <div class="text-muted small" th:text="#{admin.deployment.list.title}">Yêu cầu triển khai</div>
+            </div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+</html>
