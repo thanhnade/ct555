@@ -221,15 +221,30 @@
 				break;
 
 			case 'complete':
+				// Xác định success: nếu có field success thì dùng, nếu không thì kiểm tra message
+				let isSuccess = data.success;
+				if (isSuccess === undefined || isSuccess === null) {
+					// Nếu không có field success, kiểm tra message để xác định
+					const message = (data.message || '').toLowerCase();
+					// Nếu message chứa từ khóa lỗi/thất bại thì là false, ngược lại là true
+					isSuccess = !(message.includes('lỗi') || message.includes('error') || 
+								  message.includes('thất bại') || message.includes('failed') ||
+								  message.includes('❌'));
+				}
+				
 				if (onComplete) {
-					onComplete(data.success || false, data.message || '');
+					onComplete(isSuccess, data.message || '');
 				}
 				if (onLogMessage) {
-					if (data.success) {
-						onLogMessage('success', '✅ ' + (data.message || 'Hoàn thành'));
+					// Server đã bao gồm biểu tượng/tiền tố trong message nếu cần; hiển thị nguyên văn để tránh trùng lặp (tương tự admin.js)
+					if (isSuccess) {
+						onLogMessage('success', data.message || 'Hoàn thành!');
 					} else {
 						onLogMessage('error', '❌ ' + (data.message || 'Thất bại'));
 					}
+				}
+				if (onProgress) {
+					onProgress(100, 'Hoàn thành!');
 				}
 				break;
 

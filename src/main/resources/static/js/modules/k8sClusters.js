@@ -151,8 +151,23 @@
 			if (!btn.dataset.bound) {
 				btn.dataset.bound = '1';
 				btn.addEventListener('click', (e) => {
-					const id = parseInt(e.target.closest('.cluster-view-btn').dataset.id, 10);
-					if (id) showClusterDetail(id);
+					e.preventDefault();
+					e.stopPropagation();
+					// Dùng currentTarget hoặc btn trực tiếp thay vì e.target.closest()
+					const button = e.currentTarget || btn;
+					const idStr = button.dataset.id || button.getAttribute('data-id');
+					if (!idStr) {
+						console.error('Cluster view button missing data-id attribute');
+						window.showAlert('error', 'Không tìm thấy ID của cluster');
+						return;
+					}
+					const id = parseInt(idStr, 10);
+					if (isNaN(id) || id <= 0) {
+						console.error('Invalid cluster ID:', idStr);
+						window.showAlert('error', 'ID cluster không hợp lệ: ' + idStr);
+						return;
+					}
+					showClusterDetail(id);
 				});
 			}
 		});
@@ -161,9 +176,24 @@
 			if (!btn.dataset.bound) {
 				btn.dataset.bound = '1';
 				btn.addEventListener('click', (e) => {
-					const id = parseInt(e.target.closest('.cluster-delete-btn').dataset.id, 10);
+					e.preventDefault();
+					e.stopPropagation();
+					// Dùng currentTarget hoặc btn trực tiếp thay vì e.target.closest()
+					const button = e.currentTarget || btn;
+					const idStr = button.dataset.id || button.getAttribute('data-id');
+					if (!idStr) {
+						console.error('Cluster delete button missing data-id attribute');
+						window.showAlert('error', 'Không tìm thấy ID của cluster');
+						return;
+					}
+					const id = parseInt(idStr, 10);
+					if (isNaN(id) || id <= 0) {
+						console.error('Invalid cluster ID:', idStr);
+						window.showAlert('error', 'ID cluster không hợp lệ: ' + idStr);
+						return;
+					}
 					const name = allClusters.find(c => c.id === id)?.name || '';
-					if (id) deleteCluster(id, name);
+					deleteCluster(id, name);
 				});
 			}
 		});
@@ -469,17 +499,169 @@
 		if (servicesCount) servicesCount.textContent = '0';
 		if (ingressCount) ingressCount.textContent = '0';
 
-		// Clear cluster message (no longer needed, using toast)
+		// Clear namespace filters
+		const podsNamespaceFilter = document.getElementById('pods-namespace-filter');
+		const servicesNamespaceFilter = document.getElementById('services-namespace-filter');
+		const ingressNamespaceFilter = document.getElementById('ingress-namespace-filter');
+		
+		if (podsNamespaceFilter) {
+			podsNamespaceFilter.innerHTML = '<option value="">Tất cả namespaces</option>';
+		}
+		if (servicesNamespaceFilter) {
+			servicesNamespaceFilter.innerHTML = '<option value="">Tất cả namespaces</option>';
+		}
+		if (ingressNamespaceFilter) {
+			ingressNamespaceFilter.innerHTML = '<option value="">Tất cả namespaces</option>';
+		}
+
+		// Clear K8s resources data trong module (nếu có method)
+		if (window.K8sResourcesModule && typeof window.K8sResourcesModule.clearResourcesData === 'function') {
+			window.K8sResourcesModule.clearResourcesData();
+		}
+
+		// Reset Ansible summary badges bằng cách gọi setAnsibleSummaryBadges (nếu có)
+		if (window.AnsibleConfigModule && typeof window.AnsibleConfigModule.setAnsibleSummaryBadges === 'function') {
+			window.AnsibleConfigModule.setAnsibleSummaryBadges({ state: 'unknown' });
+		} else if (window.setAnsibleSummaryBadges && typeof window.setAnsibleSummaryBadges === 'function') {
+			window.setAnsibleSummaryBadges({ state: 'unknown' });
+		}
+
+		// Đóng các modals đang mở (nếu có)
+		const modalsToClose = [
+			'ansibleInstallModal',
+			'initAnsibleModal',
+			'ansibleConfigModal',
+			'k8s-output-modal',
+			'scale-workload-modal',
+			'addNodeModal',
+			'playbookManagerModal'
+		];
+		modalsToClose.forEach(modalId => {
+			const modalElement = document.getElementById(modalId);
+			if (modalElement) {
+				const modalInstance = bootstrap.Modal.getInstance(modalElement);
+				if (modalInstance) {
+					modalInstance.hide();
+				}
+			}
+		});
+
+		// Đã clear tất cả dữ liệu cluster
+	}
+
+	// Clear cluster detail UI (không reset currentClusterId - dùng khi chuyển cluster)
+	function clearClusterDetailUI() {
+		// Clear cluster info
+		const elementsToReset = ['cd-name', 'cd-master', 'cd-workers', 'cd-status', 'cd-version'];
+		elementsToReset.forEach(id => {
+			const element = document.getElementById(id);
+			if (element) {
+				if (id === 'cd-version') {
+					element.textContent = '';
+				} else {
+					element.textContent = '';
+				}
+			}
+		});
+
+		// Clear nodes table
+		const nodesTbody = document.getElementById('cd-nodes-tbody');
+		if (nodesTbody) {
+			nodesTbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4"><i class="bi bi-hourglass-split"></i> Đang tải...</td></tr>';
+		}
+
+		// Clear Ansible summary badges
+		const ansibleSummaryInstall = document.getElementById('ansible-summary-install');
+		const ansibleSummaryVersion = document.getElementById('ansible-summary-version');
+		const ansibleSummaryMaster = document.getElementById('ansible-summary-master');
+		const ansibleSummaryActions = document.getElementById('ansible-summary-actions');
+		const ansibleStatusDisplay = document.getElementById('ansible-status-display');
+		
+		if (ansibleSummaryInstall) {
+			ansibleSummaryInstall.className = 'badge bg-secondary';
+			ansibleSummaryInstall.textContent = 'Chưa kiểm tra';
+		}
+		if (ansibleSummaryVersion) {
+			ansibleSummaryVersion.textContent = 'Phiên bản: -';
+		}
+		if (ansibleSummaryMaster) {
+			ansibleSummaryMaster.textContent = 'MASTER: -';
+		}
+		if (ansibleSummaryActions) {
+			ansibleSummaryActions.innerHTML = '';
+		}
+		if (ansibleStatusDisplay) {
+			ansibleStatusDisplay.innerHTML = '';
+			ansibleStatusDisplay.classList.add('d-none');
+		}
+
+		// Clear K8s resources tables
+		const podsTbody = document.getElementById('pods-tbody');
+		const namespacesTbody = document.getElementById('namespaces-tbody');
+		const workloadsTbody = document.getElementById('workloads-tbody');
+		const servicesTbody = document.getElementById('services-tbody');
+		const ingressTbody = document.getElementById('ingress-tbody');
+		
+		if (podsTbody) {
+			podsTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...</td></tr>';
+		}
+		if (namespacesTbody) {
+			namespacesTbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3"><i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...</td></tr>';
+		}
+		if (workloadsTbody) {
+			workloadsTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...</td></tr>';
+		}
+		if (servicesTbody) {
+			servicesTbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3"><i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...</td></tr>';
+		}
+		if (ingressTbody) {
+			ingressTbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3"><i class="bi bi-hourglass-split"></i> Đang tải dữ liệu...</td></tr>';
+		}
+
+		// Reset K8s resources counts
+		const podsCount = document.getElementById('pods-count');
+		const namespacesCount = document.getElementById('namespaces-count');
+		const workloadsCount = document.getElementById('workloads-count');
+		const servicesCount = document.getElementById('services-count');
+		const ingressCount = document.getElementById('ingress-count');
+		
+		if (podsCount) podsCount.textContent = '0';
+		if (namespacesCount) namespacesCount.textContent = '0';
+		if (workloadsCount) workloadsCount.textContent = '0';
+		if (servicesCount) servicesCount.textContent = '0';
+		if (ingressCount) ingressCount.textContent = '0';
+
+		// Clear K8s resources data trong module (nếu có method)
+		if (window.K8sResourcesModule && typeof window.K8sResourcesModule.clearResourcesData === 'function') {
+			window.K8sResourcesModule.clearResourcesData();
+		}
 	}
 
 	// Show cluster detail (simplified version - full implementation can be added later)
 	async function showClusterDetail(clusterId) {
-		currentClusterId = clusterId;
-		window.currentClusterId = clusterId;
+		// Validate clusterId
+		if (!clusterId || clusterId === null || clusterId === undefined) {
+			console.error('showClusterDetail: clusterId is required');
+			window.showAlert('error', 'Không có ID cluster. Vui lòng thử lại.');
+			return;
+		}
+
+		const id = typeof clusterId === 'number' ? clusterId : parseInt(clusterId, 10);
+		if (isNaN(id) || id <= 0) {
+			console.error('showClusterDetail: Invalid clusterId:', clusterId);
+			window.showAlert('error', 'ID cluster không hợp lệ: ' + clusterId);
+			return;
+		}
+
+		// Clear dữ liệu cũ trước khi load cluster mới
+		clearClusterDetailUI();
+
+		currentClusterId = id;
+		window.currentClusterId = id;
 
 		// Set in playbook-manager.js
 		if (window.setCurrentClusterId) {
-			window.setCurrentClusterId(clusterId);
+			window.setCurrentClusterId(id);
 		}
 
 		// Switch sections
@@ -489,13 +671,38 @@
 		document.getElementById('k8s-detail')?.classList.remove('d-none');
 
 		try {
-			const detail = await window.ApiClient.get(`/admin/clusters/${clusterId}/detail`);
+			// Thêm timeout cho API call (30 giây)
+			const timeoutPromise = new Promise((_, reject) => {
+				setTimeout(() => reject(new Error('Request timeout: Không nhận được phản hồi từ server sau 30 giây')), 30000);
+			});
+			
+			const detailPromise = window.ApiClient.get(`/admin/clusters/${id}/detail`);
+			const detail = await Promise.race([detailPromise, timeoutPromise]);
 
-			// Display cluster info
-			document.getElementById('cd-name').textContent = detail.name || '';
-			document.getElementById('cd-master').textContent = detail.masterNode || '';
-			document.getElementById('cd-workers').textContent = detail.workerCount ?? 0;
-			document.getElementById('cd-status').textContent = detail.status || '';
+			// Kiểm tra detail có hợp lệ không
+			if (!detail) {
+				window.showAlert('error', 'Không tải được chi tiết cluster. Vui lòng thử lại.');
+				return;
+			}
+
+			// Display cluster info với xử lý null/undefined an toàn
+			const nameEl = document.getElementById('cd-name');
+			const masterEl = document.getElementById('cd-master');
+			const workersEl = document.getElementById('cd-workers');
+			const statusEl = document.getElementById('cd-status');
+
+			if (nameEl) {
+				nameEl.textContent = detail.name || 'N/A';
+			}
+			if (masterEl) {
+				masterEl.textContent = detail.masterNode || 'Chưa có';
+			}
+			if (workersEl) {
+				workersEl.textContent = (detail.workerCount !== null && detail.workerCount !== undefined) ? detail.workerCount : 0;
+			}
+			if (statusEl) {
+				statusEl.textContent = detail.status || 'UNKNOWN';
+			}
 
 			const verEl = document.getElementById('cd-version');
 			const version = (detail.version || '').trim();
@@ -511,38 +718,42 @@
 			}
 
 			// Load nodes (simplified - can be enhanced later)
-			loadClusterNodes(clusterId, detail);
+			// Đảm bảo detail có nodes array
+			if (detail && (detail.nodes === null || detail.nodes === undefined)) {
+				detail.nodes = [];
+			}
+			loadClusterNodes(id, detail);
 
 			// Set current cluster ID trong các module
 			if (window.K8sResourcesModule) {
-				window.K8sResourcesModule.setCurrentClusterId(clusterId);
+				window.K8sResourcesModule.setCurrentClusterId(id);
 			}
 			if (window.AnsibleConfigModule) {
-				window.AnsibleConfigModule.setCurrentClusterId(clusterId);
+				window.AnsibleConfigModule.setCurrentClusterId(id);
 			}
 			if (window.AnsibleWebSocketModule) {
-				window.AnsibleWebSocketModule.setCurrentClusterId(clusterId);
+				window.AnsibleWebSocketModule.setCurrentClusterId(id);
 			}
 
 			// Load K8s resources và networking resources
 			if (window.K8sResourcesModule) {
 				// Load K8s resources (pods, namespaces, workloads)
-				window.K8sResourcesModule.loadK8sResources(clusterId).catch(err => {
+				window.K8sResourcesModule.loadK8sResources(id).catch(err => {
 					console.error('Error loading K8s resources:', err);
 				});
 				// Load networking resources (services, ingress)
-				window.K8sResourcesModule.loadNetworkingResources(clusterId).catch(err => {
+				window.K8sResourcesModule.loadNetworkingResources(id).catch(err => {
 					console.error('Error loading networking resources:', err);
 				});
 			}
 
 			// Tự động load trạng thái Ansible
 			if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
-				window.checkAnsibleStatus(clusterId).catch(err => {
+				window.checkAnsibleStatus(id).catch(err => {
 					console.error('Error checking Ansible status:', err);
 				});
 			} else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
-				window.AnsibleConfigModule.checkAnsibleStatus(clusterId).catch(err => {
+				window.AnsibleConfigModule.checkAnsibleStatus(id).catch(err => {
 					console.error('Error checking Ansible status:', err);
 				});
 			}
@@ -562,7 +773,7 @@
 				// Remove old listener if exists
 				const newReloadBtn = reloadBtn.cloneNode(true);
 				reloadBtn.parentNode.replaceChild(newReloadBtn, reloadBtn);
-				newReloadBtn.addEventListener('click', () => showClusterDetail(clusterId));
+				newReloadBtn.addEventListener('click', () => showClusterDetail(id));
 			}
 
 			// Bind add node button
@@ -577,7 +788,7 @@
 						const clusterIdInput = modal.querySelector('#add-node-cluster-id');
 						const clusterNameSpan = modal.querySelector('#add-node-cluster-name');
 						if (clusterIdInput) {
-							clusterIdInput.value = clusterId;
+							clusterIdInput.value = id;
 						}
 						if (clusterNameSpan) {
 							const clusterName = document.getElementById('cd-name')?.textContent?.trim() || '';
@@ -599,9 +810,9 @@
 				checkAnsibleBtn.addEventListener('click', async () => {
 					// Check if checkAnsibleStatus function exists (from ansibleConfig.js or admin.js)
 					if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
-						await window.checkAnsibleStatus(clusterId);
+						await window.checkAnsibleStatus(id);
 					} else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
-						await window.AnsibleConfigModule.checkAnsibleStatus(clusterId);
+						await window.AnsibleConfigModule.checkAnsibleStatus(id);
 					} else {
 						window.showAlert('error', 'Function checkAnsibleStatus không khả dụng. Vui lòng tải lại trang.');
 						console.error('checkAnsibleStatus function not found');
@@ -617,7 +828,7 @@
 				// Bind new event listener
 				refreshK8sResourcesBtn.addEventListener('click', async () => {
 					if (window.K8sResourcesModule && window.K8sResourcesModule.loadK8sResources) {
-						await window.K8sResourcesModule.loadK8sResources(clusterId);
+						await window.K8sResourcesModule.loadK8sResources(id);
 					} else {
 						window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
 					}
@@ -632,7 +843,7 @@
 				// Bind new event listener
 				refreshNetworkingBtn.addEventListener('click', async () => {
 					if (window.K8sResourcesModule && window.K8sResourcesModule.loadNetworkingResources) {
-						await window.K8sResourcesModule.loadNetworkingResources(clusterId);
+						await window.K8sResourcesModule.loadNetworkingResources(id);
 					} else {
 						window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
 					}
@@ -641,18 +852,78 @@
 
 		} catch (err) {
 			console.error('Error loading cluster detail:', err);
-			window.showAlert('error', 'Không tải được chi tiết cluster: ' + (err.message || 'Lỗi không xác định'));
+			console.error('Error stack:', err.stack);
+			const errorMsg = err.message || err.toString() || 'Lỗi không xác định';
+			
+			// Xử lý các loại lỗi khác nhau
+			let userMessage = 'Không tải được chi tiết cluster';
+			if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
+				userMessage = 'Timeout: Server đang xử lý quá lâu. Cluster có thể đang load metrics từ các nodes. Vui lòng thử lại sau.';
+			} else if (errorMsg.includes('404') || errorMsg.includes('Not Found')) {
+				userMessage = 'Không tìm thấy cluster với ID: ' + id;
+			} else if (errorMsg.includes('400') || errorMsg.includes('Bad Request')) {
+				userMessage = 'Yêu cầu không hợp lệ. Vui lòng kiểm tra lại.';
+			} else if (errorMsg.includes('500') || errorMsg.includes('Internal Server Error')) {
+				userMessage = 'Lỗi server. Vui lòng thử lại sau.';
+			} else {
+				userMessage = 'Không tải được chi tiết cluster: ' + errorMsg;
+			}
+			
+			window.showAlert('error', userMessage);
+			
+			// Hiển thị thông báo lỗi trong UI
+			const nameEl = document.getElementById('cd-name');
+			if (nameEl) {
+				nameEl.textContent = 'Lỗi tải dữ liệu';
+			}
+			const masterEl = document.getElementById('cd-master');
+			if (masterEl) {
+				masterEl.textContent = '-';
+			}
+			const workersEl = document.getElementById('cd-workers');
+			if (workersEl) {
+				workersEl.textContent = '-';
+			}
+			const statusEl = document.getElementById('cd-status');
+			if (statusEl) {
+				statusEl.textContent = 'ERROR';
+			}
+			
+			// Clear nodes table
+			const tbody = document.getElementById('cd-nodes-tbody');
+			if (tbody) {
+				tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Không thể tải danh sách nodes</td></tr>';
+			}
 		}
 	}
 
 	// Load cluster nodes (simplified)
 	async function loadClusterNodes(clusterId, detail) {
 		const tbody = document.getElementById('cd-nodes-tbody');
-		if (!tbody) return;
+		if (!tbody) {
+			console.warn('cd-nodes-tbody element not found');
+			return;
+		}
 
 		tbody.innerHTML = '';
 
-		if (!detail.nodes || detail.nodes.length === 0) {
+		// Kiểm tra detail và nodes
+		if (!detail) {
+			const tr = document.createElement('tr');
+			tr.innerHTML = `
+				<td colspan="7" class="text-center text-danger py-4">
+					<i class="bi bi-exclamation-triangle me-2"></i>
+					Không có dữ liệu cluster
+				</td>
+			`;
+			tbody.appendChild(tr);
+			return;
+		}
+
+		// Đảm bảo nodes là array
+		const nodes = Array.isArray(detail.nodes) ? detail.nodes : [];
+		
+		if (nodes.length === 0) {
 			const tr = document.createElement('tr');
 			tr.innerHTML = `
 				<td colspan="7" class="text-center text-muted py-4">
@@ -665,20 +936,29 @@
 		}
 
 		// Render nodes (simplified - can be enhanced with K8s status later)
-		detail.nodes.forEach(n => {
-			const isOnline = n.isConnected || (n.status === 'ONLINE');
+		nodes.forEach(n => {
+			if (!n) return; // Bỏ qua null/undefined nodes
+			
+			const isOnline = n.isConnected === true || (n.status === 'ONLINE');
 			const statusLabel = isOnline ? (n.isConnected ? 'CONNECTED' : 'ONLINE') : 'OFFLINE';
 			const statusBadge = isOnline ? 'info' : 'secondary';
+			const nodeId = n.id || '';
+			const nodeIp = n.ip || n.host || '';
+			const nodeRole = n.role || 'UNKNOWN';
+			const nodeCpu = n.cpu || '-';
+			const nodeRam = n.ram || '-';
+			const nodeDisk = n.disk || '-';
+			
 			const tr = document.createElement('tr');
 			tr.innerHTML = `
-				<td>${escapeHtml(n.ip || '')}</td>
-				<td>${escapeHtml(n.role || '')}</td>
+				<td>${escapeHtml(nodeIp)}</td>
+				<td>${escapeHtml(nodeRole)}</td>
 				<td><span class="badge bg-${statusBadge}">${statusLabel}</span></td>
-				<td>${n.cpu || '-'}</td>
-				<td>${n.ram || '-'}</td>
-				<td>${n.disk || '-'}</td>
+				<td>${escapeHtml(String(nodeCpu))}</td>
+				<td>${escapeHtml(String(nodeRam))}</td>
+				<td>${escapeHtml(String(nodeDisk))}</td>
 				<td class="text-nowrap">
-					<button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${n.id}" data-cluster="${clusterId}">
+					<button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${nodeId}" data-cluster="${clusterId}">
 						<i class="bi bi-trash me-1"></i> Xóa
 					</button>
 				</td>
@@ -1072,12 +1352,39 @@
 		init();
 	}
 
+	// Bind Playbook Manager Modal - tự động load playbooks khi mở modal
+	function bindPlaybookManagerModal() {
+		const playbookModal = document.getElementById('playbookManagerModal');
+		if (playbookModal) {
+			playbookModal.addEventListener('show.bs.modal', () => {
+				if (!currentClusterId) {
+					window.showAlert('warning', 'Vui lòng chọn cluster trước khi mở Playbook Manager');
+					return;
+				}
+				
+				// Set currentClusterId cho playbook manager
+				if (window.setCurrentClusterId && typeof window.setCurrentClusterId === 'function') {
+					window.setCurrentClusterId(currentClusterId);
+				}
+				
+				// Load playbooks
+				if (window.loadPlaybooks && typeof window.loadPlaybooks === 'function') {
+					window.loadPlaybooks(currentClusterId);
+				} else if (window.refreshPlaybooks && typeof window.refreshPlaybooks === 'function') {
+					window.refreshPlaybooks();
+				}
+			});
+		}
+	}
+
 	function init() {
 		// Wait for ApiClient to be ready before loading clusters
 		function waitForApiClient() {
 			if (window.ApiClient && typeof window.ApiClient.get === 'function') {
 				// Load cluster list
 				loadClusterList();
+				// Bind playbook manager modal
+				bindPlaybookManagerModal();
 				loadClustersAndServers();
 
 				// Bind create cluster form

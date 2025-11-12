@@ -4,6 +4,7 @@
 
 	// Trạng thái module
 	let currentClusterId = null;
+	let ansibleStatusRequestToken = 0; // Token để track request hiện tại, tránh race condition
 
 	// Hàm hỗ trợ: Escape HTML để tránh XSS
 	function escapeHtml(text) {
@@ -156,17 +157,50 @@
 
 	// Kiểm tra trạng thái Ansible
 	async function checkAnsibleStatus(clusterId) {
-		if (!clusterId) {
+		// Validate và lấy cluster ID từ nhiều nguồn
+		let targetClusterId = clusterId;
+		if (!targetClusterId) {
+			targetClusterId = window.currentClusterId || currentClusterId;
+		}
+		
+		if (!targetClusterId) {
 			console.error('checkAnsibleStatus: clusterId là bắt buộc');
-			window.showAlert('error', 'Cluster ID là bắt buộc');
+			window.showAlert('error', 'Cluster ID là bắt buộc. Vui lòng chọn cluster trước.');
 			return;
 		}
 
-		currentClusterId = clusterId;
+		// Validate cluster ID là số hợp lệ
+		const id = typeof targetClusterId === 'number' ? targetClusterId : parseInt(targetClusterId, 10);
+		if (isNaN(id) || id <= 0) {
+			console.error('checkAnsibleStatus: Invalid clusterId:', targetClusterId);
+			window.showAlert('error', 'Cluster ID không hợp lệ: ' + targetClusterId);
+			return;
+		}
+
+		// Tăng token để đánh dấu request mới (hủy request cũ nếu có)
+		ansibleStatusRequestToken++;
+
+		// Clear dữ liệu cũ trước khi kiểm tra cluster mới
+		if (currentClusterId !== null && currentClusterId !== id) {
+			// Clear status display
+			const statusDisplay = document.getElementById('ansible-status-display');
+			if (statusDisplay) {
+				statusDisplay.innerHTML = '';
+				statusDisplay.classList.add('d-none');
+			}
+			// Reset summary badges
+			setAnsibleSummaryBadges({ state: 'unknown' });
+		}
+
+		// Set currentClusterId ngay từ đầu để tránh race condition
+		currentClusterId = id;
 
 		const checkBtn = document.getElementById('cd-check-ansible');
 		const statusDisplay = document.getElementById('ansible-status-display');
 		const statusTable = document.getElementById('ansible-status-table');
+
+		// Lưu token hiện tại để kiểm tra trong finally
+		const requestToken = ansibleStatusRequestToken;
 
 		try {
 			if (checkBtn) {
@@ -174,38 +208,105 @@
 				checkBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang kiểm tra...';
 			}
 
-			// Lấy thông tin cluster detail để có master node
+			// Lấy thông tin cluster detail để có master node (sử dụng id đã validate)
 			let clusterDetail = null;
+			let masterNode = null;
 			try {
-				clusterDetail = await window.ApiClient.get(`/admin/clusters/${clusterId}/detail`);
+				clusterDetail = await window.ApiClient.get(`/admin/clusters/${id}/detail`);
+				if (clusterDetail) {
+					// Validate cluster ID trong response khớp với id đang kiểm tra
+					if (clusterDetail.id && clusterDetail.id !== id) {
+						throw new Error('Cluster ID không khớp. Có thể đang xem cluster khác.');
+					}
+					masterNode = clusterDetail.masterNode || null;
+				}
 			} catch (err) {
-				console.warn('Could not fetch cluster detail:', err);
+				throw err; // Re-throw để xử lý ở catch block
 			}
 
-			// Gọi API kiểm tra trạng thái Ansible
-			const ansibleStatus = await window.ApiClient.get(`/admin/clusters/${clusterId}/ansible-status`);
-
-			// Nếu ansibleStatus không có masterInfo/serverInfo, lấy từ clusterDetail
-			if (clusterDetail && clusterDetail.masterNode) {
-				if (!ansibleStatus.masterInfo && !ansibleStatus.serverInfo) {
-					ansibleStatus.masterInfo = clusterDetail.masterNode;
-				}
-				// Nếu ansibleStatus có ansibleStatus map, tìm master trong đó
-				if (ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
-					const entries = Object.entries(ansibleStatus.ansibleStatus);
-					for (const [host, status] of entries) {
-						if (status && status.role === 'MASTER') {
-							ansibleStatus.masterInfo = host;
+			// Gọi API kiểm tra trạng thái Ansible (backend sẽ tự động kiểm tra MASTER của cluster này)
+			const ansibleStatus = await window.ApiClient.get(`/admin/clusters/${id}/ansible-status`);
+			
+			// Kiểm tra nếu request này đã bị hủy bởi request mới hơn
+			if (requestToken !== ansibleStatusRequestToken) {
+				return; // Bỏ qua response này vì đã có request mới hơn
+			}
+			
+			// Validate cluster ID trong response
+			if (ansibleStatus.clusterId && ansibleStatus.clusterId !== id) {
+				throw new Error('Cluster ID trong response không khớp. Có thể đang xem cluster khác.');
+			}
+			
+			// Validate currentClusterId vẫn là id (tránh bị thay đổi bởi request khác)
+			if (currentClusterId !== id) {
+				currentClusterId = id;
+			}
+			
+			// Xác định master node từ nhiều nguồn (ưu tiên từ clusterDetail để đảm bảo đúng cluster)
+			let masterHost = null;
+			
+			// 1. Từ clusterDetail.masterNode (ưu tiên cao nhất - đảm bảo đúng cluster)
+			if (masterNode && masterNode !== '' && masterNode !== '-') {
+				masterHost = masterNode;
+			}
+			
+			// 2. Từ ansibleStatus.ansibleStatus map (chỉ dùng nếu không có từ clusterDetail)
+			if (!masterHost && ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
+				const entries = Object.entries(ansibleStatus.ansibleStatus);
+				for (const [host, status] of entries) {
+					if (status && status.role === 'MASTER') {
+						// Validate rằng host này thuộc về cluster hiện tại
+						// (kiểm tra bằng cách so sánh với masterNode từ clusterDetail nếu có)
+						if (!masterNode || host === masterNode) {
+							masterHost = host;
 							break;
 						}
 					}
 				}
 			}
+			
+			// 3. Từ ansibleStatus.masterInfo hoặc serverInfo (fallback)
+			if (!masterHost) {
+				masterHost = ansibleStatus.masterInfo || ansibleStatus.serverInfo || null;
+			}
 
-			// Update summary badges
-			updateAnsibleSummary(ansibleStatus);
+			// Validate masterHost thuộc về cluster hiện tại
+			if (masterHost && masterNode && masterHost !== masterNode) {
+				// Ưu tiên sử dụng masterNode từ clusterDetail vì nó chắc chắn đúng cluster
+				masterHost = masterNode;
+			}
+
+			// Lưu masterHost và clusterId vào ansibleStatus để sử dụng sau
+			if (masterHost) {
+				ansibleStatus.masterInfo = masterHost;
+				ansibleStatus.masterHost = masterHost; // Thêm field mới để dễ truy cập
+				ansibleStatus.clusterId = id; // Đảm bảo clusterId được lưu
+			}
+
+			// Hiển thị thông tin đang kiểm tra master node (nếu có)
+			if (statusDisplay && masterHost) {
+				statusDisplay.innerHTML = `
+					<div class="alert alert-info">
+						<i class="bi bi-info-circle"></i> Đang kiểm tra trạng thái Ansible trên MASTER: <strong>${escapeHtml(masterHost)}</strong>
+					</div>
+				`;
+				statusDisplay.classList.remove('d-none');
+			}
+
+			// Kiểm tra lại token trước khi update UI (tránh update với dữ liệu cũ)
+			if (requestToken !== ansibleStatusRequestToken) {
+				return; // Bỏ qua update vì đã có request mới hơn
+			}
+
+			// Update summary badges (truyền clusterId để đảm bảo đúng cluster)
+			updateAnsibleSummary(ansibleStatus, id);
 
 		} catch (error) {
+			// Kiểm tra nếu request này đã bị hủy bởi request mới hơn
+			if (requestToken !== ansibleStatusRequestToken) {
+				return; // Bỏ qua error này vì đã có request mới hơn
+			}
+
 			// Hiển thị lỗi chi tiết hơn
 			let errorMessage = error.message || 'Không thể kiểm tra trạng thái Ansible';
 			let alertType = 'danger';
@@ -245,145 +346,127 @@
 			setAnsibleSummaryBadges({ state: 'unknown' });
 
 		} finally {
-			if (checkBtn) {
-				checkBtn.disabled = false;
-				checkBtn.innerHTML = '<i class="bi bi-search"></i> Kiểm tra trạng thái';
+			// Chỉ reset button nếu request này vẫn là request hiện tại
+			if (requestToken === ansibleStatusRequestToken) {
+				if (checkBtn) {
+					checkBtn.disabled = false;
+					checkBtn.innerHTML = '<i class="bi bi-search"></i> Kiểm tra trạng thái';
+				}
 			}
 		}
 	}
 
 	// Update Ansible summary badges
-	function updateAnsibleSummary(ansibleStatus) {
+	function updateAnsibleSummary(ansibleStatus, expectedClusterId = null) {
 		const statusDisplay = document.getElementById('ansible-status-display');
 		const badgeInstall = document.getElementById('ansible-summary-install');
 		const badgeVersion = document.getElementById('ansible-summary-version');
 		const badgeMaster = document.getElementById('ansible-summary-master');
 		const actions = document.getElementById('ansible-summary-actions');
 
+		if (!badgeInstall || !badgeVersion || !badgeMaster) return;
+		if (actions) actions.innerHTML = '';
+
+		// Defaults
+		setAnsibleSummaryBadges({ state: 'unknown' });
+		if (statusDisplay) statusDisplay.classList.add('d-none');
+
 		if (!ansibleStatus) {
-			setAnsibleSummaryBadges({ state: 'unknown' });
+			setAnsibleSummaryBadges({ state: 'error', message: 'Không nhận được phản hồi từ server.' });
 			return;
 		}
 
-		// Update install badge
-		if (badgeInstall) {
-			// Xác định isInstalled từ nhiều nguồn
-			let isInstalled = ansibleStatus.state === 'installed' || ansibleStatus.installed === true;
-			
-			// Nếu không có trong ansibleStatus, thử tìm trong ansibleStatus map
-			if (!isInstalled && ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
-				const entries = Object.entries(ansibleStatus.ansibleStatus);
-				for (const [host, status] of entries) {
-					if (status && status.role === 'MASTER') {
-						isInstalled = status.installed === true || status.installed === 'true';
-						break;
-					}
-				}
+		// Sử dụng expectedClusterId nếu được truyền vào, nếu không thì dùng currentClusterId
+		const targetClusterId = expectedClusterId !== null ? expectedClusterId : currentClusterId;
+
+		// Validate cluster ID trong ansibleStatus khớp với targetClusterId
+		if (ansibleStatus.clusterId && targetClusterId && ansibleStatus.clusterId !== targetClusterId) {
+			setAnsibleSummaryBadges({ state: 'unknown' });
+			if (statusDisplay) {
+				statusDisplay.innerHTML = `
+					<div class="alert alert-warning">
+						<i class="bi bi-exclamation-triangle"></i> Dữ liệu Ansible không khớp với cluster hiện tại. Vui lòng kiểm tra lại.
+					</div>
+				`;
+				statusDisplay.classList.remove('d-none');
 			}
-			
-			if (isInstalled) {
-				badgeInstall.className = 'badge bg-success';
-				badgeInstall.textContent = '✅ Đã cài đặt';
-			} else {
-				badgeInstall.className = 'badge bg-danger';
-				badgeInstall.textContent = '❌ Chưa cài đặt';
+			return;
+		}
+
+		// Đảm bảo currentClusterId được cập nhật nếu có expectedClusterId
+		if (expectedClusterId !== null && expectedClusterId !== currentClusterId) {
+			currentClusterId = expectedClusterId;
+		}
+
+		// Xử lý master offline case (tương tự admin.js)
+		if (ansibleStatus.masterOffline === true) {
+			setAnsibleSummaryBadges({
+				state: 'offline',
+				master: ansibleStatus.masterHost || 'MASTER',
+				message: 'MASTER offline'
+			});
+			if (actions) {
+				actions.innerHTML = `
+					<div class="btn-group btn-group-sm">
+						<button class="btn btn-outline-secondary" disabled title="MASTER offline">Cài đặt</button>
+					</div>
+				`;
+			}
+			if (statusDisplay) {
+				statusDisplay.innerHTML = `
+					<div class="alert alert-warning"><i class="bi bi-server"></i> MASTER (${escapeHtml(ansibleStatus.masterHost || 'MASTER')}) đang offline.</div>
+				`;
+				statusDisplay.classList.remove('d-none');
+			}
+			return;
+		}
+
+		// Xử lý empty map case (tương tự admin.js)
+		const map = ansibleStatus.ansibleStatus || {};
+		const entries = Object.entries(map);
+		if (entries.length === 0) {
+			setAnsibleSummaryBadges({
+				state: 'empty',
+				message: escapeHtml(ansibleStatus.recommendation || 'Không tìm thấy thông tin Ansible.')
+			});
+			return;
+		}
+
+		// Find master entry từ map (tương tự admin.js)
+		let masterHost = '-';
+		let masterInstalled = false;
+		let masterVersion = '-';
+		for (const [host, st] of entries) {
+			if (st && st.role === 'MASTER') {
+				masterHost = host;
+				masterInstalled = !!st.installed;
+				masterVersion = st.installed ? (st.version || '-') : '-';
+				break;
 			}
 		}
 
-		// Update version badge
-		if (badgeVersion) {
-			let version = ansibleStatus.version || ansibleStatus.ansibleVersion || null;
-			
-			// Nếu không có trong ansibleStatus, thử tìm trong ansibleStatus map
-			if (!version || version === '-') {
-				if (ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
-					const entries = Object.entries(ansibleStatus.ansibleStatus);
-					for (const [host, status] of entries) {
-						if (status && status.role === 'MASTER' && status.version) {
-							version = status.version;
-							break;
-						}
-					}
-				}
+		// Ưu tiên sử dụng masterHost đã được xác định trong checkAnsibleStatus (nếu có)
+		if (ansibleStatus.masterHost && ansibleStatus.masterHost !== '-' && ansibleStatus.masterHost !== '') {
+			masterHost = ansibleStatus.masterHost;
+			// Lấy thông tin từ map nếu có
+			if (map[masterHost]) {
+				const st = map[masterHost];
+				masterInstalled = !!st.installed;
+				masterVersion = st.installed ? (st.version || '-') : '-';
 			}
-			
-			badgeVersion.textContent = `Phiên bản: ${escapeHtml(String(version || '-'))}`;
 		}
 
-		// Update master badge
-		if (badgeMaster) {
-			let masterInfo = ansibleStatus.masterInfo || ansibleStatus.serverInfo || null;
-			
-			// Nếu không có trong ansibleStatus, thử lấy từ ansibleStatus map
-			if (!masterInfo || masterInfo === '-') {
-				if (ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
-					const entries = Object.entries(ansibleStatus.ansibleStatus);
-					for (const [host, status] of entries) {
-						if (status && status.role === 'MASTER') {
-							masterInfo = host;
-							break;
-						}
-					}
-				}
-			}
-			
-			// Nếu vẫn không có, thử lấy từ cluster detail (nếu có trong DOM)
-			if (!masterInfo || masterInfo === '-') {
-				const masterNodeEl = document.getElementById('cd-master');
-				if (masterNodeEl) {
-					const masterText = masterNodeEl.textContent?.trim();
-					if (masterText && masterText !== '') {
-						masterInfo = masterText;
-					}
-				}
-			}
-			
-			badgeMaster.textContent = `MASTER: ${escapeHtml(String(masterInfo || '-'))}`;
-		}
+		// Update badges sử dụng setAnsibleSummaryBadges (tương tự admin.js)
+		setAnsibleSummaryBadges({
+			state: masterInstalled ? 'installed' : 'not_installed',
+			version: masterVersion,
+			master: masterHost
+		});
 
-		// Update actions - hiển thị các button install/reinstall/uninstall
+		// Render quick actions for install/reinstall (tương tự admin.js)
 		if (actions) {
-			// Lấy masterHost từ nhiều nguồn
-			let masterHost = ansibleStatus.masterInfo || ansibleStatus.serverInfo || null;
-			let masterStatus = null; // Status của master node từ ansibleStatus map
-			
-			// Nếu không có trong ansibleStatus, thử lấy từ ansibleStatus map
-			if (!masterHost || masterHost === '-' || masterHost === '') {
-				if (ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
-					const entries = Object.entries(ansibleStatus.ansibleStatus);
-					for (const [host, status] of entries) {
-						if (status && status.role === 'MASTER') {
-							masterHost = host;
-							masterStatus = status;
-							break;
-						}
-					}
-				}
-			} else if (ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
-				// Nếu đã có masterHost, lấy status từ map
-				masterStatus = ansibleStatus.ansibleStatus[masterHost];
-			}
-			
-			// Nếu vẫn không có, thử lấy từ cluster detail (nếu có trong DOM)
-			if (!masterHost || masterHost === '-' || masterHost === '') {
-				const masterNodeEl = document.getElementById('cd-master');
-				if (masterNodeEl) {
-					const masterText = masterNodeEl.textContent?.trim();
-					if (masterText && masterText !== '') {
-						masterHost = masterText;
-					}
-				}
-			}
-			
-			// Xác định isInstalled từ nhiều nguồn
-			let isInstalled = ansibleStatus.state === 'installed' || ansibleStatus.installed === true;
-			if (!isInstalled && masterStatus) {
-				isInstalled = masterStatus.installed === true || masterStatus.installed === 'true';
-			}
-			
-			if (masterHost && masterHost !== '-' && masterHost !== '') {
-				if (isInstalled) {
-					// Đã cài đặt: hiển thị button "Cài đặt lại" và "Gỡ cài đặt"
+			if (masterHost && masterHost !== '-') {
+				if (masterInstalled) {
 					actions.innerHTML = `
 						<div class="btn-group btn-group-sm" role="group">
 							<button class="btn btn-outline-warning" title="Cài đặt lại Ansible trên MASTER" id="btn-reinstall-ansible">
@@ -405,7 +488,6 @@
 						uninstallBtn.addEventListener('click', () => uninstallAnsibleOnServer(masterHost));
 					}
 				} else {
-					// Chưa cài đặt: hiển thị button "Cài đặt"
 					actions.innerHTML = `
 						<div class="btn-group btn-group-sm" role="group">
 							<button class="btn btn-outline-primary" title="Cài đặt Ansible trên MASTER" id="btn-install-ansible">
@@ -420,39 +502,45 @@
 						installBtn.addEventListener('click', () => installAnsibleOnServer(masterHost));
 					}
 				}
-			} else {
-				// Không có master host
-				actions.innerHTML = '';
 			}
-		}
-
-		// Update status display
-		if (statusDisplay) {
-			statusDisplay.innerHTML = '';
-			statusDisplay.classList.add('d-none');
 		}
 	}
 
-	// Set Ansible summary badges to default/unknown state
-	function setAnsibleSummaryBadges(status = {}) {
+	// Set Ansible summary badges to default/unknown state (tương tự admin.js)
+	function setAnsibleSummaryBadges({ state, version, master, message } = {}) {
 		const badgeInstall = document.getElementById('ansible-summary-install');
 		const badgeVersion = document.getElementById('ansible-summary-version');
 		const badgeMaster = document.getElementById('ansible-summary-master');
+		if (!badgeInstall || !badgeVersion || !badgeMaster) return;
 
-		if (badgeInstall) {
-			if (status.state === 'unknown' || !status.state) {
+		switch (state) {
+			case 'installed':
+				badgeInstall.className = 'badge bg-success';
+				badgeInstall.innerHTML = '<i class="bi bi-check-circle"></i> Đã cài đặt';
+				break;
+			case 'not_installed':
+				badgeInstall.className = 'badge bg-danger';
+				badgeInstall.innerHTML = '<i class="bi bi-x-circle"></i> Chưa cài đặt';
+				break;
+			case 'offline':
+				badgeInstall.className = 'badge bg-warning text-dark';
+				badgeInstall.innerHTML = '<i class="bi bi-wifi-off"></i> MASTER offline';
+				break;
+			case 'error':
+				badgeInstall.className = 'badge bg-danger';
+				badgeInstall.innerHTML = `<i class="bi bi-exclamation-triangle"></i> Lỗi${message ? `: ${escapeHtml(message)}` : ''}`;
+				break;
+			case 'empty':
+				badgeInstall.className = 'badge bg-secondary';
+				badgeInstall.innerHTML = `<i class="bi bi-info-circle"></i> ${escapeHtml(message || 'Không có dữ liệu')}`;
+				break;
+			default:
 				badgeInstall.className = 'badge bg-secondary';
 				badgeInstall.textContent = 'Chưa kiểm tra';
-			}
 		}
 
-		if (badgeVersion) {
-			badgeVersion.textContent = 'Phiên bản: -';
-		}
-
-		if (badgeMaster) {
-			badgeMaster.textContent = 'MASTER: -';
-		}
+		badgeVersion.textContent = `Phiên bản: ${escapeHtml(version || '-')}`;
+		badgeMaster.textContent = `MASTER: ${escapeHtml(master || '-')}`;
 	}
 
 	// Hiển thị modal cài đặt Ansible cho server
@@ -818,43 +906,117 @@
 		}
 	}
 
+	// Update config status panel
+	function updateConfigStatus(status, message, lastCheck = null) {
+		const statusPanel = document.getElementById('config-status-panel');
+		const statusText = document.getElementById('config-status-text');
+		const lastCheckEl = document.getElementById('config-last-check');
+		
+		if (!statusPanel || !statusText) return;
+
+		// Remove all status classes
+		statusPanel.classList.remove('alert-info', 'alert-success', 'alert-warning', 'alert-danger');
+		
+		// Set status class and message
+		switch (status) {
+			case 'loading':
+				statusPanel.classList.add('alert-info');
+				statusText.textContent = message || 'Đang tải...';
+				break;
+			case 'success':
+				statusPanel.classList.add('alert-success');
+				statusText.textContent = message || 'Cấu hình hợp lệ';
+				break;
+			case 'warning':
+				statusPanel.classList.add('alert-warning');
+				statusText.textContent = message || 'Cảnh báo';
+				break;
+			case 'error':
+				statusPanel.classList.add('alert-danger');
+				statusText.textContent = message || 'Lỗi';
+				break;
+			default:
+				statusPanel.classList.add('alert-info');
+				statusText.textContent = message || 'Chưa kiểm tra';
+		}
+
+		// Update last check time
+		if (lastCheckEl) {
+			if (lastCheck) {
+				lastCheckEl.textContent = `Lần kiểm tra: ${lastCheck}`;
+			} else {
+				lastCheckEl.textContent = '-';
+			}
+		}
+	}
+
 	// Bind event handlers cho Ansible Config Modal buttons
 	function bindAnsibleConfigButtons() {
-		// Update cluster name khi modal mở
+		// Update cluster name và load config khi modal mở
 		const configModal = document.getElementById('ansibleConfigModal');
 		if (configModal) {
-			configModal.addEventListener('show.bs.modal', () => {
+			configModal.addEventListener('show.bs.modal', async () => {
 				const clusterNameEl = document.getElementById('current-cluster-name');
-				if (clusterNameEl && currentClusterId) {
+				if (!currentClusterId) {
+					if (clusterNameEl) {
+						clusterNameEl.textContent = 'Chưa chọn cluster';
+					}
+					window.showAlert('warning', 'Vui lòng chọn cluster trước khi mở cấu hình Ansible');
+					return;
+				}
+
+				if (clusterNameEl) {
 					// Lấy tên cluster từ DOM hoặc API
 					const cdNameEl = document.getElementById('cd-name');
-					if (cdNameEl) {
-						clusterNameEl.textContent = cdNameEl.textContent.trim() || `Cluster #${currentClusterId}`;
+					if (cdNameEl && cdNameEl.textContent.trim()) {
+						clusterNameEl.textContent = cdNameEl.textContent.trim();
 					} else {
 						clusterNameEl.textContent = `Cluster #${currentClusterId}`;
 					}
-					// Tự động load config khi mở modal
-					if (window.AnsibleConfigModule && window.AnsibleConfigModule.readAnsibleConfig) {
-						window.AnsibleConfigModule.readAnsibleConfig(currentClusterId).then(data => {
-							if (data && data.success) {
-								const cfgEditor = document.getElementById('ansible-cfg-editor');
-								const inventoryEditor = document.getElementById('ansible-inventory-editor');
-								const varsEditor = document.getElementById('ansible-vars-editor');
-								
-								if (cfgEditor && data.ansibleCfg) {
-									cfgEditor.value = data.ansibleCfg;
-								}
-								if (inventoryEditor && data.hosts) {
-									inventoryEditor.value = data.hosts;
-								}
-								if (varsEditor && data.vars) {
-									varsEditor.value = data.vars;
-								}
-							}
-						}).catch(err => {
-							console.error('Error loading Ansible config:', err);
-						});
+				}
+
+				// Update status panel
+				updateConfigStatus('loading', 'Đang tải cấu hình...');
+
+				// Tự động load config khi mở modal
+				try {
+					const data = await readAnsibleConfig(currentClusterId);
+					if (data && data.success) {
+						const cfgEditor = document.getElementById('ansible-cfg-editor');
+						const inventoryEditor = document.getElementById('ansible-inventory-editor');
+						const varsEditor = document.getElementById('ansible-vars-editor');
+						
+						if (cfgEditor) {
+							cfgEditor.value = data.ansibleCfg || data.cfg || '';
+						}
+						if (inventoryEditor) {
+							inventoryEditor.value = data.hosts || '';
+						}
+						if (varsEditor) {
+							varsEditor.value = data.vars || '';
+						}
+
+						// Update status to success
+						const now = new Date().toLocaleTimeString('vi-VN');
+						updateConfigStatus('success', 'Cấu hình đã được tải thành công', now);
+					} else {
+						// Update status to warning/error
+						const now = new Date().toLocaleTimeString('vi-VN');
+						updateConfigStatus('warning', data?.error || 'Không thể tải cấu hình', now);
+						
+						// Set empty values
+						const cfgEditor = document.getElementById('ansible-cfg-editor');
+						const inventoryEditor = document.getElementById('ansible-inventory-editor');
+						const varsEditor = document.getElementById('ansible-vars-editor');
+						
+						if (cfgEditor) cfgEditor.value = '';
+						if (inventoryEditor) inventoryEditor.value = '';
+						if (varsEditor) varsEditor.value = '';
 					}
+				} catch (err) {
+					console.error('Error loading Ansible config:', err);
+					const now = new Date().toLocaleTimeString('vi-VN');
+					updateConfigStatus('error', 'Lỗi khi tải cấu hình: ' + (err.message || 'Không xác định'), now);
 				}
 			});
 		}
@@ -1142,6 +1304,58 @@
 		}
 	}
 
+	// Bind complete button (Hoàn thành)
+	function bindAnsibleCompleteButton() {
+		const completeBtn = document.getElementById('ansible-complete-btn');
+		if (completeBtn && !completeBtn.dataset.bound) {
+			completeBtn.dataset.bound = '1';
+			completeBtn.addEventListener('click', async () => {
+				// Lấy cluster ID hiện tại
+				const clusterId = window.currentClusterId || currentClusterId;
+				if (!clusterId) {
+					window.showAlert('warning', 'Không tìm thấy cluster ID. Vui lòng chọn cluster trước.');
+					return;
+				}
+
+				// Đóng modal trước
+				const modal = bootstrap.Modal.getInstance(document.getElementById('ansibleInstallModal'));
+				if (modal) {
+					modal.hide();
+				}
+
+				// Reload và kiểm tra trạng thái Ansible
+				window.showAlert('info', 'Đang kiểm tra trạng thái Ansible...');
+				
+				try {
+					// Kiểm tra trạng thái Ansible
+					if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
+						await window.checkAnsibleStatus(clusterId);
+					} else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
+						await window.AnsibleConfigModule.checkAnsibleStatus(clusterId);
+					} else {
+						window.showAlert('error', 'Function checkAnsibleStatus không khả dụng. Vui lòng tải lại trang.');
+						return;
+					}
+
+					// Reload cluster detail để cập nhật UI (nếu đang ở trang cluster detail)
+					if (window.showClusterDetail && typeof window.showClusterDetail === 'function') {
+						// Delay một chút để đảm bảo status đã được cập nhật
+						setTimeout(() => {
+							window.showClusterDetail(clusterId);
+						}, 1000);
+					} else if (window.K8sClustersModule && window.K8sClustersModule.showClusterDetail) {
+						setTimeout(() => {
+							window.K8sClustersModule.showClusterDetail(clusterId);
+						}, 1000);
+					}
+				} catch (err) {
+					console.error('Error checking Ansible status:', err);
+					window.showAlert('error', 'Không thể kiểm tra trạng thái Ansible: ' + (err.message || 'Lỗi không xác định'));
+				}
+			});
+		}
+	}
+
 	// Initialize event handlers khi DOM ready
 	function initAnsibleEventHandlers() {
 		// Bind init buttons
@@ -1150,6 +1364,8 @@
 		bindAnsibleConfigButtons();
 		// Bind install button
 		bindAnsibleInstallButton();
+		// Bind complete button
+		bindAnsibleCompleteButton();
 	}
 
 	// Auto-initialize khi DOM ready
@@ -1167,7 +1383,9 @@
 		}
 		if (event.target.id === 'ansibleInstallModal') {
 			bindAnsibleInstallButton();
+			bindAnsibleCompleteButton();
 		}
 	});
 })();
+
 

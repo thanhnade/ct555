@@ -1078,6 +1078,20 @@
 		}
 	}
 
+	// Clear K8s resources data (dùng khi chuyển cluster)
+	function clearResourcesData() {
+		k8sResourcesData.pods = [];
+		k8sResourcesData.namespaces = [];
+		k8sResourcesData.workloads.deployments = [];
+		k8sResourcesData.workloads.statefulSets = [];
+		k8sResourcesData.workloads.daemonSets = [];
+		k8sResourcesData.services = [];
+		k8sResourcesData.ingress = [];
+		deletingNamespaces.clear();
+		// Tăng token để vô hiệu hóa các request đang chờ
+		k8sRequestToken++;
+	}
+
 	// Export module để sử dụng từ bên ngoài
 	window.K8sResourcesModule = {
 		loadK8sResources,
@@ -1096,6 +1110,7 @@
 		deleteIngress,
 		deleteWorkload,
 		scaleWorkload,
+		clearResourcesData,
 		setCurrentClusterId: (id) => { currentClusterId = id; },
 		getCurrentClusterId: () => currentClusterId,
 		getResourcesData: () => ({ ...k8sResourcesData })

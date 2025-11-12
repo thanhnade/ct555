@@ -230,14 +230,57 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session,
                             String.format("{\"type\":\"server_error\",\"server\":\"%s\",\"message\":\"❌ %s: %s\"}",
                                     server.getHost(), server.getHost(), e.getMessage()));
+                    // Gửi message complete với success = false
+                    try {
+                        java.util.Map<String, Object> completeMessage = new java.util.HashMap<>();
+                        completeMessage.put("type", "complete");
+                        completeMessage.put("success", false);
+                        if (Boolean.TRUE.equals(isUninstall)) {
+                            completeMessage.put("message", "❌ Gỡ cài đặt Ansible thất bại: " + e.getMessage());
+                        } else {
+                            completeMessage.put("message", "❌ Cài đặt Ansible thất bại: " + e.getMessage());
+                        }
+                        String jsonMessage = new com.fasterxml.jackson.databind.ObjectMapper()
+                                .writeValueAsString(completeMessage);
+                        sendMessage(session, jsonMessage);
+                    } catch (Exception jsonError) {
+                        System.err.println("ERROR: Failed to create complete JSON: " + jsonError.getMessage());
+                        if (Boolean.TRUE.equals(isUninstall)) {
+                            sendMessage(session,
+                                    String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Gỡ cài đặt Ansible thất bại: %s\"}",
+                                            escapeJsonString(e.getMessage())));
+                        } else {
+                            sendMessage(session,
+                                    String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Cài đặt Ansible thất bại: %s\"}",
+                                            escapeJsonString(e.getMessage())));
+                        }
+                    }
+                    return;
                 }
 
-                if (Boolean.TRUE.equals(isUninstall)) {
-                    sendMessage(session,
-                            "{\"type\":\"complete\",\"message\":\"🎉 Hoàn thành gỡ cài đặt Ansible!\"}");
-                } else {
-                    sendMessage(session,
-                            "{\"type\":\"complete\",\"message\":\"🎉 Hoàn thành cài đặt Ansible!\"}");
+                // Gửi message complete với success = true
+                try {
+                    java.util.Map<String, Object> completeMessage = new java.util.HashMap<>();
+                    completeMessage.put("type", "complete");
+                    completeMessage.put("success", true);
+                    if (Boolean.TRUE.equals(isUninstall)) {
+                        completeMessage.put("message", "🎉 Hoàn thành gỡ cài đặt Ansible!");
+                    } else {
+                        completeMessage.put("message", "🎉 Hoàn thành cài đặt Ansible!");
+                    }
+                    String jsonMessage = new com.fasterxml.jackson.databind.ObjectMapper()
+                            .writeValueAsString(completeMessage);
+                    sendMessage(session, jsonMessage);
+                } catch (Exception jsonError) {
+                    System.err.println("ERROR: Failed to create complete JSON: " + jsonError.getMessage());
+                    // Fallback với string format
+                    if (Boolean.TRUE.equals(isUninstall)) {
+                        sendMessage(session,
+                                "{\"type\":\"complete\",\"success\":true,\"message\":\"🎉 Hoàn thành gỡ cài đặt Ansible!\"}");
+                    } else {
+                        sendMessage(session,
+                                "{\"type\":\"complete\",\"success\":true,\"message\":\"🎉 Hoàn thành cài đặt Ansible!\"}");
+                    }
                 }
 
             } catch (Exception e) {
@@ -245,9 +288,35 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 e.printStackTrace();
                 try {
                     sendMessage(session,
-                            String.format("{\"type\":\"error\",\"message\":\"❌ Lỗi: %s\"}", e.getMessage()));
+                            String.format("{\"type\":\"error\",\"message\":\"❌ Lỗi: %s\"}", escapeJsonString(e.getMessage())));
+                    // Gửi message complete với success = false
+                    java.util.Map<String, Object> completeMessage = new java.util.HashMap<>();
+                    completeMessage.put("type", "complete");
+                    completeMessage.put("success", false);
+                    if (Boolean.TRUE.equals(isUninstall)) {
+                        completeMessage.put("message", "❌ Gỡ cài đặt Ansible thất bại: " + e.getMessage());
+                    } else {
+                        completeMessage.put("message", "❌ Cài đặt Ansible thất bại: " + e.getMessage());
+                    }
+                    String jsonMessage = new com.fasterxml.jackson.databind.ObjectMapper()
+                            .writeValueAsString(completeMessage);
+                    sendMessage(session, jsonMessage);
                 } catch (Exception sendError) {
                     System.out.println("ERROR: Failed to send error message: " + sendError.getMessage());
+                    // Fallback với string format
+                    try {
+                        if (Boolean.TRUE.equals(isUninstall)) {
+                            sendMessage(session,
+                                    String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Gỡ cài đặt Ansible thất bại: %s\"}",
+                                            escapeJsonString(e.getMessage())));
+                        } else {
+                            sendMessage(session,
+                                    String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Cài đặt Ansible thất bại: %s\"}",
+                                            escapeJsonString(e.getMessage())));
+                        }
+                    } catch (Exception fallbackError) {
+                        System.out.println("ERROR: Failed to send fallback complete message: " + fallbackError.getMessage());
+                    }
                 }
             }
         });
