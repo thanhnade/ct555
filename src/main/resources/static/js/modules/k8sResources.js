@@ -179,7 +179,19 @@
 
 	// Tải networking resources (Services & Ingress)
 	async function loadNetworkingResources(clusterId) {
-		if (!clusterId) return;
+		if (!clusterId) {
+			console.error('loadNetworkingResources: clusterId is required');
+			return;
+		}
+
+		currentClusterId = clusterId;
+
+		// Đảm bảo ApiClient đã được load
+		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
+			console.error('ApiClient chưa sẵn sàng. Đang chờ load...');
+			setTimeout(() => loadNetworkingResources(clusterId), 100);
+			return;
+		}
 
 		// Kiểm tra MASTER có online không
 		try {
@@ -213,6 +225,15 @@
 			updateIngressNamespaceFilter();
 		} catch (error) {
 			console.error('Error loading networking resources:', error);
+			// Hiển thị thông báo lỗi cho user
+			if (error.status === 503) {
+				showNetworkingOfflineMessage();
+			} else {
+				const errorMsg = error.message || 'Lỗi tải networking resources';
+				if (window.showAlert) {
+					window.showAlert('error', errorMsg);
+				}
+			}
 		}
 	}
 

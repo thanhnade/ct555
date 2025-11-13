@@ -822,30 +822,64 @@
 
 			// Bind refresh K8s resources button
 			const refreshK8sResourcesBtn = document.getElementById('refresh-k8s-resources');
-			if (refreshK8sResourcesBtn) {
+			if (refreshK8sResourcesBtn && !refreshK8sResourcesBtn.dataset.bound) {
+				refreshK8sResourcesBtn.dataset.bound = '1';
 				// Remove old onclick if exists
 				refreshK8sResourcesBtn.removeAttribute('onclick');
 				// Bind new event listener
 				refreshK8sResourcesBtn.addEventListener('click', async () => {
-					if (window.K8sResourcesModule && window.K8sResourcesModule.loadK8sResources) {
-						await window.K8sResourcesModule.loadK8sResources(id);
-					} else {
-						window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
+					// Show loading state
+					const originalHtml = refreshK8sResourcesBtn.innerHTML;
+					refreshK8sResourcesBtn.disabled = true;
+					refreshK8sResourcesBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Đang làm mới...';
+					
+					try {
+						if (window.K8sResourcesModule && window.K8sResourcesModule.loadK8sResources) {
+							await window.K8sResourcesModule.loadK8sResources(id);
+						} else {
+							window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
+						}
+					} catch (error) {
+						console.error('Error refreshing K8s resources:', error);
+						if (window.showAlert) {
+							window.showAlert('error', 'Lỗi khi làm mới tài nguyên Kubernetes: ' + (error.message || 'Unknown error'));
+						}
+					} finally {
+						// Restore button state
+						refreshK8sResourcesBtn.disabled = false;
+						refreshK8sResourcesBtn.innerHTML = originalHtml;
 					}
 				});
 			}
 
 			// Bind refresh networking resources button
 			const refreshNetworkingBtn = document.getElementById('refresh-networking-resources');
-			if (refreshNetworkingBtn) {
+			if (refreshNetworkingBtn && !refreshNetworkingBtn.dataset.bound) {
+				refreshNetworkingBtn.dataset.bound = '1';
 				// Remove old onclick if exists
 				refreshNetworkingBtn.removeAttribute('onclick');
 				// Bind new event listener
 				refreshNetworkingBtn.addEventListener('click', async () => {
-					if (window.K8sResourcesModule && window.K8sResourcesModule.loadNetworkingResources) {
-						await window.K8sResourcesModule.loadNetworkingResources(id);
-					} else {
-						window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
+					// Show loading state
+					const originalHtml = refreshNetworkingBtn.innerHTML;
+					refreshNetworkingBtn.disabled = true;
+					refreshNetworkingBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Đang làm mới...';
+					
+					try {
+						if (window.K8sResourcesModule && window.K8sResourcesModule.loadNetworkingResources) {
+							await window.K8sResourcesModule.loadNetworkingResources(id);
+						} else {
+							window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
+						}
+					} catch (error) {
+						console.error('Error refreshing networking resources:', error);
+						if (window.showAlert) {
+							window.showAlert('error', 'Lỗi khi làm mới tài nguyên Networking: ' + (error.message || 'Unknown error'));
+						}
+					} finally {
+						// Restore button state
+						refreshNetworkingBtn.disabled = false;
+						refreshNetworkingBtn.innerHTML = originalHtml;
 					}
 				});
 			}
@@ -897,7 +931,7 @@
 		}
 	}
 
-	// Load cluster nodes (simplified)
+	// Load cluster nodes với K8s status (Ready/NotReady/Unregistered)
 	async function loadClusterNodes(clusterId, detail) {
 		const tbody = document.getElementById('cd-nodes-tbody');
 		if (!tbody) {
@@ -935,28 +969,66 @@
 			return;
 		}
 
-		// Render nodes (simplified - can be enhanced with K8s status later)
+		// Load K8s nodes status song song với việc render servers
+		let k8sNodeByIP = new Map();
+		let k8sNodeByName = new Map();
+		const k8sNodesPromise = window.ApiClient.get(`/admin/clusters/${clusterId}/k8s/nodes`).catch(() => null);
+
+		// Tạo Map để lưu trữ row elements theo server ID để cập nhật sau
+		const serverRows = new Map();
+
+		// Render nodes ngay với thông tin cơ bản
 		nodes.forEach(n => {
 			if (!n) return; // Bỏ qua null/undefined nodes
 			
 			const isOnline = n.isConnected === true || (n.status === 'ONLINE');
-			const statusLabel = isOnline ? (n.isConnected ? 'CONNECTED' : 'ONLINE') : 'OFFLINE';
-			const statusBadge = isOnline ? 'info' : 'secondary';
+			const isOffline = !isOnline || (n.status === 'OFFLINE');
+			const hasMetrics = n.cpu && n.cpu !== '-';
+			
+			// Hiển thị status ban đầu dựa trên thông tin cơ bản
+			// Sẽ cập nhật sau khi có K8s status (nếu master online)
+			let statusLabel = 'OFFLINE';
+			let statusBadge = 'secondary';
+			if (isOnline) {
+				statusLabel = n.isConnected ? 'CONNECTED' : 'ONLINE';
+				statusBadge = 'info';
+			}
+
+			// Color coding cho RAM usage
+			const ramPercentage = n.ramPercentage || 0;
+			let ramColorClass = '';
+			if (isOffline || !hasMetrics) {
+				ramColorClass = 'text-muted';
+			} else if (ramPercentage >= 90) {
+				ramColorClass = 'text-danger fw-bold';
+			} else if (ramPercentage >= 80) {
+				ramColorClass = 'text-danger';
+			} else if (ramPercentage >= 70) {
+				ramColorClass = 'text-warning';
+			} else if (ramPercentage >= 50) {
+				ramColorClass = 'text-info';
+			} else {
+				ramColorClass = 'text-success';
+			}
+
+			// Hiển thị metrics
+			const cpuDisplay = isOffline ? '-' : (hasMetrics ? n.cpu : '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>');
+			const ramDisplay = isOffline ? '-' : (hasMetrics ? n.ram : '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>');
+			const diskDisplay = isOffline ? '-' : (hasMetrics ? n.disk : '<span class="spinner-border spinner-border-sm me-1" role="status"></span><span class="text-muted">Đang tải...</span>');
+
 			const nodeId = n.id || '';
 			const nodeIp = n.ip || n.host || '';
 			const nodeRole = n.role || 'UNKNOWN';
-			const nodeCpu = n.cpu || '-';
-			const nodeRam = n.ram || '-';
-			const nodeDisk = n.disk || '-';
 			
 			const tr = document.createElement('tr');
+			tr.setAttribute('data-server-id', nodeId);
 			tr.innerHTML = `
 				<td>${escapeHtml(nodeIp)}</td>
 				<td>${escapeHtml(nodeRole)}</td>
-				<td><span class="badge bg-${statusBadge}">${statusLabel}</span></td>
-				<td>${escapeHtml(String(nodeCpu))}</td>
-				<td>${escapeHtml(String(nodeRam))}</td>
-				<td>${escapeHtml(String(nodeDisk))}</td>
+				<td><span class="badge bg-${statusBadge}" id="status-badge-${nodeId}">${statusLabel}</span></td>
+				<td id="cpu-${nodeId}">${cpuDisplay}</td>
+				<td class="${ramColorClass}" id="ram-${nodeId}">${ramDisplay}</td>
+				<td id="disk-${nodeId}">${diskDisplay}</td>
 				<td class="text-nowrap">
 					<button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${nodeId}" data-cluster="${clusterId}">
 						<i class="bi bi-trash me-1"></i> Xóa
@@ -964,6 +1036,88 @@
 				</td>
 			`;
 			tbody.appendChild(tr);
+			serverRows.set(nodeId, tr);
+		});
+
+		// Sau khi render xong, cập nhật K8s status
+		let hasK8sData = false;
+		let k8sResp = null;
+		try {
+			k8sResp = await k8sNodesPromise;
+			if (k8sResp && Array.isArray(k8sResp.nodes) && k8sResp.nodes.length > 0) {
+				hasK8sData = true;
+				k8sResp.nodes.forEach(nd => {
+					// Backend trả về k8sInternalIP, không phải internalIP
+					const ip = nd.k8sInternalIP || nd.internalIP;
+					if (ip) {
+						k8sNodeByIP.set(String(ip), nd);
+					}
+					if (nd.name) {
+						k8sNodeByName.set(String(nd.name), nd);
+					}
+				});
+			}
+		} catch (e) {
+			hasK8sData = false;
+			k8sResp = null;
+		}
+
+		// Cập nhật K8s status cho các servers
+		nodes.forEach(n => {
+			const tr = serverRows.get(n.id);
+			if (!tr) return;
+			
+			const isOnline = n.isConnected || (n.status === 'ONLINE');
+			const statusBadgeEl = tr.querySelector(`#status-badge-${n.id}`);
+			
+			if (statusBadgeEl) {
+				let statusLabel = 'OFFLINE';
+				let statusBadge = 'secondary';
+				
+				if (isOnline) {
+					// Node đang online - thử lấy K8s status nếu có
+					const nd = k8sNodeByIP.get(String(n.ip)) || 
+							   k8sNodeByName.get(String(n.ip)) || 
+							   k8sNodeByName.get(String(n.hostname || n.ip));
+					const k8sStatus = nd?.k8sStatus;
+					
+					if (k8sStatus === 'Ready') {
+						statusLabel = 'Ready';
+						statusBadge = 'success';
+					} else if (k8sStatus === 'NotReady') {
+						statusLabel = 'NotReady';
+						statusBadge = 'warning text-dark';
+					} else if (k8sStatus !== undefined && k8sStatus !== null && k8sStatus !== 'Unknown') {
+						statusLabel = String(k8sStatus);
+						statusBadge = 'dark';
+					} else if (hasK8sData && k8sNodeByIP.size > 0) {
+						// Có K8s data nhưng không match được node này → Unregistered
+						statusLabel = 'UNREGISTERED';
+						statusBadge = 'danger';
+					} else {
+						// Không có K8s status (có thể master offline hoặc node chưa join cluster)
+						statusLabel = n.isConnected ? 'CONNECTED' : 'ONLINE';
+						statusBadge = 'info';
+					}
+				} else {
+					statusLabel = 'OFFLINE';
+					statusBadge = 'secondary';
+				}
+				
+				statusBadgeEl.textContent = statusLabel;
+				statusBadgeEl.className = `badge bg-${statusBadge}`;
+				
+				// Tooltip để giải thích status
+				let tooltip = '';
+				if (statusLabel === 'UNREGISTERED') {
+					tooltip = 'Node chưa đăng ký trong cụm (không thấy trong kubectl)';
+				} else if (statusLabel === 'CONNECTED' || statusLabel === 'ONLINE') {
+					tooltip = 'Node đang online nhưng không có thông tin K8s (có thể MASTER offline)';
+				} else if (statusLabel === 'OFFLINE') {
+					tooltip = 'Node đang offline';
+				}
+				statusBadgeEl.title = tooltip;
+			}
 		});
 
 		// Bind remove node buttons (reset để có thể bind lại mỗi lần load)
@@ -1358,13 +1512,20 @@
 		if (playbookModal) {
 			playbookModal.addEventListener('show.bs.modal', () => {
 				if (!currentClusterId) {
-					window.showAlert('warning', 'Vui lòng chọn cluster trước khi mở Playbook Manager');
+					if (window.showAlert) {
+						window.showAlert('warning', 'Vui lòng chọn cluster trước khi mở Playbook Manager');
+					}
 					return;
 				}
 				
 				// Set currentClusterId cho playbook manager
 				if (window.setCurrentClusterId && typeof window.setCurrentClusterId === 'function') {
 					window.setCurrentClusterId(currentClusterId);
+				}
+				
+				// Bind buttons
+				if (window.bindPlaybookManagerButtons && typeof window.bindPlaybookManagerButtons === 'function') {
+					window.bindPlaybookManagerButtons();
 				}
 				
 				// Load playbooks

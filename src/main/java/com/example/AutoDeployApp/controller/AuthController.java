@@ -51,7 +51,7 @@ public class AuthController {
                                         session.setAttribute("USER_ROLE", user.getRole());
                                         String redirectPath = user.getRole() != null
                                                         && user.getRole().equalsIgnoreCase("ADMIN")
-                                                                        ? "/home-admin"
+                                                                        ? "/admin"
                                                                         : "/home-user";
                                         return ResponseEntity.ok(Map.of(
                                                         "redirect", redirectPath,

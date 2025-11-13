@@ -317,54 +317,367 @@
 				? 'Để trống để hệ thống tự chọn cluster HEALTHY.'
 				: 'Chưa có cluster khả dụng. Nếu để trống hệ thống sẽ cố gắng chọn tự động.';
 
-			// Fill form (nếu có appFormModal)
-			const appIdEl = document.getElementById('app-id');
-			const appNameEl = document.getElementById('app-name');
-			const appChartEl = document.getElementById('app-chart');
-			const appChartVersionEl = document.getElementById('app-chart-version');
-			const appImageRepoEl = document.getElementById('app-image-repo');
-			const appImageTagEl = document.getElementById('app-image-tag');
-			const appNamespaceEl = document.getElementById('app-namespace');
-			const appClusterIdEl = document.getElementById('app-cluster-id');
-			const appReleaseNameEl = document.getElementById('app-release-name');
-
-			if (appIdEl) appIdEl.value = detail.id || '';
-			if (appNameEl) appNameEl.value = detail.appName || '';
-			if (appChartEl) appChartEl.value = detail.chart || '';
-			if (appChartVersionEl) appChartVersionEl.value = detail.chartVersion || '';
-			if (appImageRepoEl) appImageRepoEl.value = detail.imageRepository || '';
-			if (appImageTagEl) appImageTagEl.value = detail.imageTag || '';
-			if (appNamespaceEl) appNamespaceEl.value = detail.k8sNamespace || '';
-			if (appClusterIdEl) {
-				appClusterIdEl.innerHTML = '<option value="">-- Chọn Cluster --</option>' + clusterOptionsHtml;
-			}
-			if (appReleaseNameEl) appReleaseNameEl.value = detail.releaseName || '';
-
-			// Show modal using UI component
-			if (window.Modal) {
-				window.Modal.show('appFormModal');
-			} else {
-				// Fallback to Bootstrap
-				const modalEl = document.getElementById('appFormModal');
-				if (modalEl) {
-					try {
-						// Use getOrCreateInstance to avoid re-initialization issues
-						const modal = bootstrap.Modal.getOrCreateInstance(modalEl, {
-							backdrop: true,
-							keyboard: true,
-							focus: true
-						});
-						modal.show();
-					} catch (err) {
-						console.error('Error showing app form modal:', err);
-						// Fallback: try to show without options
-						const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-						modal.show();
+			const currentClusterLabel = existingClusterId != null
+				? (() => {
+					const matched = clusters.find(c => Number(c.id) === existingClusterId);
+					if (matched) {
+						const displayName = matched.name != null && matched.name !== ''
+							? matched.name
+							: `Cluster #${existingClusterId}`;
+						return `${displayName} (ID: ${existingClusterId})`;
 					}
+					return `Cluster #${existingClusterId}`;
+				})()
+				: 'Chưa gán';
+
+			const modalId = 'deploymentDetailModal';
+			const existing = document.getElementById(modalId);
+			if (existing) existing.remove();
+
+			// Parse envVars if exists
+			let envVarsDisplay = '';
+			if (detail.envVars) {
+				try {
+					const envVarsObj = typeof detail.envVars === 'string' ? JSON.parse(detail.envVars) : detail.envVars;
+					envVarsDisplay = Object.entries(envVarsObj).map(([key, value]) => `${key}=${value}`).join('\n');
+				} catch (e) {
+					envVarsDisplay = detail.envVars;
 				}
 			}
+
+			const statusBadgeClass = detail.status === 'PENDING' ? 'bg-warning' :
+				(detail.status === 'ERROR' ? 'bg-danger' :
+					(detail.status === 'RUNNING' ? 'bg-success' : 'bg-secondary'));
+
+			const modalHtml = `
+      <div class="modal fade" id="${modalId}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title"><i class="bi bi-info-circle"></i> Xử lý yêu cầu #${id}</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="card mb-3">
+                <div class="card-header bg-light">
+                  <h6 class="mb-0"><i class="bi bi-info-circle"></i> Thông tin cơ bản</h6>
+                </div>
+                <div class="card-body">
+                  <div class="row g-2 mb-2">
+                    <div class="col-md-6">
+                      <label class="form-label small"><strong>Tên app:</strong></label>
+                      <div><code>${escapeHtml(detail.appName || '')}</code></div>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label small"><strong>Người dùng:</strong></label>
+                      <div>${escapeHtml(detail.username || 'Unknown')}</div>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label small"><strong>Namespace:</strong></label>
+                      <div><code>${escapeHtml(detail.k8sNamespace || '')}</code></div>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label small"><strong>Trạng thái:</strong></label>
+                      <div><span class="badge ${statusBadgeClass}">${escapeHtml(detail.status || '')}</span></div>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label small"><strong>Cluster hiện tại:</strong></label>
+                      <div>${escapeHtml(currentClusterLabel)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card mb-3">
+                <div class="card-header bg-light">
+                  <h6 class="mb-0"><i class="bi bi-gear"></i> Cấu hình triển khai</h6>
+                </div>
+                <div class="card-body">
+                  <div class="mb-3">
+                    <label class="form-label">Docker Image *</label>
+                    <input id="dd-docker" class="form-control" value="${escapeHtml(detail.dockerImage || '')}" placeholder="nginx:latest" />
+                    <small class="form-text text-muted">Ví dụ: nginx:latest, node:18-alpine</small>
+                  </div>
+
+                  <div class="row g-2 mb-3">
+                    <div class="col-md-6">
+                      <label class="form-label">Container Port *</label>
+                      <input type="number" id="dd-port" class="form-control" value="${detail.containerPort != null ? detail.containerPort : 80}" min="1" max="65535" />
+                      <small class="form-text text-muted">Port mà container lắng nghe (mặc định: 80)</small>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">Replicas *</label>
+                      <div class="input-group">
+                        <input type="number" id="dd-replicas" class="form-control" value="${detail.replicas != null ? detail.replicas : 1}" min="1" max="10" />
+                        <span class="input-group-text">pods</span>
+                      </div>
+                      <small class="form-text text-muted">Số lượng pods chạy ứng dụng (mặc định: 1)</small>
+                    </div>
+                  </div>
+
+                  <div class="mb-3">
+                    <label class="form-label">Cluster triển khai</label>
+                    <select id="dd-cluster" class="form-select">
+                      <option value="">-- Tự động chọn cluster HEALTHY --</option>
+                      ${clusterOptionsHtml}
+                    </select>
+                    <small class="form-text text-muted">${escapeHtml(clusterHelpText)}</small>
+                  </div>
+
+                  <div class="row g-2">
+                    <div class="col-md-6">
+                      <label class="form-label">CPU Request</label>
+                      <input id="dd-cpu-req" class="form-control" value="${escapeHtml(detail.cpuRequest || '100m')}" placeholder="100m" />
+                      <small class="form-text text-muted">Ví dụ: 100m, 500m, 1</small>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">CPU Limit</label>
+                      <input id="dd-cpu-lim" class="form-control" value="${escapeHtml(detail.cpuLimit || '500m')}" placeholder="500m" />
+                      <small class="form-text text-muted">Ví dụ: 500m, 1000m, 2</small>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">Memory Request</label>
+                      <input id="dd-mem-req" class="form-control" value="${escapeHtml(detail.memoryRequest || '128Mi')}" placeholder="128Mi" />
+                      <small class="form-text text-muted">Ví dụ: 128Mi, 512Mi, 1Gi</small>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">Memory Limit</label>
+                      <input id="dd-mem-lim" class="form-control" value="${escapeHtml(detail.memoryLimit || '256Mi')}" placeholder="256Mi" />
+                      <small class="form-text text-muted">Ví dụ: 256Mi, 1Gi, 2Gi</small>
+                    </div>
+                  </div>
+
+                  <div class="mt-3">
+                    <label class="form-label">Environment Variables</label>
+                    <textarea id="dd-env-vars" class="form-control" rows="4" placeholder="KEY1=value1&#10;KEY2=value2">${envVarsDisplay ? escapeHtml(envVarsDisplay) : ''}</textarea>
+                    <small class="form-text text-muted">Mỗi biến một dòng, định dạng: KEY=value (để trống nếu không cần)</small>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card mb-0">
+                <div class="card-header bg-light">
+                  <h6 class="mb-0"><i class="bi bi-list-check"></i> Tóm tắt cấu hình</h6>
+                </div>
+                <div class="card-body">
+                  <div class="row g-2 small">
+                    <div class="col-md-3">
+                      <strong>Replicas:</strong> <span id="summary-replicas" class="badge bg-info">${detail.replicas != null ? detail.replicas : 1}</span>
+                    </div>
+                    <div class="col-md-3">
+                      <strong>Port:</strong> <code id="summary-port">${detail.containerPort != null ? detail.containerPort : 80}</code>
+                    </div>
+                    <div class="col-md-3">
+                      <strong>CPU:</strong> <span id="summary-cpu">${escapeHtml(detail.cpuRequest || '100m')} / ${escapeHtml(detail.cpuLimit || '500m')}</span>
+                    </div>
+                    <div class="col-md-3">
+                      <strong>Memory:</strong> <span id="summary-memory">${escapeHtml(detail.memoryRequest || '128Mi')} / ${escapeHtml(detail.memoryLimit || '256Mi')}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+              <button type="button" class="btn btn-outline-info" id="dd-validate">Kiểm tra image</button>
+              <button type="button" class="btn btn-outline-primary" id="dd-save">Lưu</button>
+              <button type="button" class="btn btn-success" id="dd-process">Xử lý</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+			document.body.insertAdjacentHTML('beforeend', modalHtml);
+			const modalEl = document.getElementById(modalId);
+			const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+			modal.show();
+
+			const saveBtn = document.getElementById('dd-save');
+			const validateBtn = document.getElementById('dd-validate');
+			const processBtn = document.getElementById('dd-process');
+
+			// Function to update summary
+			const updateSummary = () => {
+				const replicas = document.getElementById('dd-replicas')?.value || '1';
+				const port = document.getElementById('dd-port')?.value || '80';
+				const cpuReq = document.getElementById('dd-cpu-req')?.value || '100m';
+				const cpuLim = document.getElementById('dd-cpu-lim')?.value || '500m';
+				const memReq = document.getElementById('dd-mem-req')?.value || '128Mi';
+				const memLim = document.getElementById('dd-mem-lim')?.value || '256Mi';
+
+				const summaryReplicas = document.getElementById('summary-replicas');
+				const summaryPort = document.getElementById('summary-port');
+				const summaryCpu = document.getElementById('summary-cpu');
+				const summaryMemory = document.getElementById('summary-memory');
+
+				if (summaryReplicas) summaryReplicas.textContent = replicas;
+				if (summaryPort) summaryPort.textContent = port;
+				if (summaryCpu) summaryCpu.textContent = `${cpuReq} / ${cpuLim}`;
+				if (summaryMemory) summaryMemory.textContent = `${memReq} / ${memLim}`;
+			};
+
+			// Add event listeners to update summary on change
+			['dd-replicas', 'dd-port', 'dd-cpu-req', 'dd-cpu-lim', 'dd-mem-req', 'dd-mem-lim'].forEach(id => {
+				const el = document.getElementById(id);
+				if (el) {
+					el.addEventListener('input', updateSummary);
+					el.addEventListener('change', updateSummary);
+				}
+			});
+
+			const doSave = async () => {
+				const dockerImage = document.getElementById('dd-docker').value.trim();
+				const containerPort = parseInt(document.getElementById('dd-port')?.value || '80');
+				const replicas = parseInt(document.getElementById('dd-replicas')?.value || '1');
+
+				if (!dockerImage) {
+					throw new Error('Vui lòng nhập Docker Image');
+				}
+				if (containerPort < 1 || containerPort > 65535) {
+					throw new Error('Port phải trong khoảng 1-65535');
+				}
+				if (replicas < 1 || replicas > 10) {
+					throw new Error('Replicas phải trong khoảng 1-10');
+				}
+
+				const body = {
+					dockerImage: dockerImage,
+					containerPort: containerPort,
+					replicas: replicas,
+					cpuRequest: document.getElementById('dd-cpu-req').value.trim(),
+					cpuLimit: document.getElementById('dd-cpu-lim').value.trim(),
+					memoryRequest: document.getElementById('dd-mem-req').value.trim(),
+					memoryLimit: document.getElementById('dd-mem-lim').value.trim()
+				};
+
+				// Parse env vars if exists
+				const envVarsTextarea = document.getElementById('dd-env-vars');
+				if (envVarsTextarea && envVarsTextarea.value.trim()) {
+					const envVarsObj = {};
+					const lines = envVarsTextarea.value.trim().split('\n');
+					lines.forEach(line => {
+						const trimmed = line.trim();
+						if (trimmed && !trimmed.startsWith('#')) {
+							const [key, ...valueParts] = trimmed.split('=');
+							if (key && key.trim()) {
+								envVarsObj[key.trim()] = valueParts.join('=').trim();
+							}
+						}
+					});
+					if (Object.keys(envVarsObj).length > 0) {
+						body.envVars = JSON.stringify(envVarsObj);
+					}
+				}
+
+				const data = await window.ApiClient.put(`/admin/deployment-requests/${id}`, body);
+				if (window.showAlert) {
+					window.showAlert('success', 'Đã lưu cấu hình yêu cầu.');
+				}
+				loadList();
+			};
+
+			saveBtn.addEventListener('click', async () => {
+				try {
+					await doSave();
+				} catch (e) {
+					if (window.showAlert) {
+						window.showAlert('error', e.message || 'Lỗi lưu');
+					}
+				}
+			});
+
+			validateBtn.addEventListener('click', async () => {
+				try {
+					const image = document.getElementById('dd-docker').value.trim();
+					if (!image) {
+						if (window.showAlert) {
+							window.showAlert('warning', 'Vui lòng nhập Docker image');
+						}
+						return;
+					}
+					const data = await window.ApiClient.get(`/admin/images/validate?image=${encodeURIComponent(image)}`);
+					if (data.valid) {
+						if (window.showAlert) {
+							window.showAlert('success', `Image hợp lệ: ${image} (${data.message || 'OK'})`);
+						}
+					} else {
+						if (window.showAlert) {
+							window.showAlert('error', `Image không hợp lệ: ${image} (${data.message || 'UNKNOWN'})`);
+						}
+					}
+				} catch (e) {
+					if (window.showAlert) {
+						window.showAlert('error', e.message || 'Lỗi kiểm tra image');
+					}
+				}
+			});
+
+			processBtn.addEventListener('click', async () => {
+				try {
+					const dockerImage = document.getElementById('dd-docker').value.trim();
+					const containerPort = parseInt(document.getElementById('dd-port')?.value || '80');
+					const replicas = parseInt(document.getElementById('dd-replicas')?.value || '1');
+
+					if (!dockerImage) {
+						throw new Error('Vui lòng nhập Docker Image');
+					}
+
+					// Save configuration first
+					await doSave();
+
+					// Prepare process request body with all parameters
+					const processBody = {
+						dockerImage: dockerImage,
+						containerPort: containerPort,
+						replicas: replicas,
+						cpuRequest: document.getElementById('dd-cpu-req').value.trim(),
+						cpuLimit: document.getElementById('dd-cpu-lim').value.trim(),
+						memoryRequest: document.getElementById('dd-mem-req').value.trim(),
+						memoryLimit: document.getElementById('dd-mem-lim').value.trim()
+					};
+
+					// Add env vars if exists
+					const envVarsTextarea = document.getElementById('dd-env-vars');
+					if (envVarsTextarea && envVarsTextarea.value.trim()) {
+						const envVarsObj = {};
+						const lines = envVarsTextarea.value.trim().split('\n');
+						lines.forEach(line => {
+							const trimmed = line.trim();
+							if (trimmed && !trimmed.startsWith('#')) {
+								const [key, ...valueParts] = trimmed.split('=');
+								if (key && key.trim()) {
+									envVarsObj[key.trim()] = valueParts.join('=').trim();
+								}
+							}
+						});
+						if (Object.keys(envVarsObj).length > 0) {
+							processBody.envVars = JSON.stringify(envVarsObj);
+						}
+					}
+
+					const clusterSelect = document.getElementById('dd-cluster');
+					if (clusterSelect && clusterSelect.value) {
+						processBody.clusterId = clusterSelect.value;
+					}
+
+					// Process deployment with parameters
+					await processDeploymentRequestWithParams(id, processBody);
+					modal.hide();
+				} catch (e) {
+					if (window.showAlert) {
+						window.showAlert('error', e.message || 'Lỗi xử lý');
+					}
+				}
+			});
+
+			// Clean up modal when hidden
+			modalEl.addEventListener('hidden.bs.modal', () => {
+				modalEl.remove();
+			});
 		} catch (error) {
-			window.showAlert('error', error.message || 'Không thể tải thông tin yêu cầu');
+			if (window.showAlert) {
+				window.showAlert('error', 'Không thể tải chi tiết: ' + (error.message || 'Lỗi không xác định'));
+			}
 		}
 	}
 

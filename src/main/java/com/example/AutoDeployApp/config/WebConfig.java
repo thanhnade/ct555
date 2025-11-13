@@ -1,6 +1,7 @@
 package com.example.AutoDeployApp.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -8,8 +9,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
 
     @Override
-    public void addInterceptors(InterceptorRegistry registry) {
+    public void addInterceptors(@NonNull InterceptorRegistry registry) {
         registry.addInterceptor(new AdminAccessInterceptor())
-                .addPathPatterns("/admin/**", "/home-admin");
+                .addPathPatterns("/admin", "/admin/**", "/home-admin");
     }
 }

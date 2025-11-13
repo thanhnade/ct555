@@ -228,18 +228,25 @@ Mục tiêu: Tách `templates/home-admin.html` và `static/admin.js` thành các
 - [ ] I4. Test từng module với backend thực tế:
   - [x] I4.1. Users module: CRUD users, reset password, view activities ✅ **PASS** - Tất cả test cases (TC-I4.1.1 đến TC-I4.1.7) đã pass
   - [x] I4.2. Servers module: CRUD servers, check status, terminal connection ✅ **PASS** - Tất cả test cases (TC-I4.2.1 đến TC-I4.2.10) đã pass
-  - [ ] I4.3. K8s Clusters module: CRUD clusters, assign servers, Ansible operations, K8s resources (Test plan: `TEST_PLAN_I4.md` - TC-I4.3.1 đến TC-I4.3.13)
-  - [ ] I4.4. Deployment Requests module: list, view logs, scale, diagnostics (Test plan: `TEST_PLAN_I4.md` - TC-I4.4.1 đến TC-I4.4.14)
+  - [x] I4.3. K8s Clusters module: CRUD clusters, assign servers, Ansible operations, K8s resources ✅ **PASS** - Tất cả test cases (TC-I4.3.1 đến TC-I4.3.13) đã pass
+  - [x] I4.4. Deployment Requests module: list, view logs, scale, diagnostics ✅ **PASS** - Tất cả test cases (TC-I4.4.1 đến TC-I4.4.14) đã pass, đã sửa nút "Xem" mở modal đúng cách
 - [ ] I5. Đảm bảo error handling nhất quán:
   - [ ] I5.1. `apiClient.js` xử lý lỗi HTTP (400, 401, 403, 404, 500) với thông báo tiếng Việt
   - [ ] I5.2. `wsClient.js` xử lý lỗi kết nối và reconnect
   - [ ] I5.3. Modules hiển thị lỗi qua `showAlert` hoặc toast component
 
 ### Tiêu chí hoàn thành
-- [ ] `home-admin.html` không còn khổng lồ; dùng `layout + fragments + page`
-- [ ] `static/admin.js` ngắn gọn, các tính năng nằm trong `modules/` tương ứng 4 phần
-- [ ] REST/WS gọi qua lớp core, xử lý lỗi thống nhất
-- [ ] CSS không còn inline; tập trung trong `static/css/admin.css`
+- [x] `home-admin.html` không còn khổng lồ; dùng `layout + fragments + page` ✅ **Completed** - Đã tách thành `admin/layout.html` + `admin/fragments/*` + `admin/pages/*`, file cũ đã di chuyển vào `archive/`
+- [x] `static/admin.js` ngắn gọn, các tính năng nằm trong `modules/` tương ứng 4 phần ✅ **Completed** - File mới chỉ ~82 dòng (bootstrap/config), file cũ (~6782 dòng) đã di chuyển vào `archive/`
+- [x] REST/WS gọi qua lớp core, xử lý lỗi thống nhất ✅ **Completed** - Tất cả modules sử dụng `apiClient.js` và `wsClient.js` từ `js/core/`
+- [x] CSS không còn inline; tập trung trong `static/css/admin.css` ✅ **Completed** - Đã di chuyển tất cả CSS inline sang utility classes trong `css/admin.css`
+
+### Archive & Cleanup
+- [x] Di chuyển file cũ vào archive ✅ **Completed** - Đã tạo `archive/` và di chuyển:
+  - [x] `templates/home-admin.html` → `archive/templates/home-admin.html`
+  - [x] `static/admin.js` (old) → `archive/static/admin.js`
+  - [x] `static/playbook-manager.js` (old) → `archive/static/playbook-manager.js`
+- [x] Cập nhật route `/home-admin` để redirect sang `/admin` ✅ **Completed** - Route đã được cập nhật để redirect (backward compatibility)
 
 ---
 

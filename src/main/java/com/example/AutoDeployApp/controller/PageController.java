@@ -22,10 +22,8 @@ public class PageController {
     }
 
     @GetMapping("/home-admin")
-    public String homeAdmin(HttpServletRequest request, Model model) {
-        Object username = request.getSession(false) != null ? request.getSession(false).getAttribute("USER_USERNAME")
-                : null;
-        model.addAttribute("username", username != null ? username : "Guest");
-        return "home-admin";
+    public String homeAdmin() {
+        // Redirect to new admin dashboard (backward compatibility)
+        return "redirect:/admin";
     }
 }

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>AutoDeployApp - Rancher Style</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- Đã bỏ màn hình đăng nhập, vào thẳng giao diện -->
+
+  <!-- ========== APP SHELL (SAU ĐĂNG NHẬP) ========== -->
+  <div id="appShell" class="app-shell" style="display:flex;">
+
+    <div class="sidebar">
+
+      <div class="sidebar-header">
+        <div class="logo-circle">A</div>
+        <span>AutoDeployApp</span>
+      </div>
+
+      <!-- GROUP 1 – HẠ TẦNG -->
+      <div class="dropdown-group">
+        <div class="dropdown-header" onclick="toggleDropdown(this)">Hạ tầng (Servers & Clusters)
+          <span class="arrow">›</span>
+        </div>
+        <div class="dropdown-content">
+          <a href="#" data-page="servers" class="active" onclick="navClick(event)">🖥 Servers</a>
+          <a href="#" data-page="addServer" onclick="navClick(event)">➕ Add Server</a>
+          <a href="#" data-page="clusters" onclick="navClick(event)">🧩 Clusters</a>
+          <a href="#" data-page="createCluster" onclick="navClick(event)">➕ Create Cluster</a>
+          <a href="#" data-page="assignServers" onclick="navClick(event)">🔗 Assign Servers</a>
+          <a href="#" data-page="clusterSetup" onclick="navClick(event)">⚙ Cluster Setup</a>
+        </div>
+      </div>
+
+      <!-- GROUP 2 – KUBERNETES -->
+      <div class="dropdown-group">
+        <div class="dropdown-header" onclick="toggleDropdown(this)">Kubernetes (Rancher View)
+          <span class="arrow">›</span>
+        </div>
+        <div class="dropdown-content">
+          <a href="#" data-page="k8sOverview" onclick="navClick(event)">📊 Overview</a>
+          <a href="#" data-page="nodes" onclick="navClick(event)">🖥 Nodes</a>
+          <a href="#" data-page="namespaces" onclick="navClick(event)">📂 Namespaces</a>
+          <a href="#" data-page="workloads" onclick="navClick(event)">📦 Workloads</a>
+          <a href="#" data-page="services" onclick="navClick(event)">🌐 Services</a>
+          <a href="#" data-page="ingress" onclick="navClick(event)">🚪 Ingress</a>
+          <a href="#" data-page="storage" onclick="navClick(event)">💾 Storage</a>
+        </div>
+      </div>
+
+      <!-- GROUP 3 – QUẢN LÝ HỆ THỐNG (ADMIN) -->
+      <div class="dropdown-group">
+        <div class="dropdown-header" onclick="toggleDropdown(this)">
+          Quản lý hệ thống (Admin)
+          <span class="arrow">›</span>
+        </div>
+        <div class="dropdown-content">
+          <a href="#" data-page="users" onclick="navClick(event)">👥 Users</a>
+          <a href="#" data-page="apps" onclick="navClick(event)">🧩 User Apps</a>
+          <a href="#" data-page="review" onclick="navClick(event)">📝 Review Requests</a>
+
+        </div>
+      </div>
+      
+    </div>
+
+
+    <!-- MAIN AREA -->
+    <div class="main">
+      <div class="topbar">
+        <div class="topbar-title" id="pageTitle">Servers</div>
+        <div class="topbar-right">
+          <span id="currentUserLabel">admin</span>
+          <div class="avatar-circle">AD</div>
+        </div>
+      </div>
+      <div class="content" id="contentArea"></div>
+    </div>
+  </div>
+
+  <!-- ========== POPUP VIEW YAML ========== -->
+  <div id="yamlPopup" class="popup-backdrop" style="display:none;">
+    <div class="popup-box">
+      <div class="popup-header">YAML Viewer</div>
+      <pre id="yamlContent" class="yaml-area"></pre>
+      <div class="popup-actions">
+        <button class="btn-close" onclick="closeYamlPopup()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
