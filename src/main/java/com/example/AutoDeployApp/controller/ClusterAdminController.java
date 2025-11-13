@@ -1302,39 +1302,50 @@ public class ClusterAdminController {
         }
         map.put("age", age);
 
-        // Address (từ LoadBalancer status)
-        String address = "";
+        // Collect LoadBalancer addresses (hostname/ip)
+        java.util.List<String> addressList = new java.util.ArrayList<>();
         if (ing.getStatus() != null && ing.getStatus().getLoadBalancer() != null &&
-                ing.getStatus().getLoadBalancer().getIngress() != null &&
-                !ing.getStatus().getLoadBalancer().getIngress().isEmpty()) {
-            var lbIngress = ing.getStatus().getLoadBalancer().getIngress().get(0);
-            if (lbIngress.getHostname() != null && !lbIngress.getHostname().isEmpty()) {
-                address = lbIngress.getHostname();
-            } else if (lbIngress.getIp() != null && !lbIngress.getIp().isEmpty()) {
-                address = lbIngress.getIp();
+                ing.getStatus().getLoadBalancer().getIngress() != null) {
+            for (var lbIngress : ing.getStatus().getLoadBalancer().getIngress()) {
+                if (lbIngress == null) {
+                    continue;
+                }
+                if (lbIngress.getHostname() != null && !lbIngress.getHostname().isEmpty()) {
+                    addressList.add(lbIngress.getHostname());
+                } else if (lbIngress.getIp() != null && !lbIngress.getIp().isEmpty()) {
+                    addressList.add(lbIngress.getIp());
+                }
             }
         }
-        map.put("address", address);
+        map.put("address", addressList.isEmpty() ? "" : addressList.get(0)); // backward compatibility
+        map.put("addresses", addressList);
 
         // Hosts & Ports
         java.util.List<String> hostList = new java.util.ArrayList<>();
-        String ports = "";
         if (ing.getSpec() != null && ing.getSpec().getRules() != null) {
             for (var rule : ing.getSpec().getRules()) {
+                if (rule == null) {
+                    continue;
+                }
                 if (rule.getHost() != null && !rule.getHost().isEmpty()) {
                     hostList.add(rule.getHost());
                 }
             }
-            // Ports từ TLS
-            if (ing.getSpec().getTls() != null && !ing.getSpec().getTls().isEmpty()) {
-                ports = "80, 443";
-            } else if (ports.isEmpty()) {
-                ports = "80";
+        }
+
+        // Determine exposed ports (best-effort: 443 when TLS present, otherwise 80)
+        java.util.List<String> portList = new java.util.ArrayList<>();
+        if (ing.getSpec() != null) {
+            boolean hasTls = ing.getSpec().getTls() != null && !ing.getSpec().getTls().isEmpty();
+            portList.add("80");
+            if (hasTls) {
+                portList.add("443");
             }
         }
-        String hosts = hostList.isEmpty() ? "*" : String.join(", ", hostList);
-        map.put("host", hosts);
-        map.put("ports", ports);
+
+        map.put("host", hostList.isEmpty() ? "*" : hostList.get(0)); // backward compatibility
+        map.put("hosts", hostList);
+        map.put("ports", portList);
 
         return map;
     }
