@@ -6,19 +6,15 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "servers", uniqueConstraints = @UniqueConstraint(columnNames = { "ip", "port", "username" }))
+@Table(name = "servers", uniqueConstraints = @UniqueConstraint(columnNames = { "host", "port", "username" }))
 public class Server {
 
     public enum ServerRole {
-        MASTER, WORKER, DOCKER, DATABASE, STANDALONE
+        MASTER, WORKER, STANDALONE
     }
 
     public enum ServerStatus {
-        RUNNING, STOPPED, BUILDING, ERROR, ONLINE, OFFLINE
-    }
-
-    public enum ClusterStatus {
-        AVAILABLE, UNAVAILABLE
+        ONLINE, OFFLINE
     }
 
     public enum AuthType {
@@ -30,12 +26,9 @@ public class Server {
     private Long id;
 
     @Column(nullable = false, length = 100)
-    private String name;
+    private String host;
 
-    @Column(nullable = false, length = 100)
-    private String ip; // Đổi từ host thành ip
-
-    @Column(nullable = false)
+    @Column
     private Integer port = 22;
 
     @Column(nullable = false, length = 50)
@@ -44,31 +37,24 @@ public class Server {
     @Column(nullable = false, length = 255)
     private String password; // store hashed/encoded
 
-    @Column(nullable = false, length = 20)
-    private String role = "WORKER"; // MASTER, WORKER, DOCKER, DATABASE
-
-    @Column(name = "server_status", nullable = false, length = 20)
-    private String serverStatus = "STOPPED"; // RUNNING, STOPPED, BUILDING, ERROR
-
-    @Column(name = "cluster_status", nullable = false, length = 20)
-    private String clusterStatus = "UNAVAILABLE"; // AVAILABLE, UNAVAILABLE
-
-    // Fields tương thích với hệ thống cũ (giữ lại)
     @Enumerated(EnumType.STRING)
-    @Column(name = "auth_type", length = 16)
+    @Column(name = "auth_type", nullable = false, length = 16)
     private AuthType authType = AuthType.PASSWORD;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "ssh_key_id")
     private SshKey sshKey;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private ServerRole role = ServerRole.WORKER;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cluster_id")
     private Cluster cluster;
 
-    // Legacy status field (giữ lại để tương thích)
     @Enumerated(EnumType.STRING)
-    @Column(length = 16)
+    @Column(nullable = false, length = 16)
     private ServerStatus status = ServerStatus.OFFLINE;
 
     @CreationTimestamp
@@ -89,29 +75,12 @@ public class Server {
         this.id = id;
     }
 
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getIp() {
-        return ip;
-    }
-
-    public void setIp(String ip) {
-        this.ip = ip;
-    }
-
-    // Backward compatibility: host -> ip
     public String getHost() {
-        return ip; // Trả về ip để tương thích với code cũ
+        return host;
     }
 
     public void setHost(String host) {
-        this.ip = host; // Set vào ip để tương thích với code cũ
+        this.host = host;
     }
 
     public Integer getPort() {
@@ -154,41 +123,12 @@ public class Server {
         this.sshKey = sshKey;
     }
 
-    public String getRole() {
+    public ServerRole getRole() {
         return role;
     }
 
-    public void setRole(String role) {
+    public void setRole(ServerRole role) {
         this.role = role;
-    }
-
-    // Backward compatibility: ServerRole enum
-    public ServerRole getRoleEnum() {
-        try {
-            return ServerRole.valueOf(role);
-        } catch (Exception e) {
-            return ServerRole.WORKER; // Default fallback
-        }
-    }
-
-    public void setRoleEnum(ServerRole roleEnum) {
-        this.role = roleEnum != null ? roleEnum.name() : "WORKER";
-    }
-
-    public String getServerStatus() {
-        return serverStatus;
-    }
-
-    public void setServerStatus(String serverStatus) {
-        this.serverStatus = serverStatus;
-    }
-
-    public String getClusterStatus() {
-        return clusterStatus;
-    }
-
-    public void setClusterStatus(String clusterStatus) {
-        this.clusterStatus = clusterStatus;
     }
 
     public Cluster getCluster() {
@@ -199,31 +139,12 @@ public class Server {
         this.cluster = cluster;
     }
 
-    // Legacy status field (backward compatibility)
     public ServerStatus getStatus() {
-        // Map serverStatus string sang ServerStatus enum
-        if (serverStatus == null) {
-            return ServerStatus.OFFLINE;
-        }
-        try {
-            return ServerStatus.valueOf(serverStatus.toUpperCase());
-        } catch (Exception e) {
-            // Fallback mapping
-            if ("RUNNING".equalsIgnoreCase(serverStatus)) {
-                return ServerStatus.ONLINE;
-            }
-            return ServerStatus.OFFLINE;
-        }
+        return status;
     }
 
     public void setStatus(ServerStatus status) {
         this.status = status;
-        // Đồng bộ sang serverStatus
-        if (status == ServerStatus.ONLINE) {
-            this.serverStatus = "RUNNING";
-        } else if (status == ServerStatus.OFFLINE) {
-            this.serverStatus = "STOPPED";
-        }
     }
 
     public LocalDateTime getCreatedAt() {
