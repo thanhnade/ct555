@@ -46,9 +46,8 @@ public class ServerService {
     }
 
     public List<Server> findAllForUser(Long userId) {
-        if (userId == null)
-            return List.of();
-        return serverRepository.findByAddedByWithCluster(userId);
+        // Since addedBy field has been removed, return all servers for all admins
+        return serverRepository.findAllWithCluster();
     }
 
     public List<Server> findByClusterId(Long clusterId) {
@@ -109,16 +108,12 @@ public class ServerService {
         if (rawPassword != null && !rawPassword.isBlank()) {
             s.setPassword(passwordEncoder.encode(rawPassword));
         }
-        if (authType != null)
-            s.setAuthType(authType);
         if (sshKeyId != null) {
             SshKey key = sshKeyRepository.findById(sshKeyId).orElse(null);
             s.setSshKey(key);
         }
         if (role != null)
             s.setRole(role);
-        if (addedBy != null)
-            s.setAddedBy(addedBy);
         if (clusterId != null) {
             Cluster c = clusterRepository.findById(clusterId).orElse(null);
             // Nếu không tìm thấy cluster, để null (bỏ qua)
@@ -130,7 +125,6 @@ public class ServerService {
         }
         if (authType == Server.AuthType.PASSWORD) {
             s.setStatus(Server.ServerStatus.ONLINE);
-            s.setLastConnected(new java.sql.Timestamp(System.currentTimeMillis()));
         } else {
             s.setStatus(Server.ServerStatus.OFFLINE);
         }
@@ -145,7 +139,6 @@ public class ServerService {
                     created.setServer(s);
                     created = sshKeyRepository.saveAndFlush(created);
                     s.setSshKey(created);
-                    s.setAuthType(Server.AuthType.KEY);
                     s = serverRepository.saveAndFlush(s);
                 }
             } catch (Exception ignored) {
@@ -160,20 +153,16 @@ public class ServerService {
             Server.ServerRole role, Server.ServerStatus status, Long clusterId, Server.AuthType authType,
             Long sshKeyId) {
         Server s = serverRepository.findById(id).orElseThrow();
-        Long addedBy = s.getAddedBy();
         if (host != null && !host.isBlank() && port != null && username != null && !username.isBlank()) {
             // Kiểm tra có server khác (ID khác) đang dùng cùng host/port/username không
-            boolean dup = serverRepository.existsByHostAndPortAndUsernameAndAddedByAndIdNot(host, port, username,
-                    addedBy, id);
-            if (dup) {
-                throw new IllegalArgumentException("Máy chủ đã tồn tại (host/port/username trùng)");
-            }
-
-            // Đồng thời đảm bảo tính duy nhất trên toàn bộ người dùng
+            // Dùng existsByHostAndPortAndUsername để kiểm tra trước, sau đó kiểm tra ID
+            if (serverRepository.existsByHostAndPortAndUsername(host, port, username)) {
+                // Kiểm tra xem server có cùng ID không (nếu có thì không phải duplicate)
             Optional<Server> existingServer = serverRepository.findByHostAndUsername(host, username);
             if (existingServer.isPresent() && !existingServer.get().getId().equals(id)) {
                 throw new IllegalArgumentException(
                         "Máy chủ đã tồn tại trong hệ thống. Vui lòng sử dụng máy chủ khác hoặc liên hệ admin để được hỗ trợ.");
+                }
             }
         }
         // Xây dựng bộ thông số kết nối cuối cùng (giữa giá trị mới và giá trị cũ)
@@ -218,13 +207,6 @@ public class ServerService {
             s.setUsername(username);
         if (usedPassword && rawPassword != null && !rawPassword.isBlank())
             s.setPassword(passwordEncoder.encode(rawPassword));
-        if (keyWorked) {
-            s.setAuthType(Server.AuthType.KEY);
-        } else if (usedPassword) {
-            s.setAuthType(Server.AuthType.PASSWORD);
-        } else if (authType != null) {
-            s.setAuthType(authType);
-        }
         if (sshKeyId != null) {
             if (sshKeyId >= 0) {
                 SshKey key = sshKeyRepository.findById(sshKeyId).orElse(null);
@@ -258,7 +240,6 @@ public class ServerService {
         // khẩu mới)
         if (connectionFieldChanged || suppliedNewPassword || keyWorked || usedPassword) {
             s.setStatus(Server.ServerStatus.ONLINE);
-            s.setLastConnected(new java.sql.Timestamp(System.currentTimeMillis()));
         } else if (status != null) {
             s.setStatus(status);
         }
@@ -546,7 +527,6 @@ public class ServerService {
         }
         s.setPassword(passwordEncoder.encode(rawPassword));
         s.setStatus(Server.ServerStatus.ONLINE);
-        s.setLastConnected(new java.sql.Timestamp(System.currentTimeMillis()));
         s = serverRepository.saveAndFlush(s);
         if (s.getSshKey() == null) {
             try {
@@ -556,7 +536,6 @@ public class ServerService {
                     created.setServer(s);
                     created = sshKeyRepository.saveAndFlush(created);
                     s.setSshKey(created);
-                    s.setAuthType(Server.AuthType.KEY);
                     s = serverRepository.saveAndFlush(s);
                 }
             } catch (Exception ignored) {

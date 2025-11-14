@@ -8,7 +8,7 @@
 	class ToastManager {
 		constructor(options = {}) {
 			this.options = {
-				position: options.position || 'top-end', // top-start, top-center, top-end, bottom-start, bottom-center, bottom-end
+				position: options.position || 'bottom-end', // top-start, top-center, top-end, bottom-start, bottom-center, bottom-end
 				containerId: options.containerId || 'toast-container',
 				defaultDuration: options.defaultDuration || 5000,
 				...options
@@ -35,6 +35,10 @@
 		_setPosition(position) {
 			const [vertical, horizontal] = position.split('-');
 			this.container.style[vertical] = '20px';
+			this.container.style.left = 'auto';
+			this.container.style.right = 'auto';
+			this.container.style.transform = 'none';
+			
 			if (horizontal === 'start') {
 				this.container.style.left = '20px';
 			} else if (horizontal === 'center') {
@@ -43,6 +47,13 @@
 			} else { // end
 				this.container.style.right = '20px';
 			}
+			
+			// Set display flex and flex-direction for stacking
+			this.container.style.display = 'flex';
+			this.container.style.flexDirection = 'column';
+			this.container.style.gap = '12px';
+			this.container.style.maxWidth = '400px';
+			this.container.style.minWidth = '300px';
 		}
 
 		/**
@@ -69,44 +80,111 @@
 
 			const typeConfig = typeMap[type] || typeMap.info;
 
-			// Create toast element
+			// Create toast element with custom style
 			const toast = document.createElement('div');
 			toast.id = id;
-			toast.className = 'toast align-items-center text-white border-0';
+			toast.className = 'custom-toast';
 			toast.setAttribute('role', 'alert');
 			toast.setAttribute('aria-live', 'assertive');
 			toast.setAttribute('aria-atomic', 'true');
+			
+			// Type color mapping
+			const colorMap = {
+				success: { bg: '#22c55e', icon: '✓', border: '#16a34a' },
+				error: { bg: '#ef4444', icon: '✕', border: '#dc2626' },
+				warning: { bg: '#f59e0b', icon: '⚠', border: '#d97706' },
+				info: { bg: '#3b82f6', icon: 'ℹ', border: '#2563eb' }
+			};
+			const color = colorMap[type] || colorMap.info;
+			
+			// Apply styles
+			toast.style.cssText = `
+				background: ${color.bg};
+				color: #ffffff;
+				border-left: 4px solid ${color.border};
+				border-radius: 6px;
+				padding: 12px 16px;
+				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+				display: flex;
+				align-items: flex-start;
+				gap: 12px;
+				min-width: 300px;
+				max-width: 400px;
+				animation: slideInRight 0.3s ease-out;
+			`;
+			
 			toast.innerHTML = `
-				<div class="d-flex">
-					<div class="toast-body ${typeConfig.bg} text-white">
-						${title ? `<strong>${title}</strong><br>` : ''}
-						<i class="bi ${typeConfig.icon} me-2"></i>${message}
-					</div>
-					<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+				<div style="flex: 1;">
+					${title ? `<div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">${title}</div>` : ''}
+					<div style="font-size: 13px; line-height: 1.5;">${message}</div>
 				</div>
+				<button type="button" class="toast-close-btn" aria-label="Close" style="
+					background: transparent;
+					border: none;
+					color: #ffffff;
+					cursor: pointer;
+					font-size: 18px;
+					line-height: 1;
+					padding: 0;
+					width: 20px;
+					height: 20px;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					opacity: 0.8;
+					transition: opacity 0.2s;
+				" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">×</button>
 			`;
 
-			// Initialize Bootstrap toast
-			const bsToast = new bootstrap.Toast(toast, {
-				autohide: !persistent,
-				delay: persistent ? 0 : duration
+			// Setup close button
+			const closeBtn = toast.querySelector('.toast-close-btn');
+			if (closeBtn) {
+				closeBtn.addEventListener('click', () => {
+					hideToast();
+				});
+			}
+
+			// Hide function
+			const hideToast = () => {
+				toast.style.animation = 'slideOutRight 0.3s ease-out';
+				setTimeout(() => {
+					if (toast.parentElement) {
+						toast.remove();
+					}
+					this.toasts.delete(id);
+					if (onClose) onClose();
+				}, 300);
+			};
+
+			// Auto-hide after duration (if not persistent)
+			let autoHideTimer = null;
+			if (!persistent && duration > 0) {
+				autoHideTimer = setTimeout(() => {
+					hideToast();
+				}, duration);
+			}
+
+			// Cancel auto-hide on hover
+			toast.addEventListener('mouseenter', () => {
+				if (autoHideTimer) {
+					clearTimeout(autoHideTimer);
+					autoHideTimer = null;
+				}
 			});
 
-			// Handle close
-			toast.addEventListener('hidden.bs.toast', () => {
-				toast.remove();
-				this.toasts.delete(id);
-				if (onClose) onClose();
+			toast.addEventListener('mouseleave', () => {
+				if (!persistent && duration > 0 && !autoHideTimer) {
+					autoHideTimer = setTimeout(() => {
+						hideToast();
+					}, duration);
+				}
 			});
 
 			// Append to container
 			this.container.appendChild(toast);
-			this.toasts.set(id, toast);
+			this.toasts.set(id, { toast, hideToast, autoHideTimer });
 
-			// Show toast
-			bsToast.show();
-
-			return { id, toast, bsToast };
+			return { id, toast, hide: hideToast };
 		}
 
 		/**
@@ -141,12 +219,12 @@
 		 * Hide a toast by ID
 		 */
 		hide(id) {
-			const toast = this.toasts.get(id);
-			if (toast) {
-				const bsToast = bootstrap.Toast.getInstance(toast);
-				if (bsToast) {
-					bsToast.hide();
+			const toastData = this.toasts.get(id);
+			if (toastData && toastData.hide) {
+				if (toastData.autoHideTimer) {
+					clearTimeout(toastData.autoHideTimer);
 				}
+				toastData.hide();
 			}
 		}
 
@@ -154,10 +232,12 @@
 		 * Hide all toasts
 		 */
 		hideAll() {
-			this.toasts.forEach((toast) => {
-				const bsToast = bootstrap.Toast.getInstance(toast);
-				if (bsToast) {
-					bsToast.hide();
+			this.toasts.forEach((toastData) => {
+				if (toastData && toastData.hide) {
+					if (toastData.autoHideTimer) {
+						clearTimeout(toastData.autoHideTimer);
+					}
+					toastData.hide();
 				}
 			});
 		}

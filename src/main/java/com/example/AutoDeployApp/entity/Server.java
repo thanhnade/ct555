@@ -1,9 +1,6 @@
 package com.example.AutoDeployApp.entity;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.CreationTimestamp;
-
-import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "servers", uniqueConstraints = @UniqueConstraint(columnNames = { "host", "port", "username" }))
@@ -37,10 +34,6 @@ public class Server {
     @Column(nullable = false, length = 255)
     private String password; // store hashed/encoded
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "auth_type", nullable = false, length = 16)
-    private AuthType authType = AuthType.PASSWORD;
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "ssh_key_id")
     private SshKey sshKey;
@@ -56,16 +49,6 @@ public class Server {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private ServerStatus status = ServerStatus.OFFLINE;
-
-    @CreationTimestamp
-    @Column(name = "created_at", columnDefinition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-
-    @Column(name = "added_by")
-    private Long addedBy; // user_id of creator
-
-    @Column(name = "last_connected")
-    private java.sql.Timestamp lastConnected;
 
     public Long getId() {
         return id;
@@ -107,14 +90,6 @@ public class Server {
         this.password = password;
     }
 
-    public AuthType getAuthType() {
-        return authType;
-    }
-
-    public void setAuthType(AuthType authType) {
-        this.authType = authType;
-    }
-
     public SshKey getSshKey() {
         return sshKey;
     }
@@ -145,29 +120,5 @@ public class Server {
 
     public void setStatus(ServerStatus status) {
         this.status = status;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Long getAddedBy() {
-        return addedBy;
-    }
-
-    public void setAddedBy(Long addedBy) {
-        this.addedBy = addedBy;
-    }
-
-    public java.sql.Timestamp getLastConnected() {
-        return lastConnected;
-    }
-
-    public void setLastConnected(java.sql.Timestamp lastConnected) {
-        this.lastConnected = lastConnected;
     }
 }

@@ -35,67 +35,14 @@
 				return;
 			}
 
-			const search = (document.getElementById('cluster-search')?.value || '').toLowerCase();
-			const statusFilter = document.getElementById('cluster-status-filter')?.value || '';
-
-			// Filter clusters
-			const filteredClusters = (allData || [])
-				.filter(c => (!search || String(c.name || '').toLowerCase().includes(search))
-					&& (!statusFilter || String(c.status || '') === statusFilter));
-
-			allClusters = filteredClusters;
-
-			// Initialize pagination if not exists
-			if (!clusterPagination && window.Pagination) {
-				const paginationContainer = document.getElementById('clusters-pagination');
-				if (paginationContainer) {
-					clusterPagination = window.Pagination.create('clusters-pagination', {
-						currentPage: 1,
-						totalPages: Math.ceil(filteredClusters.length / 10),
-						pageSize: 10,
-						onPageChange: (page) => {
-							renderClusterPage(page);
-						},
-						onPageSizeChange: (size) => {
-							clusterPagination.setTotalPages(Math.ceil(filteredClusters.length / size));
-							renderClusterPage(1);
-						}
-					});
-				}
-			}
-
-			// Update pagination total pages
-			if (clusterPagination) {
-				const pageSize = clusterPagination.getState().pageSize;
-				clusterPagination.setTotalPages(Math.ceil(filteredClusters.length / pageSize));
-				renderClusterPage(clusterPagination.getState().currentPage);
-			} else {
-				// Fallback: render all without pagination
-				renderClusters(filteredClusters);
-			}
-
-			// Bind search/filter
-			const searchEl = document.getElementById('cluster-search');
-			const filterEl = document.getElementById('cluster-status-filter');
-			if (searchEl && !searchEl.dataset.bound) {
-				searchEl.dataset.bound = '1';
-				searchEl.addEventListener('input', () => {
-					if (clusterPagination) clusterPagination.setCurrentPage(1);
-					loadClusterList();
-				});
-			}
-			if (filterEl && !filterEl.dataset.bound) {
-				filterEl.dataset.bound = '1';
-				filterEl.addEventListener('change', () => {
-					if (clusterPagination) clusterPagination.setCurrentPage(1);
-					loadClusterList();
-				});
-			}
+			// Since system has only 1 cluster, simplify display (no search/filter/pagination needed)
+			allClusters = allData || [];
+			renderClusters(allClusters);
 		} catch (err) {
 			console.error('Error loading cluster list:', err);
 			const tbody = document.getElementById('clusters-tbody');
 			if (tbody) {
-				tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">Lỗi tải danh sách: ${escapeHtml(err.message || 'Unknown error')}</td></tr>`;
+				tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="color: #CC0000; padding: 20px;">Lỗi tải danh sách: ${escapeHtml(err.message || 'Unknown error')}</td></tr>`;
 			}
 		}
 	}
@@ -123,80 +70,36 @@
 
 		if (!clusters || clusters.length === 0) {
 			const tr = document.createElement('tr');
-			tr.innerHTML = '<td colspan="6" class="text-center text-muted">Chưa có cluster nào</td>';
+			tr.innerHTML = '<td colspan="5" class="text-center" style="color: #666666; padding: 20px;">Chưa có cluster nào</td>';
 			tbody.appendChild(tr);
 			return;
 		}
 
 		clusters.forEach(c => {
 			const status = c.status || 'ERROR';
-			const badge = status === 'HEALTHY' ? 'success' : (status === 'WARNING' ? 'warning text-dark' : 'danger');
+			let statusChip = '';
+			if (status === 'HEALTHY') {
+				statusChip = '<span class="chip green">HEALTHY</span>';
+			} else if (status === 'WARNING') {
+				statusChip = '<span class="chip yellow">WARNING</span>';
+			} else {
+				statusChip = '<span class="chip red">ERROR</span>';
+			}
 			const tr = document.createElement('tr');
 			tr.innerHTML = `
-				<td>${c.id || ''}</td>
-				<td>${escapeHtml(c.name || '')}</td>
-				<td>${escapeHtml(c.masterNode || '')}</td>
+				<td><strong>${escapeHtml(c.name || '')}</strong></td>
+				<td>${escapeHtml(c.masterNode || 'Chưa có')}</td>
 				<td>${c.workerCount ?? 0}</td>
-				<td><span class="badge bg-${badge}">${escapeHtml(status)}</span></td>
-				<td class="text-nowrap">
-					<button class="btn btn-sm btn-primary cluster-view-btn" data-id="${c.id}">View</button>
-					${c.isOwner ? `<button class="btn btn-sm btn-outline-danger cluster-delete-btn" data-id="${c.id}">Delete</button>` : ''}
+				<td>${statusChip}</td>
+				<td style="white-space: nowrap;">
+					<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.location.href='/admin/kubernetes?clusterId=${c.id}'" title="Xem chi tiết">👁️</button>
+					${c.isOwner ? `<button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.deleteCluster(${c.id}, '${escapeHtml(c.name || '')}')" title="Xóa">🗑️</button>` : ''}
 				</td>
 			`;
 			tbody.appendChild(tr);
 		});
 
-		// Bind view/delete buttons
-		document.querySelectorAll('.cluster-view-btn').forEach(btn => {
-			if (!btn.dataset.bound) {
-				btn.dataset.bound = '1';
-				btn.addEventListener('click', (e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					// Dùng currentTarget hoặc btn trực tiếp thay vì e.target.closest()
-					const button = e.currentTarget || btn;
-					const idStr = button.dataset.id || button.getAttribute('data-id');
-					if (!idStr) {
-						console.error('Cluster view button missing data-id attribute');
-						window.showAlert('error', 'Không tìm thấy ID của cluster');
-						return;
-					}
-					const id = parseInt(idStr, 10);
-					if (isNaN(id) || id <= 0) {
-						console.error('Invalid cluster ID:', idStr);
-						window.showAlert('error', 'ID cluster không hợp lệ: ' + idStr);
-						return;
-					}
-					showClusterDetail(id);
-				});
-			}
-		});
-
-		document.querySelectorAll('.cluster-delete-btn').forEach(btn => {
-			if (!btn.dataset.bound) {
-				btn.dataset.bound = '1';
-				btn.addEventListener('click', (e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					// Dùng currentTarget hoặc btn trực tiếp thay vì e.target.closest()
-					const button = e.currentTarget || btn;
-					const idStr = button.dataset.id || button.getAttribute('data-id');
-					if (!idStr) {
-						console.error('Cluster delete button missing data-id attribute');
-						window.showAlert('error', 'Không tìm thấy ID của cluster');
-						return;
-					}
-					const id = parseInt(idStr, 10);
-					if (isNaN(id) || id <= 0) {
-						console.error('Invalid cluster ID:', idStr);
-						window.showAlert('error', 'ID cluster không hợp lệ: ' + idStr);
-						return;
-					}
-					const name = allClusters.find(c => c.id === id)?.name || '';
-					deleteCluster(id, name);
-				});
-			}
-		});
+		// Buttons are now using onclick handlers directly in the HTML
 	}
 
 	// Load clusters and servers for assignment
@@ -231,39 +134,45 @@
 			const tbody = document.getElementById('k8s-servers-tbody');
 			if (tbody) {
 				tbody.innerHTML = '';
+				if (!servers || servers.length === 0) {
+					const tr = document.createElement('tr');
+					tr.innerHTML = '<td colspan="8" class="text-center" style="color: #666666; padding: 20px;">Chưa có server nào</td>';
+					tbody.appendChild(tr);
+					return;
+				}
 				(servers || []).forEach(s => {
 					const cName = (clusters || []).find(c => Number(c.id) === Number(s.clusterId))?.name || '';
 					const isConnected = (connectedIds || []).includes(s.id);
-					const statusBadge = isConnected ?
-						'<span class="badge bg-success">CONNECTED</span>' :
-						'<span class="badge bg-secondary">OFFLINE</span>';
+					let statusChip = '';
+					if (isConnected) {
+						statusChip = '<span class="chip green">CONNECTED</span>';
+					} else if (s.status === 'ONLINE') {
+						statusChip = '<span class="chip blue">ONLINE</span>';
+					} else {
+						statusChip = '<span class="chip red">OFFLINE</span>';
+					}
 					const tr = document.createElement('tr');
 					tr.innerHTML = `
 						<td><input type="checkbox" class="k8s-sel" value="${s.id}"></td>
-						<td>${s.id}</td>
-						<td>${escapeHtml(s.host || '')}</td>
-						<td>${s.port || ''}</td>
+						<td><strong>${escapeHtml(s.host || '')}</strong></td>
+						<td>${s.port || 22}</td>
 						<td>${escapeHtml(s.username || '')}</td>
 						<td>
-							<select class="form-select form-select-sm" data-id="${s.id}" data-field="cluster">
+							<select class="form-control" style="font-size: 13px; padding: 6px 8px;" data-id="${s.id}" data-field="cluster">
 								<option value="">-- Chọn cluster --</option>
 								${(clusters || []).map(c => `<option value="${c.id}" ${s.clusterId === c.id ? 'selected' : ''}>${escapeHtml(c.name || '')}</option>`).join('')}
 							</select>
 						</td>
 						<td>
-							<select class="form-select form-select-sm" data-id="${s.id}" data-field="role">
+							<select class="form-control" style="font-size: 13px; padding: 6px 8px;" data-id="${s.id}" data-field="role">
 								<option value="WORKER" ${s.role === 'WORKER' ? 'selected' : ''}>WORKER</option>
 								<option value="MASTER" ${s.role === 'MASTER' ? 'selected' : ''}>MASTER</option>
 							</select>
 						</td>
-						<td>${statusBadge}</td>
-						<td class="text-nowrap">
-							<button class="btn btn-sm btn-primary me-1" onclick="window.K8sClustersModule.saveServerClusterAndRole(${s.id})" title="Lưu thay đổi cluster và role">
-								<i class="bi bi-check-lg"></i> Lưu
-							</button>
-							<button class="btn btn-sm btn-outline-danger" onclick="window.K8sClustersModule.removeSingleServerFromCluster(${s.id})" title="Gỡ server này khỏi cluster">
-								<i class="bi bi-x-circle"></i> Bỏ khỏi Cluster
-							</button>
+						<td>${statusChip}</td>
+						<td style="white-space: nowrap;">
+							<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.saveServerClusterAndRole(${s.id})" title="Lưu thay đổi">💾</button>
+							<button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.removeSingleServerFromCluster(${s.id})" title="Bỏ khỏi Cluster">🗑️</button>
 						</td>
 					`;
 					tbody.appendChild(tr);
@@ -290,7 +199,7 @@
 
 	// Bind assignment buttons
 	function bindAssignmentButtons() {
-		// Assign selected
+		// Assign selected - gán server vào cluster, giữ nguyên role hiện tại
 		const assignBtn = document.getElementById('btn-assign-selected');
 		if (assignBtn && !assignBtn.dataset.bound) {
 			assignBtn.dataset.bound = '1';
@@ -301,16 +210,28 @@
 					return;
 				}
 				const clusterId = parseInt(document.getElementById('k8s-cluster-select').value, 10);
-				const role = document.getElementById('k8s-role-select').value;
 				if (!clusterId) {
 					window.showAlert('warning', 'Vui lòng chọn cluster');
 					return;
 				}
-				await addExistingNodesToCluster(selected, role);
+				// Lấy role hiện tại của từng server từ dropdown trong bảng (giữ nguyên role)
+				const serverRoles = [];
+				selected.forEach(serverId => {
+					const row = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
+					if (row) {
+						const roleSelect = row.querySelector('select[data-field="role"]');
+						const role = roleSelect ? roleSelect.value : 'WORKER'; // Lấy role từ dropdown trong bảng
+						serverRoles.push({ serverId, role });
+					} else {
+						// Nếu không tìm thấy row, dùng role mặc định
+						serverRoles.push({ serverId, role: 'WORKER' });
+					}
+				});
+				await addExistingNodesToClusterWithRoles(selected, serverRoles, clusterId);
 			});
 		}
 
-		// Update role selected
+		// Update role selected - chỉ cập nhật role, giữ nguyên cluster hiện tại
 		const updateRoleBtn = document.getElementById('btn-update-role-selected');
 		if (updateRoleBtn && !updateRoleBtn.dataset.bound) {
 			updateRoleBtn.dataset.bound = '1';
@@ -322,7 +243,17 @@
 				}
 				const role = document.getElementById('k8s-role-select').value;
 				for (const serverId of selected) {
-					await saveServerClusterAndRole(serverId, null, role);
+					// Lấy cluster hiện tại của server từ dropdown trong bảng, giữ nguyên cluster
+					const row = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
+					if (row) {
+						const clusterSelect = row.querySelector('select[data-field="cluster"]');
+						const currentClusterId = clusterSelect && clusterSelect.value ? parseInt(clusterSelect.value, 10) : null;
+						// Chỉ cập nhật role, giữ nguyên clusterId hiện tại (null nếu chưa có cluster)
+						await saveServerClusterAndRole(serverId, currentClusterId, role);
+					} else {
+						// Nếu không tìm thấy row, chỉ cập nhật role, giữ cluster null
+						await saveServerClusterAndRole(serverId, null, role);
+					}
 				}
 				await loadClustersAndServers();
 			});
@@ -350,12 +281,24 @@
 	// Create cluster
 	async function createCluster(name, description) {
 		try {
+			// Create new cluster
 			const data = await window.ApiClient.post('/admin/clusters', {
 				name: name.trim(),
 				description: description ? description.trim() : null
 			});
 			window.showAlert('success', 'Đã tạo cluster thành công');
-			await Promise.all([loadClusterList(), loadClustersAndServers()]);
+			
+			// Reload cluster list to show updated data
+			const isAssignServersPage = document.getElementById('k8s-assign') && !document.getElementById('k8s-list');
+			if (!isAssignServersPage) {
+				await loadClusterList();
+			}
+			// Also reload clusters for assign-servers page if exists
+			const clusterSelect = document.getElementById('k8s-cluster-select');
+			if (clusterSelect) {
+				await loadClustersAndServers();
+			}
+			
 			return data;
 		} catch (err) {
 			window.showAlert('error', err.message || 'Tạo cluster thất bại');
@@ -384,11 +327,18 @@
 
 	// Show cluster list view
 	function showClusterList() {
-		document.getElementById('k8s-list')?.classList.remove('d-none');
-		document.getElementById('k8s-create')?.classList.remove('d-none');
-		document.getElementById('k8s-assign')?.classList.remove('d-none');
-		document.getElementById('k8s-detail')?.classList.add('d-none');
-		resetClusterData();
+		const k8sListEl = document.getElementById('k8s-list');
+		if (k8sListEl) {
+			// We're on cluster.html, switch back to list view
+			k8sListEl.classList.remove('d-none');
+			document.getElementById('k8s-create')?.classList.remove('d-none');
+			document.getElementById('k8s-assign')?.classList.remove('d-none');
+			document.getElementById('k8s-detail')?.classList.add('d-none');
+			resetClusterData();
+		} else {
+			// We're on kubernetes.html, redirect to cluster.html
+			window.location.href = '/admin/cluster';
+		}
 	}
 
 	// Reset cluster data
@@ -664,11 +614,21 @@
 			window.setCurrentClusterId(id);
 		}
 
-		// Switch sections
-		document.getElementById('k8s-list')?.classList.add('d-none');
-		document.getElementById('k8s-create')?.classList.add('d-none');
-		document.getElementById('k8s-assign')?.classList.add('d-none');
-		document.getElementById('k8s-detail')?.classList.remove('d-none');
+		// Switch sections (only if we're on cluster.html, not kubernetes.html)
+		const k8sListEl = document.getElementById('k8s-list');
+		const k8sCreateEl = document.getElementById('k8s-create');
+		const k8sAssignEl = document.getElementById('k8s-assign');
+		const k8sDetailEl = document.getElementById('k8s-detail');
+		if (k8sListEl) {
+			// We're on cluster.html, switch views
+			k8sListEl.classList.add('d-none');
+			k8sCreateEl?.classList.add('d-none');
+			k8sAssignEl?.classList.add('d-none');
+			k8sDetailEl?.classList.remove('d-none');
+		} else if (k8sDetailEl) {
+			// We're on kubernetes.html, detail section is always visible
+			// No need to switch sections
+		}
 
 		try {
 			// Thêm timeout cho API call (30 giây)
@@ -1211,7 +1171,53 @@
 		await addExistingNodesToCluster(nodeIds, role, clusterId, true);
 	}
 
-	// Add existing nodes to cluster
+	// Add existing nodes to cluster with individual roles (giữ nguyên role của từng server)
+	async function addExistingNodesToClusterWithRoles(nodeIds, serverRoles, clusterId) {
+		if (!nodeIds || nodeIds.length === 0) {
+			window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
+			return;
+		}
+
+		if (!clusterId || isNaN(clusterId)) {
+			window.showAlert('warning', 'Vui lòng chọn cluster');
+			return;
+		}
+
+		const assignBtn = document.getElementById('btn-assign-selected');
+
+		try {
+			// Disable button
+			if (assignBtn) {
+				assignBtn.disabled = true;
+				assignBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang gán...';
+			}
+
+			// Gán từng server vào cluster với role riêng của nó (giữ nguyên role)
+			for (const { serverId, role } of serverRoles) {
+				const body = { clusterId, role };
+				await window.ApiClient.put(`/admin/servers/${serverId}`, body);
+			}
+
+			window.showAlert('success', `✓ Đã gán ${nodeIds.length} server vào cluster với role tương ứng`);
+
+			// Refresh ngay
+			if (currentClusterId === clusterId) {
+				await showClusterDetail(clusterId);
+			}
+			await Promise.all([loadClusterList(), loadClustersAndServers()]);
+		} catch (error) {
+			console.error('Error adding existing nodes with roles:', error);
+			window.showAlert('error', error.message || 'Gán server thất bại');
+		} finally {
+			// Restore button state
+			if (assignBtn) {
+				assignBtn.disabled = false;
+				assignBtn.innerHTML = '📌 Gán vào Cluster';
+			}
+		}
+	}
+
+	// Add existing nodes to cluster (với role chung - từ modal hoặc các trường hợp khác)
 	async function addExistingNodesToCluster(nodeIds, role, clusterIdParam = null, isFromModal = false) {
 		if (!nodeIds || nodeIds.length === 0) {
 			window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
@@ -1484,6 +1490,45 @@
 		}
 	}
 
+	// Reset cluster form
+	function resetClusterForm() {
+		const form = document.getElementById('create-cluster-inline-form');
+		if (form) {
+			form.reset();
+			const errorDiv = document.getElementById('create-cluster-inline-error');
+			if (errorDiv) {
+				errorDiv.style.display = 'none';
+				errorDiv.textContent = '';
+			}
+			// Close accordion
+			const accordion = document.getElementById('create-cluster-accordion');
+			if (accordion) {
+				accordion.classList.remove('open');
+			}
+		}
+	}
+
+	// Toggle create cluster accordion (inline trong danh sách)
+	function toggleCreateCluster() {
+		const accordion = document.getElementById('create-cluster-accordion');
+		if (accordion) {
+			const isOpen = accordion.classList.contains('open');
+			if (isOpen) {
+				accordion.classList.remove('open');
+				// Reset form when closing
+				const form = document.getElementById('create-cluster-inline-form');
+				if (form) form.reset();
+				const errorDiv = document.getElementById('create-cluster-inline-error');
+				if (errorDiv) {
+					errorDiv.style.display = 'none';
+					errorDiv.textContent = '';
+				}
+			} else {
+				accordion.classList.add('open');
+			}
+		}
+	}
+
 	// Export module
 	window.K8sClustersModule = {
 		loadClusterList,
@@ -1493,10 +1538,12 @@
 		showClusterDetail,
 		showClusterList,
 		resetClusterData,
+		resetClusterForm,
 		saveServerClusterAndRole,
 		removeSingleServerFromCluster,
 		addExistingNodesToCluster,
-		removeNodeFromCluster
+		removeNodeFromCluster,
+		toggleCreateCluster
 	};
 
 	// Auto-init on page load
@@ -1539,41 +1586,137 @@
 	}
 
 	function init() {
+		// Check if we're on the kubernetes.html page and need to auto-load cluster detail
+		const urlParams = new URLSearchParams(window.location.search);
+		const clusterIdParam = urlParams.get('clusterId');
+		if (clusterIdParam && document.getElementById('k8s-detail')) {
+			// We're on the kubernetes.html page with a clusterId parameter
+			const clusterId = parseInt(clusterIdParam, 10);
+			if (!isNaN(clusterId) && clusterId > 0) {
+				// Auto-load cluster detail
+				setTimeout(() => {
+					if (window.ApiClient && typeof window.ApiClient.get === 'function') {
+						showClusterDetail(clusterId);
+					} else {
+						// Wait for ApiClient
+						const checkApiClient = setInterval(() => {
+							if (window.ApiClient && typeof window.ApiClient.get === 'function') {
+								clearInterval(checkApiClient);
+								showClusterDetail(clusterId);
+							}
+						}, 100);
+					}
+				}, 100);
+			}
+			return; // Don't load cluster list on kubernetes.html page
+		}
+
+		// Check if we're on the assign-servers.html page
+		const isAssignServersPage = document.getElementById('k8s-assign') && !document.getElementById('k8s-list');
+		
 		// Wait for ApiClient to be ready before loading clusters
 		function waitForApiClient() {
 			if (window.ApiClient && typeof window.ApiClient.get === 'function') {
-				// Load cluster list
-				loadClusterList();
-				// Bind playbook manager modal
-				bindPlaybookManagerModal();
-				loadClustersAndServers();
+				if (isAssignServersPage) {
+					// We're on assign-servers.html page - only load servers and cluster selection
+					loadClustersAndServers();
+				} else {
+					// We're on cluster.html page - load cluster list and form
+					loadClusterList();
+					// Bind playbook manager modal (if exists)
+					bindPlaybookManagerModal();
+				}
 
-				// Bind create cluster form
-				const createForm = document.getElementById('create-cluster-form');
-				if (createForm && !createForm.dataset.bound) {
-					createForm.dataset.bound = '1';
-					createForm.addEventListener('submit', async (e) => {
+
+				// Bind refresh clusters button (on cluster.html)
+				const refreshBtn = document.getElementById('refresh-clusters-btn');
+				if (refreshBtn && !refreshBtn.dataset.bound) {
+					refreshBtn.dataset.bound = '1';
+					refreshBtn.addEventListener('click', () => {
+						if (isAssignServersPage) {
+							// On assign-servers page
+							loadClustersAndServers();
+						} else {
+							// On cluster page
+							loadClusterList();
+						}
+					});
+				}
+
+				// Bind refresh servers button (on assign-servers.html)
+				const refreshServersBtn = document.getElementById('refresh-servers-btn');
+				if (refreshServersBtn && !refreshServersBtn.dataset.bound) {
+					refreshServersBtn.dataset.bound = '1';
+					refreshServersBtn.addEventListener('click', () => {
+						loadClustersAndServers();
+					});
+				}
+
+				// Bind create cluster inline form (trong danh sách)
+				const createInlineForm = document.getElementById('create-cluster-inline-form');
+				if (createInlineForm && !createInlineForm.dataset.bound) {
+					createInlineForm.dataset.bound = '1';
+					createInlineForm.addEventListener('submit', async (e) => {
 						e.preventDefault();
-						const name = createForm.name.value.trim();
-						const description = createForm.description.value.trim();
-						const btn = createForm.querySelector('button[type="submit"]');
+						const nameInput = document.getElementById('cluster-name-inline');
+						const descInput = document.getElementById('cluster-description-inline');
+						const name = nameInput ? nameInput.value.trim() : '';
+						const description = descInput ? descInput.value.trim() : '';
+						const submitBtn = document.getElementById('create-cluster-inline-submit-btn');
+						const textSpan = document.getElementById('create-cluster-inline-text');
+						const loadingSpan = document.getElementById('create-cluster-inline-loading');
+						const errorDiv = document.getElementById('create-cluster-inline-error');
+
+						// Hide error
+						if (errorDiv) {
+							errorDiv.style.display = 'none';
+							errorDiv.textContent = '';
+						}
 
 						if (!name) {
+							if (errorDiv) {
+								errorDiv.textContent = 'Vui lòng nhập tên cluster';
+								errorDiv.style.display = 'block';
+							}
 							window.showAlert('warning', 'Vui lòng nhập tên cluster');
 							return;
 						}
 
+						// Validate pattern
+						if (!/^[a-zA-Z0-9-_]+$/.test(name)) {
+							if (errorDiv) {
+								errorDiv.textContent = 'Tên cluster chỉ được chứa chữ, số, dấu gạch ngang và gạch dưới';
+								errorDiv.style.display = 'block';
+							}
+							window.showAlert('warning', 'Tên cluster chỉ được chứa chữ, số, dấu gạch ngang và gạch dưới');
+							return;
+						}
+
 						try {
-							btn.disabled = true;
-							btn.textContent = 'Đang tạo...';
-							await createCluster(name, description);
-							// createCluster đã hiển thị thông báo success
-							createForm.reset();
+							if (submitBtn) submitBtn.disabled = true;
+							if (textSpan) textSpan.style.display = 'none';
+							if (loadingSpan) loadingSpan.style.display = 'inline';
+
+							await createCluster(name, description || null);
+							
+							// Reset form and close accordion
+							createInlineForm.reset();
+							toggleCreateCluster();
+							
+							// Reload cluster list
+							if (!isAssignServersPage) {
+								await loadClusterList();
+							}
 						} catch (err) {
-							// createCluster đã hiển thị thông báo error
+							const errorMsg = err.message || 'Tạo cluster thất bại';
+							if (errorDiv) {
+								errorDiv.textContent = errorMsg;
+								errorDiv.style.display = 'block';
+							}
 						} finally {
-							btn.disabled = false;
-							btn.textContent = 'Tạo';
+							if (submitBtn) submitBtn.disabled = false;
+							if (textSpan) textSpan.style.display = 'inline';
+							if (loadingSpan) loadingSpan.style.display = 'none';
 						}
 					});
 				}

@@ -3,65 +3,50 @@
 <body>
 <div th:replace="admin/layout :: layout(~{::content})">
   <div th:fragment="content">
-    <div class="d-flex align-items-center justify-content-between mb-4">
-      <h1 class="m-0">🚀 Deployment Requests</h1>
-      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
-    </div>
-
-    <div class="card mb-4">
-      <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <h2 class="h6 m-0">📋 Danh sách yêu cầu triển khai</h2>
-          <div class="d-flex gap-2">
-            <select id="deployment-status-filter" class="form-select form-select-sm" onchange="loadDeploymentRequests()">
-              <option value="">Tất cả</option>
-              <option value="PENDING">⏳ Chờ xử lý</option>
-              <option value="RUNNING">✅ Đang chạy</option>
-              <option value="ERROR">❌ Lỗi</option>
-            </select>
-            <button class="btn btn-sm btn-outline-primary" onclick="loadDeploymentRequests()">
-              <i class="bi bi-arrow-clockwise"></i> Làm mới
-            </button>
-          </div>
-        </div>
-
-        <div class="table-responsive table-fixed max-h-60vh">
-          <table class="table table-sm align-middle">
-            <thead>
-            <tr>
-              <th>Ứng dụng</th>
-              <th>Docker Image</th>
-              <th>Người dùng</th>
-              <th>Namespace</th>
-              <th>Trạng thái</th>
-              <th>Access URL</th>
-              <th>Ngày tạo</th>
-              <th>Hành động</th>
-            </tr>
-            </thead>
-            <tbody id="deployment-requests-tbody">
-            <tr>
-              <td colspan="8" class="text-center text-muted">Đang tải...</td>
-            </tr>
-            </tbody>
-          </table>
-        </div>
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">Yêu cầu duyệt ứng dụng</div>
+        <div class="page-subtitle">Admin kiểm tra và cho phép triển khai ứng dụng.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <select id="deployment-status-filter" class="form-group select" style="width: auto; min-width: 150px;" onchange="loadDeploymentRequests()">
+          <option value="">Tất cả</option>
+          <option value="PENDING">⏳ Chờ xử lý</option>
+          <option value="RUNNING">✅ Đang chạy</option>
+          <option value="ERROR">❌ Lỗi</option>
+        </select>
+        <button class="btn" onclick="loadDeploymentRequests()">🔄 Làm mới</button>
       </div>
     </div>
 
-    <div class="card mb-4">
-      <div class="card-header d-flex justify-content-between align-items-center">
-        <h2 class="h6 m-0">📋 Logs triển khai</h2>
-        <div class="d-flex gap-2">
-          <button class="btn btn-sm btn-outline-secondary" id="clear-deployment-logs-btn" onclick="clearDeploymentLogs()">
-            <i class="bi bi-trash"></i> Xóa log
-          </button>
-        </div>
+    <div class="table-card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>App</th>
+            <th>User</th>
+            <th>Ngày upload</th>
+            <th>Docker Image</th>
+            <th>Trạng thái</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="deployment-requests-tbody">
+          <tr>
+            <td colspan="6" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Logs section - Hidden by default, shown when viewing logs -->
+    <div class="table-card" id="deployment-logs-section" style="display: none; margin-top: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="font-size: 15px; font-weight: 600; color: #003366;">📋 Logs triển khai</div>
+        <button class="btn" id="clear-deployment-logs-btn" onclick="clearDeploymentLogs()">🗑️ Xóa log</button>
       </div>
-      <div class="card-body p-0">
-        <div id="deployment-logs-console" class="bg-dark text-light p-3 h-400px monospace-12 overflow-auto pre-wrap">
-          <div class="text-muted text-center">Chọn một deployment request để xem logs...</div>
-        </div>
+      <div id="deployment-logs-console" class="terminal-box" style="padding: 12px; height: 400px; overflow: auto; font-family: 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; color: #e5e7eb;">
+        <div style="color: #666666; text-align: center;">Chọn một deployment request để xem logs...</div>
       </div>
     </div>
 

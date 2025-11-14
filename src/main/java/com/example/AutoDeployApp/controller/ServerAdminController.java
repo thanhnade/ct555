@@ -38,11 +38,8 @@ public class ServerAdminController {
             m.put("username", java.util.Objects.toString(s.getUsername(), ""));
             m.put("role", s.getRole() != null ? s.getRole().name() : "WORKER");
             m.put("status", s.getStatus() != null ? s.getStatus().name() : "OFFLINE");
-            m.put("authType", s.getAuthType() != null ? s.getAuthType().name() : "PASSWORD");
             if (s.getSshKey() != null && s.getSshKey().getId() != null)
                 m.put("sshKeyId", s.getSshKey().getId());
-            if (s.getLastConnected() != null)
-                m.put("lastConnected", s.getLastConnected());
             if (s.getCluster() != null && s.getCluster().getId() != null) {
                 m.put("clusterId", s.getCluster().getId());
             }
@@ -63,13 +60,6 @@ public class ServerAdminController {
         } catch (Exception ex) {
             role = Server.ServerRole.WORKER; // fallback an toàn nếu client gửi sai
         }
-        String authStr = (String) body.getOrDefault("authType", "PASSWORD");
-        Server.AuthType authType;
-        try {
-            authType = Server.AuthType.valueOf(authStr);
-        } catch (Exception ex) {
-            authType = Server.AuthType.PASSWORD;
-        }
         Long sshKeyId = null;
         if (body.containsKey("sshKeyId") && body.get("sshKeyId") != null) {
             Object v = body.get("sshKeyId");
@@ -82,15 +72,9 @@ public class ServerAdminController {
             if (v instanceof Number n)
                 clusterId = n.longValue();
         }
-        Long addedBy = null;
-        if (request.getSession(false) != null) {
-            Object uid = request.getSession(false).getAttribute("USER_ID");
-            if (uid instanceof Long l)
-                addedBy = l;
-            else if (uid instanceof Number n)
-                addedBy = n.longValue();
-        }
-        Server s = serverService.create(host, port, username, password, role, addedBy, clusterId, authType, sshKeyId);
+        // Determine authType: use KEY if sshKeyId is provided, otherwise PASSWORD
+        Server.AuthType authType = (sshKeyId != null) ? Server.AuthType.KEY : Server.AuthType.PASSWORD;
+        Server s = serverService.create(host, port, username, password, role, null, clusterId, authType, sshKeyId);
         var session = request.getSession();
         synchronized (session) {
             Object attr = session.getAttribute("CONNECTED_SERVERS");
@@ -160,15 +144,6 @@ public class ServerAdminController {
             }
         }
         Server.ServerStatus status = statusStr != null ? Server.ServerStatus.valueOf(statusStr) : null;
-        String authStr = (String) body.get("authType");
-        Server.AuthType authType = null;
-        if (authStr != null && !authStr.isBlank()) {
-            try {
-                authType = Server.AuthType.valueOf(authStr);
-            } catch (Exception ignored) {
-                authType = null;
-            }
-        }
         Long sshKeyId = null;
         if (body.containsKey("sshKeyId")) {
             Object v = body.get("sshKeyId");
@@ -178,6 +153,8 @@ public class ServerAdminController {
                 sshKeyId = n.longValue();
             }
         }
+        // Determine authType: use KEY if sshKeyId is provided, otherwise PASSWORD
+        Server.AuthType authType = (sshKeyId != null && sshKeyId >= 0) ? Server.AuthType.KEY : Server.AuthType.PASSWORD;
         // Fallback: nếu không truyền mật khẩu, lấy từ session cache để cho phép sửa
         // nhanh ở "Servers đang kết nối"
         if (password == null || password.isBlank()) {
@@ -250,8 +227,7 @@ public class ServerAdminController {
             }
         }
 
-        return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name(),
-                "authType", s.getAuthType() != null ? s.getAuthType().name() : "PASSWORD"));
+        return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name()));
     }
 
     @DeleteMapping("/{id}")

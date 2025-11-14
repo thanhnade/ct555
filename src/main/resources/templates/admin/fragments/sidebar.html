@@ -1,16 +1,57 @@
 <!doctype html>
 <html lang="vi" xmlns:th="http://www.thymeleaf.org">
 <body>
-<aside th:fragment="sidebar">
-  <!-- Placeholder sidebar (nếu cần dùng trong tương lai) -->
-  <!-- Ví dụ: danh mục điều hướng phụ, bộ lọc, quick links -->
-  <div class="card mb-3">
-    <div class="card-body">
-      <div class="small text-muted">Sidebar</div>
-      <div class="text-muted">Thêm nội dung điều hướng phụ tại đây.</div>
+<div th:fragment="sidebar" class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo-circle">MMT</div>
+    <span th:href="@{/admin}">AutoDeploy</span>
+  </div>
+
+  <!-- GROUP 1 – HẠ TẦNG -->
+  <div class="dropdown-group">
+    <div class="dropdown-header" onclick="toggleDropdown(this)">
+      Hạ tầng (Servers & Clusters)
+      <span class="arrow">›</span>
+    </div>
+    <div class="dropdown-content">
+      <a th:href="@{/admin/server}" onclick="setActiveNav(this)">🖥 Servers</a>
+      <a th:href="@{/admin/server/add}" onclick="setActiveNav(this)">➕ Add Server</a>
+      <a th:href="@{/admin/cluster}" onclick="setActiveNav(this)">🧩 Clusters</a>
+      <a th:href="@{/admin/cluster/assign}" onclick="setActiveNav(this)">🔗 Assign Servers</a>
+      <a th:href="@{/admin/cluster/setup}" onclick="setActiveNav(this)">⚙ Cluster Setup</a>
     </div>
   </div>
-</aside>
+
+  <!-- GROUP 2 – KUBERNETES -->
+  <div class="dropdown-group">
+    <div class="dropdown-header" onclick="toggleDropdown(this)">
+      Kubernetes (Rancher View)
+      <span class="arrow">›</span>
+    </div>
+    <div class="dropdown-content">
+      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">📊 Overview</a>
+      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🖥 Nodes</a>
+      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">📂 Namespaces</a>
+      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">📦 Workloads</a>
+      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🌐 Services</a>
+      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🚪 Ingress</a>
+      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">💾 Storage</a>
+    </div>
+  </div>
+
+  <!-- GROUP 3 – QUẢN LÝ HỆ THỐNG (ADMIN) -->
+  <div class="dropdown-group">
+    <div class="dropdown-header" onclick="toggleDropdown(this)">
+      Quản lý hệ thống (Admin)
+      <span class="arrow">›</span>
+    </div>
+    <div class="dropdown-content">
+      <a th:href="@{/admin/user}" onclick="setActiveNav(this)">👥 Users</a>
+      <a th:href="@{/admin/deployments}" onclick="setActiveNav(this)">🧩 User Apps</a>
+      <a th:href="@{/admin/deployments}" onclick="setActiveNav(this)">📝 Review Requests</a>
+    </div>
+  </div>
+</div>
 </body>
 </html>
 

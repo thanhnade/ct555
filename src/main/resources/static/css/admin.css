@@ -1,6 +1,25 @@
 /* Admin shared styles placeholder */
 /* Add page-level utilities and overrides here to replace inline styles */
 
+/* Body override for app-shell layout */
+body:has(.app-shell),
+body .app-shell {
+  padding: 0 !important;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Ensure app-shell takes full viewport */
+.app-shell {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+
 /* Height utilities */
 .max-h-60vh { max-height: 60vh; }
 .max-h-50vh { max-height: 50vh; }
@@ -22,13 +41,144 @@
 .pre-wrap { white-space: pre-wrap; word-wrap: break-word; }
 
 /* Boxes */
+/* Terminal Styles */
+.terminal-popup {
+	background: #FFFFFF !important;
+}
+
+.terminal-info-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.terminal-info-item {
+	display: flex;
+	flex-direction: column;
+}
+
+.terminal-input {
+	width: 100%;
+	padding: 8px 12px;
+	font-size: 13px;
+	border: 1px solid #D0D0D0;
+	border-radius: 6px;
+	background: #FFFFFF;
+	color: #333333;
+	transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.terminal-input:focus {
+	outline: none;
+	border-color: #003366;
+	box-shadow: 0 0 0 3px rgba(0, 51, 102, 0.1);
+}
+
+.terminal-input[readonly] {
+	background: #F5F5F5;
+	color: #666666;
+	cursor: not-allowed;
+}
+
 .terminal-box {
-	background: #0b1020;
-	color: #e5e7eb;
+	background: #FFFFFF;
+	color: #1a1a1a;
 	overflow: hidden;
-	border: 1px solid #dee2e6;
-	border-radius: .5rem;
+	border: 1px solid #D0D0D0;
+	border-radius: 8px;
 	margin: 0;
+	padding: 0;
+	font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+	font-size: 14px;
+	line-height: 1.6;
+	min-height: 400px;
+	flex: 1;
+	box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* xterm.js container styling */
+.terminal-box .xterm {
+	padding: 16px;
+	height: 100%;
+}
+
+.terminal-box .xterm-screen {
+	border-radius: 0;
+}
+
+.terminal-box .xterm-viewport {
+	background: transparent !important;
+	border-radius: 0;
+}
+
+/* Chỉ hiển thị scrollbar cho xterm-viewport (xterm.js tự quản lý) */
+.terminal-box .xterm-viewport::-webkit-scrollbar {
+	width: 12px;
+	height: 12px;
+}
+
+.terminal-box .xterm-viewport::-webkit-scrollbar-track {
+	background: #F5F5F5;
+	border-radius: 6px;
+}
+
+.terminal-box .xterm-viewport::-webkit-scrollbar-thumb {
+	background: #B0B0B0;
+	border-radius: 6px;
+	border: 2px solid #F5F5F5;
+}
+
+.terminal-box .xterm-viewport::-webkit-scrollbar-thumb:hover {
+	background: #909090;
+}
+
+.terminal-command-input {
+	flex: 1;
+	padding: 9px 14px;
+	font-size: 13px;
+	border: 1px solid #D0D0D0;
+	border-radius: 6px;
+	background: #FFFFFF;
+	color: #333333;
+	font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+	transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.terminal-command-input:focus {
+	outline: none;
+	border-color: #003366;
+	box-shadow: 0 0 0 3px rgba(0, 51, 102, 0.1);
+}
+
+.terminal-footer {
+	background: #FFFFFF;
+	border-top: 1px solid #E0E0E0;
+	padding: 12px 16px;
+	display: flex;
+	gap: 10px;
+	align-items: center;
+}
+
+.btn-close-terminal {
+	float: right;
+	border: none;
+	background: transparent;
+	color: #FFFFFF;
+	font-size: 22px;
+	cursor: pointer;
+	padding: 0;
+	width: 28px;
+	height: 28px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 0.2s;
+}
+
+.btn-close-terminal:hover {
+	background: rgba(255, 255, 255, 0.2);
 }
 
 /* Dashboard card hover effects */
@@ -45,5 +195,880 @@
 	transition: all 0.3s ease;
 }
 
+/* ==== SIDEBAR ==== */
+.sidebar {
+  width: 235px;
+  background: #003366;
+  border-right: 1px solid #004080;
+  padding: 18px 12px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
 
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+  color: #ffffff;
+}
+
+.sidebar-header span {
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.logo-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #FF6600;
+  color: #FFFFFF;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.sidebar a {
+  display: block;
+  margin-top: 4px;
+  padding: 7px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: #FFFFFF;
+}
+
+.sidebar a:hover {
+  background: #004080;
+  color: #FFFFFF;
+}
+
+.sidebar a.active {
+  background: #FF6600;
+  color: #FFFFFF;
+}
+
+/* ==== DROPDOWN MENU ==== */
+.dropdown-group {
+  margin-top: 12px;
+}
+
+.dropdown-header {
+  font-size: 11px;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  padding: 6px 4px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  opacity: 0.9;
+}
+
+.dropdown-header:hover {
+  color: #FFFFFF;
+  opacity: 1;
+}
+
+.dropdown-content {
+  margin-top: 4px;
+  display: none;
+  flex-direction: column;
+}
+
+.dropdown-content a {
+  padding-left: 16px;
+}
+
+.dropdown-group.open .dropdown-content {
+  display: flex;
+}
+
+.dropdown-group .arrow {
+  transition: transform 0.2s ease;
+  font-size: 13px;
+}
+
+.dropdown-group.open .arrow {
+	transform: rotate(90deg);
+}
+
+/* ==== NAV TABS ==== */
+.nav-tabs {
+	border-bottom: 1px solid #E0E0E0;
+	display: flex;
+	margin-bottom: 16px;
+	list-style: none;
+	padding: 0;
+}
+
+.nav-item {
+	margin-right: 4px;
+}
+
+.nav-link {
+	display: inline-block;
+	padding: 8px 16px;
+	font-size: 13px;
+	color: #666666;
+	text-decoration: none;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	border-bottom: 2px solid transparent;
+	transition: all 0.2s;
+}
+
+.nav-link:hover {
+	color: #003366;
+	border-bottom-color: #CCCCCC;
+}
+
+.nav-link.active {
+	color: #003366;
+	border-bottom-color: #003366;
+	font-weight: 600;
+	background: transparent;
+}
+
+.tab-content {
+	margin-top: 16px;
+}
+
+.tab-pane {
+	display: none;
+}
+
+.tab-pane.active,
+.tab-pane.show {
+	display: block;
+}
+
+.tab-pane.fade {
+	opacity: 0;
+	transition: opacity 0.15s linear;
+}
+
+.tab-pane.fade.show {
+	opacity: 1;
+}
+
+/* ==== MAIN LAYOUT ==== */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.topbar {
+  height: 54px;
+  background: #003366;
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid #004080;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.topbar-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #ffffff;
+}
+
+.avatar-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #FF6600;
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.content {
+  flex: 1;
+  padding: 18px 20px;
+  background: #FFFFFF;
+  overflow-y: auto;
+}
+
+/* ==== RANCHER-STYLE COMPONENTS ==== */
+.page-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: #666666;
+  margin-top: 3px;
+}
+
+.table-card {
+  background: #FFFFFF;
+  border: 1px solid #E0E0E0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-top: 10px;
+  color: #333333;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #E0E0E0;
+  color: #333333;
+}
+
+.table th {
+  text-align: left;
+  color: #003366;
+  font-weight: 500;
+}
+
+.table tbody tr:hover {
+  background: #F2F2F2;
+}
+
+.chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  display: inline-block;
+}
+
+.chip.green {
+  background: #065f46;
+  color: #6ee7b7;
+}
+
+.chip.blue {
+  background: #003366;
+  color: #FFFFFF;
+}
+
+.chip.yellow {
+  background: #78350f;
+  color: #facc15;
+}
+
+.chip.red {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+.chip.info {
+  background: #1e40af;
+  color: #bfdbfe;
+}
+
+.chip.warning {
+  background: #92400e;
+  color: #fde68a;
+}
+
+/* Form Grid */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  color: #333333;
+  margin-bottom: 3px;
+}
+
+.form-group input,
+.form-group textarea,
+.form-group select {
+  width: 100%;
+  font-size: 13px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid #E0E0E0;
+  background: #F2F2F2;
+  color: #333333;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #003366;
+}
+
+.form-group input:invalid:not(:focus):not(:placeholder-shown),
+.form-group select:invalid:not(:focus) {
+  border-color: #CC0000;
+}
+
+.form-hint {
+  display: block;
+  font-size: 11px;
+  color: #666666;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.form-error {
+  display: block;
+  padding: 10px 12px;
+  background: #fecaca;
+  border: 1px solid #f87171;
+  border-radius: 6px;
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.form-group input:required:invalid:not(:focus):not(:placeholder-shown) {
+  border-color: #CC0000;
+}
+
+.form-group input:required:valid {
+  border-color: #22c55e;
+}
+
+/* Accordion */
+.accordion {
+  border: 1px solid #E0E0E0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.accordion-header {
+  padding: 10px 12px;
+  font-size: 14px;
+  background: #F2F2F2;
+  color: #333333;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  user-select: none;
+}
+
+.accordion-body {
+  display: none;
+  padding: 12px;
+  background: #FFFFFF;
+  color: #333333;
+}
+
+.accordion.open .accordion-body {
+  display: block;
+}
+
+.accordion .arrow {
+  transition: transform .2s ease;
+}
+
+.accordion.open .arrow {
+  transform: rotate(90deg);
+}
+
+/* Buttons */
+.btn {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #E0E0E0;
+  background: #F2F2F2;
+  color: #333333;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn-primary {
+  background: #003366;
+  border-color: #003366;
+  color: #FFFFFF;
+}
+
+.btn-primary:hover {
+  background: #004080;
+  border-color: #004080;
+}
+
+.btn:hover {
+  filter: brightness(1.05);
+}
+
+.btn-danger {
+  background: #CC0000;
+  border-color: #CC0000;
+  color: #FFFFFF;
+}
+
+.btn-danger:hover {
+  filter: brightness(1.2);
+}
+
+/* Popup */
+.popup-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+.popup-box {
+  width: 60%;
+  background: #FFFFFF;
+  border: 1px solid #E0E0E0;
+  border-radius: 10px;
+  padding: 20px;
+  animation: fadeIn 0.2s ease-out;
+  color: #333333;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.popup-header {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #003366;
+}
+
+.popup-actions {
+  text-align: right;
+  margin-top: 10px;
+}
+
+.btn-close {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: #F2F2F2;
+  border: 1px solid #E0E0E0;
+  color: #333333;
+  cursor: pointer;
+}
+
+.btn-close:hover {
+  background: #E0E0E0;
+}
+
+/* ==== TABLE FIXED ==== */
+.table-fixed thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 10;
+}
+
+/* ==== ANSIBLE STYLES ==== */
+/* Ansible Status Cards */
+.ansible-status-card {
+  transition: all 0.3s ease;
+}
+
+.ansible-status-card.pending {
+  border-left: 4px solid #6c757d;
+  background-color: #f8f9fa;
+}
+
+.ansible-status-card.installed {
+  border-left: 4px solid #198754;
+  background-color: #d1e7dd;
+}
+
+.ansible-status-card.not-installed {
+  border-left: 4px solid #dc3545;
+  background-color: #f8d7da;
+}
+
+/* Ansible Output Console */
+.ansible-output-line {
+  margin-bottom: 1px;
+  padding: 1px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ansible-output-line .timestamp {
+  color: #6c757d;
+  margin-right: 8px;
+}
+
+.ansible-output-line .server-label {
+  color: #0dcaf0;
+  font-weight: bold;
+  margin-right: 8px;
+}
+
+/* Terminal prompt styling */
+.ansible-output-line.terminal-prompt {
+  color: #e9ecef;
+}
+
+.ansible-output-line.terminal-prompt .prompt {
+  color: #198754;
+  font-weight: bold;
+}
+
+.ansible-output-line.terminal-prompt .command {
+  color: #ffc107;
+  font-weight: bold;
+}
+
+/* Sudo prompt styling */
+.ansible-output-line.sudo-prompt {
+  color: #e9ecef;
+}
+
+.ansible-output-line.sudo-prompt .sudo-message {
+  color: #fd7e14;
+  font-style: italic;
+}
+
+.ansible-output-line.sudo-prompt .password-mask {
+  color: #6c757d;
+}
+
+/* Sudo NOPASSWD status styling */
+.sudo-status-badge {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.sudo-status-success {
+  background-color: #d1e7dd;
+  color: #0f5132;
+  border: 1px solid #badbcc;
+}
+
+.sudo-status-warning {
+  background-color: #fff3cd;
+  color: #664d03;
+  border: 1px solid #ffecb5;
+}
+
+.sudo-status-secondary {
+  background-color: #e2e3e5;
+  color: #41464b;
+  border: 1px solid #d3d6d8;
+}
+
+/* Terminal output styling */
+.ansible-output-line.terminal-output {
+  color: #e9ecef;
+}
+
+.ansible-output-line.terminal-output .output-text {
+  color: #f8f9fa;
+  white-space: pre-wrap;
+}
+
+/* Terminal prompt end styling */
+.ansible-output-line.terminal-prompt-end {
+  color: #e9ecef;
+}
+
+.ansible-output-line.terminal-prompt-end .prompt {
+  color: #198754;
+  font-weight: bold;
+}
+
+/* Info messages */
+.ansible-output-line.info {
+  color: #0dcaf0;
+}
+
+.ansible-output-line.success {
+  color: #198754;
+}
+
+.ansible-output-line.error {
+  color: #dc3545;
+}
+
+.ansible-output-line.warning {
+  color: #ffc107;
+}
+
+/* Console styling */
+#ansible-output-console {
+  background-color: #1a1a1a !important;
+  color: #e9ecef;
+  border: 1px solid #495057;
+  border-radius: 0.375rem;
+}
+
+#ansible-output-console::-webkit-scrollbar {
+  width: 8px;
+}
+
+#ansible-output-console::-webkit-scrollbar-track {
+  background: #2d3748;
+}
+
+#ansible-output-console::-webkit-scrollbar-thumb {
+  background: #4a5568;
+  border-radius: 4px;
+}
+
+#ansible-output-console::-webkit-scrollbar-thumb:hover {
+  background: #718096;
+}
+
+/* Ansible Config Modal Styles */
+.ansible-config-textarea {
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.ansible-config-textarea.error {
+  border-color: #dc3545 !important;
+  box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25) !important;
+}
+
+.ansible-config-textarea.success {
+  border-color: #198754 !important;
+  box-shadow: 0 0 0 0.2rem rgba(25, 135, 84, 0.25) !important;
+}
+
+/* Button loading states */
+.btn-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.btn-loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: auto;
+  border: 2px solid transparent;
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: button-loading-spinner 1s ease infinite;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes button-loading-spinner {
+  from {
+    transform: translate(-50%, -50%) rotate(0turn);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(1turn);
+  }
+}
+
+/* Spin animation for icons */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Cluster info in modal header */
+#current-cluster-name {
+  font-weight: 600;
+}
+
+/* Validation error message */
+.validation-error {
+  color: #dc3545;
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+/* Config status panel */
+#config-status-panel {
+  border-left: 4px solid #0dcaf0;
+  transition: all 0.3s ease;
+}
+
+#config-status-panel.status-success {
+  background-color: #d1edff;
+  border-left-color: #198754;
+  color: #0f5132;
+}
+
+#config-status-panel.status-error {
+  background-color: #f8d7da;
+  border-left-color: #dc3545;
+  color: #721c24;
+}
+
+#config-status-panel.status-warning {
+  background-color: #fff3cd;
+  border-left-color: #ffc107;
+  color: #664d03;
+}
+
+#config-status-panel.status-loading {
+  background-color: #e2e3e5;
+  border-left-color: #6c757d;
+  color: #495057;
+}
+
+#config-status-text {
+  font-weight: 500;
+}
+
+#config-last-check {
+  font-style: italic;
+}
+
+/* Ẩn thanh cuộn trong danh sách playbook */
+#playbook-list {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+
+#playbook-list::-webkit-scrollbar {
+  display: none; /* WebKit browsers (Chrome, Safari, Edge) */
+}
+
+/* Ansible execution output styling */
+#ansible-output {
+  scrollbar-width: thin;
+  scrollbar-color: #6c757d #343a40;
+}
+
+#ansible-output::-webkit-scrollbar {
+  width: 8px;
+}
+
+#ansible-output::-webkit-scrollbar-track {
+  background: #343a40;
+}
+
+#ansible-output::-webkit-scrollbar-thumb {
+  background: #6c757d;
+  border-radius: 4px;
+}
+
+#ansible-output::-webkit-scrollbar-thumb:hover {
+  background: #868e96;
+}
+
+/* Toast Notifications */
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 400px;
+  min-width: 300px;
+  pointer-events: none;
+}
+
+#toast-container > * {
+  pointer-events: auto;
+}
+
+.custom-toast {
+  background: #3b82f6;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 300px;
+  max-width: 400px;
+}
+
+/* Toast animations */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutRight {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.custom-toast {
+  animation: slideInRight 0.3s ease-out;
+}
+
+.custom-toast.toast-exiting {
+  animation: slideOutRight 0.3s ease-out;
+}
 

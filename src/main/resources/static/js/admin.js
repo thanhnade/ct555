@@ -3,10 +3,17 @@
 (function () {
 	'use strict';
 
-	// Global showAlert utility (backward compatibility)
-	// TODO: Migrate to UI toast component (F3) in the future
+	// Global showAlert utility - Uses Toast component if available
 	window.showAlert = function (type, message) {
 		try {
+			// Use Toast component if available (loaded after this file)
+			if (window.Toast && typeof window.Toast.show === 'function') {
+				const toastType = type === 'danger' ? 'error' : type;
+				window.Toast.show(message, toastType);
+				return;
+			}
+
+			// Fallback: Simple alert if Toast not available
 			const clsMap = { error: 'danger', warning: 'warning', success: 'success', info: 'info' };
 			const cls = clsMap[type] || 'info';
 
@@ -15,8 +22,8 @@
 			if (!container) {
 				container = document.createElement('div');
 				Object.assign(container.style, {
-					position: 'fixed', top: '20px', right: '20px',
-					zIndex: '9999', minWidth: '300px'
+					position: 'fixed', bottom: '20px', right: '20px',
+					zIndex: '9999', minWidth: '300px', maxWidth: '400px'
 				});
 				container.id = 'global-alert-container';
 				document.body.appendChild(container);

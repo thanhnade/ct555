@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="vi" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content">
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">⚙️ Thiết lập cụm Kubernetes bằng Ansible</div>
+        <div class="page-subtitle">
+          Thực hiện cài đặt Ansible, Kubernetes, CNI, Ingress, MetalLB trên các server đã gán.
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <select class="form-control" id="cluster-select" style="min-width: 200px;">
+          <option value="">-- Chọn cluster --</option>
+        </select>
+        <button class="btn" onclick="window.location.href='/admin/cluster'">← Quay lại danh sách</button>
+      </div>
+    </div>
+
+    <!-- Step 1: Environment Check -->
+    <div class="table-card">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 1 – Kiểm tra môi trường</div>
+        <button class="btn" id="btn-step-1-check">🔍 Run Check</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Kiểm tra SSH, swapoff, kernel modules, containerd,... trên tất cả server.
+      </div>
+    </div>
+
+    <!-- Step 2: Install Ansible -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 2 – Cài Ansible trên master chính</div>
+        <button class="btn btn-primary" id="btn-step-2-ansible">📦 Install Ansible</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Sau khi cài xong, trạng thái cụm chuyển sang: <strong>Ansible Installed</strong>.
+      </div>
+    </div>
+
+    <!-- Step 3: Install Kubernetes -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 3 – Cài Kubernetes (kubeadm)</div>
+        <button class="btn btn-primary" id="btn-step-3-k8s">☸️ Install Kubernetes</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Init master, join các master/worker còn lại bằng kubeadm và Ansible.
+      </div>
+    </div>
+
+    <!-- Step 4: Install Addons (CNI, Ingress, MetalLB) -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0; flex-wrap: wrap; gap: 8px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 4 – Cài CNI, Ingress, MetalLB</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn" id="btn-step-4-calico">🌐 Install Calico</button>
+          <button class="btn" id="btn-step-4-ingress">🚪 Install Ingress</button>
+          <button class="btn" id="btn-step-4-metallb">⚖️ Install MetalLB</button>
+        </div>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Triển khai các addon cần thiết cho cụm.
+      </div>
+    </div>
+
+    <!-- Step 5: Verify Cluster -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 5 – Verify Cluster</div>
+        <button class="btn btn-primary" id="btn-step-5-verify">✅ Verify</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Sau khi verify thành công, chuyển sang giao diện quản lý kiểu Rancher (Kubernetes Overview).
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/clusterSetup.js"></script>
+</body>
+</html>
+

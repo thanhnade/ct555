@@ -1,6 +1,6 @@
 package com.example.AutoDeployApp.service;
 
-import com.example.AutoDeployApp.entity.User;
+import com.example.AutoDeployApp.entity.UserEntity;
 import com.example.AutoDeployApp.repository.UserRepository;
 import com.example.AutoDeployApp.repository.UserActivityRepository;
 import com.example.AutoDeployApp.entity.UserActivity;
@@ -28,69 +28,73 @@ public class UserService {
     }
 
     @Transactional
-    public User register(String username, String rawPassword) {
+    public UserEntity register(String username, String rawPassword) {
         if (userRepository.existsByUsername(username)) {
             throw new IllegalArgumentException("Tên đăng nhập đã tồn tại");
         }
-        User user = new User();
+        UserEntity user = new UserEntity();
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(rawPassword));
-        // Role mặc định là CLIENT theo cấu hình entity
-        User saved = userRepository.saveAndFlush(user);
+        user.setFullname(username); // Default fullname = username
+        user.setRole("USER"); // Default role = USER
+        user.setTier("STANDARD"); // Default tier = STANDARD
+        user.setStatus("ACTIVE"); // Default status = ACTIVE
+        UserEntity saved = userRepository.saveAndFlush(user);
         return saved;
     }
 
-    public Optional<User> authenticate(String username, String rawPassword) {
+    public Optional<UserEntity> authenticate(String username, String rawPassword) {
         return userRepository.findByUsername(username)
-                .filter(u -> passwordEncoder.matches(rawPassword, u.getPassword()));
+                .filter(u -> passwordEncoder.matches(rawPassword, u.getPassword()))
+                .filter(u -> "ACTIVE".equals(u.getStatus())); // Chỉ cho phép user ACTIVE
     }
 
-    public List<User> findAll() {
+    public List<UserEntity> findAll() {
         return userRepository.findAll();
     }
 
-    public Optional<User> findById(Long id) {
+    public Optional<UserEntity> findById(Long id) {
         return userRepository.findById(id);
     }
 
-    public Optional<User> findByUsername(String username) {
+    public Optional<UserEntity> findByUsername(String username) {
         return userRepository.findByUsername(username);
     }
 
-    public Map<Long, User> findAllByIds(Collection<Long> ids) {
+    public Map<Long, UserEntity> findAllByIds(Collection<Long> ids) {
         if (ids == null || ids.isEmpty()) {
             return Map.of();
         }
         return userRepository.findAllById(ids).stream()
-                .collect(Collectors.toUnmodifiableMap(User::getId, u -> u));
+                .collect(Collectors.toUnmodifiableMap(UserEntity::getId, u -> u));
     }
 
     @Transactional
-    public User createUser(String username, String rawPassword, String role, Integer dataLimitMb, String pathOnServer) {
+    public UserEntity createUser(String fullname, String username, String rawPassword, String role, String tier, String status) {
         if (userRepository.existsByUsername(username)) {
             throw new IllegalArgumentException("Tên đăng nhập đã tồn tại");
         }
-        User user = new User();
+        UserEntity user = new UserEntity();
+        user.setFullname(fullname != null && !fullname.isBlank() ? fullname : username);
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(rawPassword));
-        if (role != null && !role.isBlank())
-            user.setRole(role);
-        if (dataLimitMb != null)
-            user.setDataLimitMb(dataLimitMb);
-        if (pathOnServer != null)
-            user.setPathOnServer(pathOnServer);
+        user.setRole(role != null && !role.isBlank() ? role : "USER");
+        user.setTier(tier != null && !tier.isBlank() ? tier : "STANDARD");
+        user.setStatus(status != null && !status.isBlank() ? status : "ACTIVE");
         return userRepository.saveAndFlush(user);
     }
 
     @Transactional
-    public User updateUser(Long id, String role, Integer dataLimitMb, String pathOnServer) {
-        User user = userRepository.findById(id).orElseThrow();
+    public UserEntity updateUser(Long id, String fullname, String role, String tier, String status) {
+        UserEntity user = userRepository.findById(id).orElseThrow();
+        if (fullname != null && !fullname.isBlank())
+            user.setFullname(fullname);
         if (role != null && !role.isBlank())
             user.setRole(role);
-        if (dataLimitMb != null)
-            user.setDataLimitMb(dataLimitMb);
-        if (pathOnServer != null)
-            user.setPathOnServer(pathOnServer);
+        if (tier != null && !tier.isBlank())
+            user.setTier(tier);
+        if (status != null && !status.isBlank())
+            user.setStatus(status);
         return userRepository.saveAndFlush(user);
     }
 
@@ -101,13 +105,13 @@ public class UserService {
 
     @Transactional
     public void resetPassword(Long id, String newRawPassword) {
-        User user = userRepository.findById(id).orElseThrow();
+        UserEntity user = userRepository.findById(id).orElseThrow();
         user.setPassword(passwordEncoder.encode(newRawPassword));
         userRepository.saveAndFlush(user);
     }
 
     @Transactional
-    public void logActivity(User user, String action, String details, String ip) {
+    public void logActivity(UserEntity user, String action, String details, String ip) {
         UserActivity a = new UserActivity();
         a.setUserId(user != null ? user.getId() : null);
         a.setUsername(user != null ? user.getUsername() : null);

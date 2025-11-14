@@ -6,40 +6,54 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users")
-public class User {
+public class UserEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 100)
+    @Column(nullable = false)
+    private String fullname;
+
+    @Column(unique = true, nullable = false)
     private String username;
 
-    @Column(nullable = false, length = 255)
+    @Column(nullable = false)
     private String password;
 
-    @Column(nullable = false, length = 20)
-    private String role = "CLIENT"; // ADMIN / CLIENT
+    @Column(nullable = false)
+    private String role; // USER, ADMIN
 
-    @Column(name = "data_limit_mb", nullable = false)
-    private Integer dataLimitMb = 1024;
+    @Column(nullable = false)
+    private String tier; // STANDARD, PREMIUM
 
-    @Column(name = "path_on_server", length = 512)
-    private String pathOnServer;
+    @Column(nullable = false)
+    private String status; // INACTIVE, ACTIVE
 
-    @Column(name = "created_at", insertable = false, updatable = false)
-    private LocalDateTime createdAt; // populated by DB default CURRENT_TIMESTAMP
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
 
+    // Getters and Setters
     public Long getId() {
         return id;
     }
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getFullname() {
+        return fullname;
+    }
+
+    public void setFullname(String fullname) {
+        this.fullname = fullname;
     }
 
     public String getUsername() {
@@ -66,20 +80,20 @@ public class User {
         this.role = role;
     }
 
-    public Integer getDataLimitMb() {
-        return dataLimitMb;
+    public String getTier() {
+        return tier;
     }
 
-    public void setDataLimitMb(Integer dataLimitMb) {
-        this.dataLimitMb = dataLimitMb;
+    public void setTier(String tier) {
+        this.tier = tier;
     }
 
-    public String getPathOnServer() {
-        return pathOnServer;
+    public String getStatus() {
+        return status;
     }
 
-    public void setPathOnServer(String pathOnServer) {
-        this.pathOnServer = pathOnServer;
+    public void setStatus(String status) {
+        this.status = status;
     }
 
     public LocalDateTime getCreatedAt() {
@@ -90,3 +104,4 @@ public class User {
         this.createdAt = createdAt;
     }
 }
+

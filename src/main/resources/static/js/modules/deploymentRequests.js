@@ -20,7 +20,7 @@
 		if (!tbody) return;
 
 		try {
-			tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Đang tải...</td></tr>';
+			tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td></tr>';
 
 			const statusFilter = document.getElementById('deployment-status-filter');
 			const status = statusFilter ? statusFilter.value : '';
@@ -29,7 +29,7 @@
 			const data = await window.ApiClient.get(url);
 
 			if (!data || data.length === 0) {
-				tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">Không có yêu cầu nào${status ? ' với trạng thái này' : ''}</td></tr>`;
+				tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="color: #666666; padding: 20px;">Không có yêu cầu nào${status ? ' với trạng thái này' : ''}</td></tr>`;
 				return;
 			}
 
@@ -38,100 +38,76 @@
 				const tr = document.createElement('tr');
 				const createdAt = req.createdAt ? new Date(req.createdAt).toLocaleString('vi-VN') : 'N/A';
 
-				// Status badge
+				// Status badge (chip style like in mẫu)
 				let statusBadge = '';
+				let chipClass = 'yellow';
 				if (req.status === 'PENDING') {
-					statusBadge = '<span class="badge bg-warning">⏳ Chờ xử lý</span>';
+					statusBadge = 'Pending';
+					chipClass = 'yellow';
 				} else if (req.status === 'RUNNING') {
-					statusBadge = '<span class="badge bg-success">✅ Đang chạy</span>';
+					statusBadge = 'Running';
+					chipClass = 'green';
 				} else if (req.status === 'PAUSED') {
-					statusBadge = '<span class="badge bg-secondary text-dark">⏸️ Tạm dừng</span>';
+					statusBadge = 'Paused';
+					chipClass = 'yellow';
 				} else if (req.status === 'ERROR') {
-					statusBadge = '<span class="badge bg-danger">❌ Lỗi</span>';
+					statusBadge = 'Error';
+					chipClass = 'red';
 				} else if (req.status === 'REJECTED') {
-					statusBadge = '<span class="badge bg-secondary">🚫 Từ chối</span>';
+					statusBadge = 'Rejected';
+					chipClass = 'red';
 				} else if (req.status === 'DELETED') {
-					statusBadge = '<span class="badge bg-secondary">🗑️ Đã đánh dấu xóa</span>';
+					statusBadge = 'Deleted';
+					chipClass = 'yellow';
 				} else {
-					statusBadge = `<span class="badge bg-secondary">${escapeHtml(req.status || '')}</span>`;
+					statusBadge = escapeHtml(req.status || '');
+					chipClass = 'yellow';
 				}
+				statusBadge = `<span class="chip ${chipClass}">${statusBadge}</span>`;
 
 				const currentReplicas = Number.isFinite(Number(req.replicas)) ? Number(req.replicas) : 1;
 				const hasRequestedReplicas = Number.isFinite(Number(req.replicasRequested));
 				const requestedReplicas = hasRequestedReplicas ? Number(req.replicasRequested) : currentReplicas;
 
-				// Action buttons
-				let actionBtn = '';
+				// Action buttons (giống mẫu: Xem, Duyệt, Từ chối)
+				let actionButtons = '';
 				if (req.status === 'DELETED') {
-					actionBtn = '';
+					actionButtons = '';
 				} else if (req.status === 'PENDING') {
-					actionBtn = `
-						<button class="btn btn-sm btn-outline-primary" onclick="window.DeploymentRequestsModule.viewDeploymentRequest(${req.id})" title="Xem yêu cầu">
-							<i class="bi bi-eye"></i> Xem
-						</button>
-						<button class="btn btn-sm btn-outline-secondary" onclick="window.DeploymentRequestsModule.rejectDeploymentRequest(${req.id})" title="Từ chối yêu cầu này">
-							<i class="bi bi-x-circle"></i> Từ chối
-						</button>`;
+					actionButtons = `
+						<button class="btn" onclick="window.DeploymentRequestsModule.viewDeploymentRequest(${req.id})">Xem</button>
+						<button class="btn btn-primary" onclick="window.DeploymentRequestsModule.approveDeploymentRequest(${req.id})">Duyệt</button>
+						<button class="btn" onclick="window.DeploymentRequestsModule.rejectDeploymentRequest(${req.id})">Từ chối</button>`;
 				} else if (req.status === 'RUNNING' || req.status === 'PAUSED') {
-					actionBtn = `
-						<button class="btn btn-sm btn-outline-success" onclick="window.DeploymentRequestsModule.promptScaleDeployment(${req.id}, ${requestedReplicas})" title="Điều chỉnh số replicas">
-							<i class="bi bi-sliders"></i> ${req.status === 'PAUSED' ? 'Resume / Scale' : 'Scale'}
-						</button>`;
+					actionButtons = `
+						<button class="btn" onclick="window.DeploymentRequestsModule.viewDeploymentRequest(${req.id})">Xem</button>
+						<button class="btn" onclick="window.DeploymentRequestsModule.promptScaleDeployment(${req.id}, ${requestedReplicas})">Scale</button>`;
 				} else if (req.status === 'ERROR') {
-					actionBtn = `<button class="btn btn-sm btn-warning" onclick="window.DeploymentRequestsModule.retryDeploymentRequest(${req.id})" title="Thử triển khai lại">
-						<i class="bi bi-arrow-repeat"></i> Retry
-					</button>`;
+					actionButtons = `
+						<button class="btn" onclick="window.DeploymentRequestsModule.viewDeploymentRequest(${req.id})">Xem</button>
+						<button class="btn" onclick="window.DeploymentRequestsModule.retryDeploymentRequest(${req.id})">Retry</button>`;
 				} else {
-					actionBtn = `<button class="btn btn-sm btn-secondary" disabled>${escapeHtml(req.status || '')}</button>`;
+					actionButtons = `<button class="btn" onclick="window.DeploymentRequestsModule.viewDeploymentRequest(${req.id})">Xem</button>`;
 				}
 
-				const diagnosticsBtn = `<button class="btn btn-sm btn-outline-dark" onclick="window.DeploymentRequestsModule.viewDeploymentDiagnostics(${req.id})" title="Thu thập diagnostics">
-					<i class="bi bi-activity"></i> Diagnostics
-				</button>`;
-
-				const deleteBtn = `<button class="btn btn-sm btn-outline-danger" onclick="window.DeploymentRequestsModule.deleteDeploymentRequest(${req.id}, '${escapeHtml(req.appName || '').replace(/'/g, "\\'")}', '${escapeHtml(req.k8sNamespace || '').replace(/'/g, "\\'")}')" title="Delete deployment request and namespace">
-					<i class="bi bi-trash"></i> Delete
-				</button>`;
-
-				const viewLogsBtn = `<button class="btn btn-sm btn-outline-info" onclick="window.DeploymentRequestsModule.viewDeploymentLogs(${req.id})" title="Xem logs">
-					<i class="bi bi-file-text"></i> Logs
-				</button>`;
-
-				let accessUrlCell = '<td><small class="text-muted">-</small></td>';
-				if (req.accessUrl) {
-					const fullUrl = escapeHtml(req.accessUrl);
-					accessUrlCell = `<td><a href="${fullUrl}" target="_blank" class="text-primary" title="${fullUrl}"><code>${fullUrl}</code> <i class="bi bi-box-arrow-up-right"></i></a></td>`;
-				}
-
-				const pendingActionNote = hasRequestedReplicas
-					? `<div class="badge bg-info text-dark mt-1">User yêu cầu: ${currentReplicas} → ${requestedReplicas}</div>`
-					: '';
-
+				const uploadedDate = req.createdAt ? new Date(req.createdAt).toLocaleDateString('vi-VN') : 'N/A';
+				const dockerImage = escapeHtml(req.dockerImage || 'N/A');
+				
 				tr.innerHTML = `
-					<td>
-						<strong>${escapeHtml(req.appName || `#${req.id}`)}</strong>
-						${pendingActionNote}
-					</td>
-					<td><code>${escapeHtml(req.dockerImage || 'N/A')}</code></td>
+					<td>${escapeHtml(req.appName || `#${req.id}`)}</td>
 					<td>${escapeHtml(req.username || 'Unknown')}</td>
-					<td><code>${escapeHtml(req.k8sNamespace || 'N/A')}</code></td>
+					<td>${uploadedDate}</td>
+					<td><code style="font-size: 12px;">${dockerImage}</code></td>
 					<td>${statusBadge}</td>
-					${accessUrlCell}
-					<td><small>${createdAt}</small></td>
 					<td>
-						<div class="d-flex gap-1 flex-wrap">
-							${actionBtn}
-							${viewLogsBtn}
-							${diagnosticsBtn}
-							${deleteBtn}
-						</div>
+						${actionButtons}
 					</td>
 				`;
 				tbody.appendChild(tr);
 			});
 		} catch (error) {
 			if (tbody) {
-				tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Lỗi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}</td></tr>`;
+				tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="color: #dc3545; padding: 20px;">Lỗi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}</td></tr>`;
 			}
 			console.error('loadDeploymentRequests error:', error);
 			if (typeof window.showAlert === 'function') {
@@ -145,7 +121,12 @@
 	// View deployment logs
 	function viewDeploymentLogs(id) {
 		currentViewingDeploymentId = id;
+		const logsSection = document.getElementById('deployment-logs-section');
+		if (logsSection) {
+			logsSection.style.display = 'block';
+		}
 		loadDeploymentLogs(id);
+		startPollingDeploymentLogs(id);
 	}
 
 	// Load deployment logs from API
@@ -269,6 +250,20 @@
 			window.showAlert('info', 'Đã tải diagnostics cho deployment #' + id);
 		} catch (error) {
 			window.showAlert('error', error.message || 'Không thể lấy diagnostics');
+		}
+	}
+
+	// Approve deployment request (alias for processDeploymentRequest)
+	async function approveDeploymentRequest(id) {
+		if (!confirm('Bạn có chắc chắn muốn duyệt yêu cầu triển khai này?')) {
+			return;
+		}
+		try {
+			await processDeploymentRequest(id);
+			window.showAlert('success', 'Yêu cầu đã được duyệt và đang triển khai.');
+			await loadList();
+		} catch (e) {
+			window.showAlert('error', 'Không thể duyệt: ' + (e.message || 'Lỗi không xác định'));
 		}
 	}
 
@@ -844,6 +839,7 @@
 		promptScaleDeployment,
 		deleteDeploymentRequest,
 		viewDeploymentDiagnostics,
+		approveDeploymentRequest,
 		rejectDeploymentRequest,
 		viewDeploymentRequest,
 		processDeploymentRequest,

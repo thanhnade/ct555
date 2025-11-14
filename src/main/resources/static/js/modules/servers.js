@@ -10,11 +10,18 @@
 	// Auto-reconnect interval (45 seconds)
 	let autoReconnectInterval = null;
 
+	// Helper: Escape HTML
+	function escapeHtml(text) {
+		if (!text) return '';
+		const div = document.createElement('div');
+		div.textContent = text;
+		return div.innerHTML;
+	}
+
 	// Load servers list
 	async function loadServers() {
-		const tbodyConn = document.getElementById('servers-connected-tbody');
-		const tbodyHist = document.getElementById('servers-history-tbody');
-		if (!tbodyConn || !tbodyHist) return;
+		const tbody = document.getElementById('servers-tbody');
+		if (!tbody) return;
 
 		// Ensure ApiClient is loaded
 		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
@@ -29,130 +36,492 @@
 				window.ApiClient.get('/admin/servers/connected').catch(() => [])
 			]);
 
-			tbodyConn.innerHTML = '';
-			tbodyHist.innerHTML = '';
+			tbody.innerHTML = '';
+
+			if (!data || data.length === 0) {
+				tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="color: #666666; padding: 20px;">Chưa có server nào</td></tr>`;
+				return;
+			}
 
 			(data || []).forEach(s => {
 				const tr = document.createElement('tr');
 				const isConnected = (connectedIds || []).includes(s.id);
-				const statusCell = isConnected
-					? `<span class="badge bg-success">CONNECTED</span>`
-					: `
-						<select class="form-select form-select-sm" data-id="${s.id}" data-field="status">
-							<option ${s.status === 'OFFLINE' ? 'selected' : ''}>OFFLINE</option>
-							<option ${s.status === 'ONLINE' ? 'selected' : ''}>ONLINE</option>
-						</select>`;
+				const statusChip = isConnected
+					? '<span class="chip green">CONNECTED</span>'
+					: (s.status === 'ONLINE' 
+						? '<span class="chip blue">ONLINE</span>' 
+						: '<span class="chip red">OFFLINE</span>');
+				
 				const reconnectOrDisconnect = isConnected
-					? `<button class="btn btn-sm btn-outline-danger me-1" onclick="window.ServersModule.disconnectServer(${s.id})">Ngắt kết nối</button>`
-					: `<button class="btn btn-sm btn-outline-secondary me-1" onclick="window.ServersModule.promptReconnect(${s.id})">Kết nối lại</button>`;
+					? `<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.ServersModule.disconnectServer(${s.id})" title="Ngắt kết nối">🔌</button>`
+					: `<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.ServersModule.openReconnectModal(${s.id})" title="Kết nối lại">🔌</button>`;
+				
 				tr.innerHTML = `
-					<td>${s.id}</td>
-					<td><input class="form-control form-control-sm" value="${s.host || ''}" data-id="${s.id}" data-field="host" data-old-host="${s.host || ''}" /></td>
-					<td><input type="number" class="form-control form-control-sm" value="${s.port || 22}" data-id="${s.id}" data-field="port" data-old-port="${s.port != null ? s.port : ''}" /></td>
-					<td><input class="form-control form-control-sm" value="${s.username || ''}" data-id="${s.id}" data-field="username" data-old-username="${s.username || ''}" /></td>
-					<td>${statusCell}</td>
-					<td>${s.lastConnected ? new Date(s.lastConnected).toLocaleString() : ''}</td>
-					<td class="text-nowrap">
-						<button class="btn btn-sm btn-primary me-1" onclick="window.ServersModule.saveServer(${s.id}, this)">Lưu</button>
-						<button class="btn btn-sm btn-danger me-1" onclick="window.ServersModule.deleteServer(${s.id})">Xoá</button>
+					<td><strong>${escapeHtml(s.host || '-')}</strong></td>
+					<td>${s.port || 22}</td>
+					<td>${escapeHtml(s.username || '-')}</td>
+					<td>${statusChip}</td>
+					<td style="white-space: nowrap;">
+						<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.ServersModule.editServer(${s.id})" title="Sửa">✏️</button>
 						${reconnectOrDisconnect}
-						${isConnected ? `<button class="btn btn-sm btn-dark" onclick="window.ServersModule.openTerminal(${s.id}, true)">CLI</button>` : ''}
+						${isConnected ? `<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.ServersModule.openTerminal(${s.id}, true)" title="Terminal">💻</button>` : ''}
+						<button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="window.ServersModule.deleteServer(${s.id})" title="Xóa">🗑️</button>
 					</td>
 				`;
-				if (isConnected) tbodyConn.appendChild(tr);
-				else tbodyHist.appendChild(tr);
+				tbody.appendChild(tr);
 			});
 		} catch (error) {
-			window.showAlert('error', 'Lỗi tải danh sách: ' + (error.message || 'Error'));
+			if (tbody) {
+				const errorMsg = (window.I18n && window.I18n.t) 
+					? window.I18n.t('admin.server.loadError') 
+					: 'Lỗi tải danh sách';
+				tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="color: #CC0000; padding: 20px;">${errorMsg}: ${(error.message || 'Error')}</td></tr>`;
+			}
 			console.error('loadServers error:', error);
 		}
+	}
+
+	// Validate server form
+	function validateServerForm(form, isEdit = false) {
+		const errors = [];
+		
+		if (!form) {
+			errors.push('Form không tồn tại');
+			return errors;
+		}
+		
+		const hostEl = form.querySelector('[name="host"]') || form.elements?.host;
+		const host = hostEl?.value?.trim() || '';
+		if (!host) {
+			errors.push('Host/IP không được để trống');
+		} else if (!/^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-zA-Z0-9.-]+$/.test(host)) {
+			errors.push('Host/IP không hợp lệ');
+		}
+		
+		const portEl = form.querySelector('[name="port"]') || form.elements?.port;
+		const port = parseInt(portEl?.value || '22', 10);
+		if (isNaN(port) || port < 1 || port > 65535) {
+			errors.push('Port phải là số từ 1 đến 65535');
+		}
+		
+		const usernameEl = form.querySelector('[name="username"]') || form.elements?.username;
+		const username = usernameEl?.value?.trim() || '';
+		if (!username) {
+			errors.push('Username không được để trống');
+		}
+		
+		const passwordEl = form.querySelector('[name="password"]') || form.elements?.password;
+		const password = passwordEl?.value || '';
+		if (!isEdit && !password) {
+			errors.push('Password không được để trống khi thêm server mới');
+		}
+		
+		return errors;
+	}
+
+	// Show form error
+	function showCreateServerError(message) {
+		const errorEl = document.getElementById('create-server-error');
+		if (errorEl) {
+			errorEl.textContent = message;
+			errorEl.style.display = 'block';
+			setTimeout(() => {
+				errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+			}, 100);
+		}
+	}
+
+	// Hide form error
+	function hideCreateServerError() {
+		const errorEl = document.getElementById('create-server-error');
+		if (errorEl) {
+			errorEl.style.display = 'none';
+			errorEl.textContent = '';
+		}
+	}
+
+	// Show edit server error
+	function showEditServerError(message) {
+		const errorEl = document.getElementById('edit-server-error');
+		if (errorEl) {
+			errorEl.textContent = message;
+			errorEl.style.display = 'block';
+		}
+	}
+
+	// Hide edit server error
+	function hideEditServerError() {
+		const errorEl = document.getElementById('edit-server-error');
+		if (errorEl) {
+			errorEl.style.display = 'none';
+			errorEl.textContent = '';
+		}
+	}
+
+	// Show reconnect server error
+	function showReconnectServerError(message) {
+		const errorEl = document.getElementById('reconnect-server-error');
+		if (errorEl) {
+			errorEl.textContent = message;
+			errorEl.style.display = 'block';
+		}
+	}
+
+	// Hide reconnect server error
+	function hideReconnectServerError() {
+		const errorEl = document.getElementById('reconnect-server-error');
+		if (errorEl) {
+			errorEl.style.display = 'none';
+			errorEl.textContent = '';
+		}
+	}
+
+	// Set form loading state
+	function setCreateFormLoading(loading) {
+		const submitBtn = document.getElementById('create-server-submit-btn');
+		const submitText = document.getElementById('create-server-text');
+		const submitLoading = document.getElementById('create-server-loading');
+		
+		if (submitBtn) submitBtn.disabled = loading;
+		if (submitText) submitText.style.display = loading ? 'none' : 'inline';
+		if (submitLoading) submitLoading.style.display = loading ? 'inline' : 'none';
 	}
 
 	// Create server
 	async function createServer(ev) {
 		ev.preventDefault();
-		const f = ev.target;
+		
+		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
+
+		const form = ev.target;
+		hideCreateServerError();
+
+		// Validate
+		const errors = validateServerForm(form, false);
+		if (errors.length > 0) {
+			showCreateServerError(errors.join(', '));
+			return;
+		}
+
+		const hostEl = form.querySelector('[name="host"]') || form.elements?.host;
+		const portEl = form.querySelector('[name="port"]') || form.elements?.port;
+		const usernameEl = form.querySelector('[name="username"]') || form.elements?.username;
+		const passwordEl = form.querySelector('[name="password"]') || form.elements?.password;
+
 		const body = {
-			host: f.host.value.trim(),
-			port: parseInt(f.port.value, 10) || 22,
-			username: f.username.value.trim(),
-			password: f.password.value
+			host: (hostEl?.value || '').trim(),
+			port: parseInt(portEl?.value || '22', 10),
+			username: (usernameEl?.value || '').trim(),
+			password: passwordEl?.value || ''
 		};
 
-		const btn = f.querySelector('button[type="submit"]');
+		setCreateFormLoading(true);
+
 		try {
-			if (btn) {
-				btn.disabled = true;
-				btn.textContent = 'Đang thêm...';
-			}
 			await window.ApiClient.post('/admin/servers', body);
 			const successMsg = (window.I18n && window.I18n.t) 
 				? window.I18n.t('admin.server.create.success') 
 				: 'Thêm máy chủ thành công';
 			window.showAlert('success', successMsg);
-			f.reset();
-			if (f.port) f.port.value = 22;
+			
+			// Close accordion and reset form
+			const accordion = document.getElementById('server-create-accordion');
+			if (accordion) accordion.classList.remove('open');
+			
+			resetServerForm();
 			await loadServers();
-		} catch (err) {
-			window.showAlert('error', err.message || 'Thêm server thất bại');
+		} catch (error) {
+			let errorMessage = 'Thêm server thất bại';
+			if (error.message) {
+				errorMessage = error.message;
+			} else if (error.response && error.response.data) {
+				if (typeof error.response.data === 'string') {
+					errorMessage = error.response.data;
+				} else if (error.response.data.message) {
+					errorMessage = error.response.data.message;
+				}
+			}
+			
+			showCreateServerError(errorMessage);
+			window.showAlert('error', errorMessage);
 		} finally {
-			if (btn) {
-				btn.disabled = false;
-				btn.textContent = 'Thêm máy chủ';
+			setCreateFormLoading(false);
+		}
+	}
+
+	// Reset form
+	function resetServerForm() {
+		const form = document.getElementById('create-server-form');
+		if (form) {
+			form.reset();
+			hideCreateServerError();
+			
+			// Reset to default values
+			const portEl = form.querySelector('[name="port"]') || form.elements?.port;
+			if (portEl) portEl.value = 22;
+			
+			// Focus on first field
+			const firstInput = form.querySelector('input');
+			if (firstInput) {
+				setTimeout(() => firstInput.focus(), 100);
 			}
 		}
 	}
 
-	// Save server
-	async function saveServer(id, btn) {
-		const row = btn ? btn.closest('tr') : null;
-		const q = (sel) => row ? row.querySelector(sel) : document.querySelector(sel);
-		const hostEl = q(`input[data-id="${id}"][data-field="host"]`);
-		const portEl = q(`input[data-id="${id}"][data-field="port"]`);
-		const userEl = q(`input[data-id="${id}"][data-field="username"]`);
-
-		if (!hostEl || !portEl || !userEl) {
-			window.showAlert('error', 'Không tìm thấy các trường dữ liệu');
+	// Edit server - Load server data and show modal
+	async function editServer(id) {
+		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
 			return;
 		}
 
-		const host = hostEl.value.trim();
-		const port = parseInt(portEl.value, 10);
-		const username = userEl.value.trim();
+		try {
+			const servers = await window.ApiClient.get('/admin/servers');
+			const server = Array.isArray(servers) ? servers.find(s => s.id === id) : null;
+			
+			if (!server) {
+				window.showAlert('error', 'Không tìm thấy server');
+				return;
+			}
 
-		const oldHost = hostEl.getAttribute('data-old-host') || '';
-		const oldPortStr = portEl.getAttribute('data-old-port') || '';
-		const oldPort = oldPortStr === '' ? null : parseInt(oldPortStr, 10);
-		const oldUsername = userEl.getAttribute('data-old-username') || '';
+			// Fill form
+			document.getElementById('edit-server-id').value = server.id || '';
+			document.getElementById('edit-server-host').value = server.host || '';
+			document.getElementById('edit-server-port').value = server.port || 22;
+			document.getElementById('edit-server-username').value = server.username || '';
+			document.getElementById('edit-server-status').value = server.status || 'OFFLINE';
 
-		const statusSel = q(`select[data-id="${id}"][data-field="status"]`);
-		const body = { host, port, username };
-		if (statusSel) body.status = statusSel.value;
+			// Clear password
+			document.getElementById('edit-server-password').value = '';
+
+			// Update title
+			const titleEl = document.getElementById('edit-server-title');
+			if (titleEl) {
+				titleEl.textContent = `✏️ Sửa Server: ${escapeHtml(server.host || 'Unknown')}`;
+			}
+
+			// Hide error
+			hideEditServerError();
+
+			// Show modal
+			openEditServerPopup();
+		} catch (error) {
+			window.showAlert('error', 'Không thể tải thông tin server: ' + (error.message || 'Lỗi không xác định'));
+		}
+	}
+
+	// Save edit server - Save from modal
+	async function saveEditServer() {
+		if (!window.ApiClient || typeof window.ApiClient.put !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
+
+		hideEditServerError();
+
+		const form = document.getElementById('edit-server-form');
+		if (!form) {
+			showEditServerError('Form không tồn tại');
+			return;
+		}
+
+		const id = document.getElementById('edit-server-id').value;
+		if (!id) {
+			showEditServerError('ID server không hợp lệ');
+			return;
+		}
+
+		// Validate
+		const errors = validateServerForm(form, true);
+		if (errors.length > 0) {
+			showEditServerError(errors.join(', '));
+			return;
+		}
+
+		const hostEl = form.querySelector('[name="host"]') || form.elements?.host;
+		const portEl = form.querySelector('[name="port"]') || form.elements?.port;
+		const usernameEl = form.querySelector('[name="username"]') || form.elements?.username;
+		const passwordEl = form.querySelector('[name="password"]') || form.elements?.password;
+		const statusEl = form.querySelector('[name="status"]') || form.elements?.status;
+
+		const body = {
+			host: (hostEl?.value || '').trim(),
+			port: parseInt(portEl?.value || '22', 10),
+			username: (usernameEl?.value || '').trim(),
+			status: statusEl?.value || 'OFFLINE'
+		};
+
+		// Only include password if provided
+		const password = passwordEl?.value || '';
+		if (password) {
+			body.password = password;
+		}
+
+		// Set loading state
+		const saveBtn = document.getElementById('save-edit-server-btn');
+		const saveText = document.getElementById('save-edit-text');
+		const saveLoading = document.getElementById('save-edit-loading');
+		
+		if (saveBtn) saveBtn.disabled = true;
+		if (saveText) saveText.style.display = 'none';
+		if (saveLoading) saveLoading.style.display = 'inline';
 
 		try {
-			if (btn) btn.disabled = true;
 			await window.ApiClient.put(`/admin/servers/${id}`, body);
-			const changes = [];
-			if (oldHost !== host) changes.push(`host: "${oldHost}" -> "${host}"`);
-			if ((oldPort ?? null) !== (isNaN(port) ? null : port)) changes.push(`port: "${oldPort ?? ''}" -> "${isNaN(port) ? '' : port}"`);
-			if (oldUsername !== username) changes.push(`username: "${oldUsername}" -> "${username}"`);
-			const successMsg = changes.length 
-				? `Đã lưu máy ${id}: ${changes.join(', ')}` 
-				: ((window.I18n && window.I18n.t) 
-					? window.I18n.t('admin.server.update.success') 
-					: `Lưu máy ${id} thành công`);
-			window.showAlert('success', successMsg);
+			
+			// Close modal
+			closeEditServerPopup();
+
+			window.showAlert('success', 'Đã lưu thay đổi thành công');
 			await loadServers();
-		} catch (e) {
-			window.showAlert('error', e.message || `Lưu máy ${id} thất bại`);
+		} catch (error) {
+			const errorMsg = error.message || 'Lưu server thất bại';
+			showEditServerError(errorMsg);
+			window.showAlert('error', errorMsg);
 		} finally {
-			if (btn) btn.disabled = false;
+			// Reset loading state
+			if (saveBtn) saveBtn.disabled = false;
+			if (saveText) saveText.style.display = 'inline';
+			if (saveLoading) saveLoading.style.display = 'none';
 		}
+	}
+
+	// Open edit server popup
+	function openEditServerPopup() {
+		const popup = document.getElementById('editServerPopup');
+		if (popup) popup.style.display = 'flex';
+	}
+
+	// Close edit server popup
+	function closeEditServerPopup() {
+		const popup = document.getElementById('editServerPopup');
+		if (popup) popup.style.display = 'none';
+		const form = document.getElementById('edit-server-form');
+		if (form) form.reset();
+		hideEditServerError();
+	}
+
+	// Open reconnect modal
+	async function openReconnectModal(id) {
+		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
+
+		// Thử check-status trước (có thể tự động connect bằng key nếu có)
+		try {
+			await window.ApiClient.post('/admin/servers/check-status', {});
+			const connected = await window.ApiClient.get('/admin/servers/connected').catch(() => []);
+			if (Array.isArray(connected) && connected.includes(id)) {
+				await loadServers();
+				return;
+			}
+		} catch (_) { /* ignore */ }
+
+		try {
+			const servers = await window.ApiClient.get('/admin/servers');
+			const server = Array.isArray(servers) ? servers.find(s => s.id === id) : null;
+			
+			if (!server) {
+				window.showAlert('error', 'Không tìm thấy server');
+				return;
+			}
+
+			// Fill form
+			document.getElementById('reconnect-server-id').value = id || '';
+			document.getElementById('reconnect-server-host').value = server.host || '';
+
+			// Update title
+			const titleEl = document.getElementById('reconnect-server-title');
+			if (titleEl) {
+				titleEl.textContent = `🔌 Kết nối lại: ${escapeHtml(server.host || 'Unknown')}`;
+			}
+
+			// Clear password
+			document.getElementById('reconnect-server-password').value = '';
+			hideReconnectServerError();
+
+			// Show modal
+			const popup = document.getElementById('reconnectServerPopup');
+			if (popup) popup.style.display = 'flex';
+		} catch (error) {
+			window.showAlert('error', 'Không thể tải thông tin server: ' + (error.message || 'Lỗi không xác định'));
+		}
+	}
+
+	// Save reconnect - Save from modal
+	async function saveReconnect() {
+		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
+
+		hideReconnectServerError();
+
+		const id = document.getElementById('reconnect-server-id').value;
+		const passwordEl = document.getElementById('reconnect-server-password');
+		const password = passwordEl?.value || '';
+
+		if (!id) {
+			showReconnectServerError('ID server không hợp lệ');
+			return;
+		}
+
+		if (!password) {
+			showReconnectServerError('Password không được để trống');
+			return;
+		}
+
+		// Set loading state
+		const saveBtn = document.getElementById('save-reconnect-btn');
+		const saveText = document.getElementById('save-reconnect-text');
+		const saveLoading = document.getElementById('save-reconnect-loading');
+		
+		if (saveBtn) saveBtn.disabled = true;
+		if (saveText) saveText.style.display = 'none';
+		if (saveLoading) saveLoading.style.display = 'inline';
+
+		try {
+			await window.ApiClient.post(`/admin/servers/${id}/reconnect`, { password: password });
+			
+			// Close modal
+			closeReconnectServerPopup();
+
+			window.showAlert('success', 'Đã kết nối lại thành công');
+			await loadServers();
+		} catch (error) {
+			const errorMsg = error.message || 'Kết nối lại thất bại';
+			showReconnectServerError(errorMsg);
+			window.showAlert('error', errorMsg);
+		} finally {
+			// Reset loading state
+			if (saveBtn) saveBtn.disabled = false;
+			if (saveText) saveText.style.display = 'inline';
+			if (saveLoading) saveLoading.style.display = 'none';
+		}
+	}
+
+	// Close reconnect server popup
+	function closeReconnectServerPopup() {
+		const popup = document.getElementById('reconnectServerPopup');
+		if (popup) popup.style.display = 'none';
+		const form = document.getElementById('reconnect-server-form');
+		if (form) form.reset();
+		hideReconnectServerError();
 	}
 
 	// Delete server
 	async function deleteServer(id) {
-		if (!confirm('Xoá server này?')) return;
+		if (!confirm('Bạn có chắc chắn muốn xóa server này?')) return;
+		
+		if (!window.ApiClient || typeof window.ApiClient.delete !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
+
 		try {
 			await window.ApiClient.delete(`/admin/servers/${id}`);
 			const successMsg = (window.I18n && window.I18n.t) 
@@ -167,6 +536,11 @@
 
 	// Disconnect server
 	async function disconnectServer(id) {
+		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
+
 		try {
 			await window.ApiClient.post(`/admin/servers/${id}/disconnect`, {});
 			const successMsg = (window.I18n && window.I18n.t) 
@@ -179,37 +553,18 @@
 		}
 	}
 
-	// Prompt reconnect
-	async function promptReconnect(id) {
-		// Thử check-status trước (có thể tự động connect bằng key nếu có)
-		try {
-			await window.ApiClient.post('/admin/servers/check-status', {});
-			const connected = await window.ApiClient.get('/admin/servers/connected').catch(() => []);
-			if (Array.isArray(connected) && connected.includes(id)) {
-				await loadServers();
-				return;
-			}
-		} catch (_) { /* ignore */ }
-
-		const pw = prompt('SSH key không khả dụng hoặc kết nối bằng key thất bại. Nhập mật khẩu để kết nối lại:');
-		if (!pw) return;
-
-		try {
-			await window.ApiClient.post(`/admin/servers/${id}/reconnect`, { password: pw });
-			await loadServers();
-			window.showAlert('success', 'Đã kết nối lại thành công');
-		} catch (err) {
-			window.showAlert('error', err.message || 'Kết nối lại thất bại');
-		}
-	}
-
 	// Check server status
 	async function checkServerStatus() {
-		const btnCheck = document.getElementById('btn-check-status');
+		const btnCheck = document.getElementById('check-status-btn');
+
+		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
 
 		if (btnCheck) {
 			btnCheck.disabled = true;
-			btnCheck.textContent = 'Đang kiểm tra...';
+			btnCheck.textContent = '⏳ Đang kiểm tra...';
 		}
 
 		try {
@@ -221,22 +576,48 @@
 		} finally {
 			if (btnCheck) {
 				btnCheck.disabled = false;
-				btnCheck.textContent = 'Kiểm tra trạng thái';
+				btnCheck.textContent = '🔍 Kiểm tra trạng thái';
 			}
 		}
 	}
 
-	// Terminal functions (tạm thời giữ trong module này)
+	// Terminal functions
 	function ensureXTerm() {
 		if (term) return term;
 		const container = document.getElementById('term-output');
 		if (!container) return null;
 		term = new window.Terminal({
-			fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-			fontSize: 13,
-			theme: { background: '#0b1020' },
+			fontFamily: '"Consolas", "Monaco", "Courier New", monospace',
+			fontSize: 14,
+			lineHeight: 1.4,
+			theme: {
+				background: '#FFFFFF',
+				foreground: '#1a1a1a',
+				cursor: '#003366',
+				cursorAccent: '#FFFFFF',
+				selection: 'rgba(0, 51, 102, 0.2)',
+				black: '#000000',
+				red: '#CC0000',
+				green: '#00AA00',
+				yellow: '#CCAA00',
+				blue: '#0066CC',
+				magenta: '#CC00CC',
+				cyan: '#00AAAA',
+				white: '#CCCCCC',
+				brightBlack: '#666666',
+				brightRed: '#FF5555',
+				brightGreen: '#55FF55',
+				brightYellow: '#FFFF55',
+				brightBlue: '#5555FF',
+				brightMagenta: '#FF55FF',
+				brightCyan: '#55FFFF',
+				brightWhite: '#FFFFFF'
+			},
 			cursorBlink: true,
+			cursorStyle: 'block',
 			convertEol: true,
+			scrollback: 1000,
+			tabStopWidth: 4,
 		});
 		term.open(container);
 		return term;
@@ -279,16 +660,13 @@
 			}
 		});
 
-		// Xử lý messages (có thể là text hoặc JSON)
+		// Xử lý messages
 		termWS.onMessage((data) => {
-			// Nếu là string, hiển thị trực tiếp
 			if (typeof data === 'string') {
 				appendTerm(data);
 			} else if (data && typeof data === 'object' && data.message) {
-				// Nếu là object có message, hiển thị message
 				appendTerm(data.message);
 			} else {
-				// Fallback: stringify object
 				appendTerm(JSON.stringify(data));
 			}
 		});
@@ -319,67 +697,104 @@
 			}
 		});
 
-		// Xử lý messages (có thể là text hoặc JSON)
+		// Xử lý messages
 		termWS.onMessage((data) => {
-			// Nếu là string, hiển thị trực tiếp
 			if (typeof data === 'string') {
 				appendTerm(data);
 			} else if (data && typeof data === 'object' && data.message) {
-				// Nếu là object có message, hiển thị message
 				appendTerm(data.message);
 			} else {
-				// Fallback: stringify object
 				appendTerm(JSON.stringify(data));
 			}
 		});
 	}
 
 	function openTerminal(id, isConnected) {
-		const host = document.querySelector(`input[data-id="${id}"][data-field="host"]`)?.value.trim();
-		const port = parseInt(document.querySelector(`input[data-id="${id}"][data-field="port"]`)?.value || '22', 10);
-		const username = document.querySelector(`input[data-id="${id}"][data-field="username"]`)?.value.trim();
-		termInfo = { host, port, username, id };
-		const hostEl = document.getElementById('term-host');
-		const portEl = document.getElementById('term-port');
-		const userEl = document.getElementById('term-user');
-		const passEl = document.getElementById('term-pass');
-		if (hostEl) hostEl.value = host || '';
-		if (portEl) portEl.value = isNaN(port) ? '' : String(port);
-		if (userEl) userEl.value = username || '';
-		if (passEl) passEl.value = '';
-		const title = document.getElementById('terminal-title');
-		if (title) title.textContent = `${host || ''}:${port || ''} (${username || ''})`;
-		const out = document.getElementById('term-output');
-		if (out) out.innerHTML = '';
+		// Get server info from current table
+		const rows = document.querySelectorAll('#servers-tbody tr');
+		let server = null;
+		for (const row of rows) {
+			const hostCell = row.querySelector('td:first-child strong');
+			if (hostCell) {
+				// Try to find server by checking all servers
+				// For now, we'll fetch from API
+			}
+		}
+
+		// Fetch server info from API
+		window.ApiClient.get('/admin/servers').then(servers => {
+			const s = Array.isArray(servers) ? servers.find(s => s.id === id) : null;
+			if (!s) {
+				window.showAlert('error', 'Không tìm thấy server');
+				return;
+			}
+
+			termInfo = { host: s.host, port: s.port || 22, username: s.username, id: s.id };
+			const hostEl = document.getElementById('term-host');
+			const portEl = document.getElementById('term-port');
+			const userEl = document.getElementById('term-user');
+			const passEl = document.getElementById('term-pass');
+			if (hostEl) hostEl.value = s.host || '';
+			if (portEl) portEl.value = (s.port || 22).toString();
+			if (userEl) userEl.value = s.username || '';
+			if (passEl) passEl.value = '';
+			const title = document.getElementById('terminal-title');
+			if (title) title.textContent = `${s.host || ''}:${s.port || 22} (${s.username || ''})`;
+			const out = document.getElementById('term-output');
+			if (out) out.innerHTML = '';
+			if (term) {
+				try { term.dispose(); } catch (_) { }
+				term = null;
+			}
+			
+			// Show modal
+			const modal = document.getElementById('terminalModal');
+			if (modal) modal.style.display = 'flex';
+			
+			if (isConnected) {
+				setTimeout(() => connectTerminalAuto(), 200);
+			}
+		}).catch(err => {
+			window.showAlert('error', 'Không thể tải thông tin server: ' + (err.message || 'Lỗi'));
+		});
+	}
+
+	function closeTerminal() {
+		const modal = document.getElementById('terminalModal');
+		if (modal) modal.style.display = 'none';
+		try { termWS?.close(); } catch (_) { }
+		termWS = null;
 		if (term) {
 			try { term.dispose(); } catch (_) { }
 			term = null;
 		}
-		// Show modal using UI component
-		if (window.Modal) {
-			window.Modal.show('terminalModal');
-		} else {
-			// Fallback to Bootstrap
-			const modalEl = document.getElementById('terminalModal');
-			if (modalEl) {
-				try {
-					// Use getOrCreateInstance to avoid re-initialization issues
-					const modal = bootstrap.Modal.getOrCreateInstance(modalEl, {
-						backdrop: true,
-						keyboard: true,
-						focus: true
-					});
-					modal.show();
-				} catch (err) {
-					console.error('Error showing terminal modal:', err);
-					// Fallback: try to show without options
-					const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-					modal.show();
+	}
+
+	// Toggle accordion
+	function toggleAccordion(el) {
+		// Support both string ID and element
+		if (typeof el === 'string') el = document.getElementById(el);
+		if (!el) return;
+		
+		// If element has class 'accordion', toggle it directly
+		// Otherwise, find parent with class 'accordion'
+		let accordion = el;
+		if (!accordion.classList.contains('accordion')) {
+			if (typeof accordion.closest === 'function') {
+				accordion = accordion.closest('.accordion');
+			} else {
+				// Fallback: manual traversal
+				let parent = accordion.parentElement;
+				while (parent && !parent.classList.contains('accordion')) {
+					parent = parent.parentElement;
+					if (!parent) break;
 				}
+				accordion = parent;
 			}
 		}
-		if (isConnected) {
-			setTimeout(() => connectTerminalAuto(), 200);
+		
+		if (accordion && accordion.classList) {
+			accordion.classList.toggle('open');
 		}
 	}
 
@@ -387,13 +802,25 @@
 	window.ServersModule = {
 		loadServers,
 		createServer,
-		saveServer,
+		editServer,
+		saveEditServer,
 		deleteServer,
 		disconnectServer,
-		promptReconnect,
+		openReconnectModal,
+		saveReconnect,
 		checkServerStatus,
-		openTerminal
+		openTerminal,
+		closeTerminal,
+		resetServerForm,
+		openEditServerPopup,
+		closeEditServerPopup,
+		closeReconnectServerPopup,
+		toggleAccordion
 	};
+
+	// Expose global functions for inline onclick handlers
+	window.closeTerminal = closeTerminal;
+	window.toggleAccordion = toggleAccordion;
 
 	// Auto-init on page load
 	if (document.readyState === 'loading') {
@@ -408,7 +835,12 @@
 			form.addEventListener('submit', createServer);
 		}
 
-		const btnCheck = document.getElementById('btn-check-status');
+		const refreshBtn = document.getElementById('refresh-servers-btn');
+		if (refreshBtn) {
+			refreshBtn.addEventListener('click', loadServers);
+		}
+
+		const btnCheck = document.getElementById('check-status-btn');
 		if (btnCheck) {
 			btnCheck.addEventListener('click', checkServerStatus);
 		}
@@ -426,14 +858,6 @@
 					term.write(val + '\r\n');
 				}
 				if (inp) inp.value = '';
-			}
-		});
-
-		// Terminal modal close
-		document.addEventListener('hidden.bs.modal', (e) => {
-			if (e.target && e.target.id === 'terminalModal') {
-				try { termWS?.close(); } catch (_) { }
-				termWS = null;
 			}
 		});
 
@@ -485,15 +909,12 @@
 		});
 	}
 
-	// Auto-connect servers (gọi check-status để tự động kết nối các server có thể)
+	// Auto-connect servers
 	async function autoConnectServers() {
 		try {
-			// Gọi check-status để tự động kết nối các server có SSH key
 			await window.ApiClient.post('/admin/servers/check-status', {});
-			// Load lại danh sách để cập nhật trạng thái
 			await loadServers();
 		} catch (err) {
-			// Không hiển thị lỗi trong auto-connect để tránh spam
 			console.debug('[servers.js] Auto-connect servers:', err.message || 'Error');
 		}
 	}
@@ -501,11 +922,9 @@
 	// Backward compatibility: expose global functions
 	window.loadServers = loadServers;
 	window.createServer = (ev) => window.ServersModule.createServer(ev);
-	window.saveServer = (id, btn) => window.ServersModule.saveServer(id, btn);
+	window.saveServer = (id, btn) => window.ServersModule.saveServer?.(id, btn);
 	window.deleteServer = (id) => window.ServersModule.deleteServer(id);
 	window.disconnectServer = (id) => window.ServersModule.disconnectServer(id);
-	window.promptReconnect = (id) => window.ServersModule.promptReconnect(id);
 	window.checkServerStatus = () => window.ServersModule.checkServerStatus();
 	window.openTerminal = (id, isConnected) => window.ServersModule.openTerminal(id, isConnected);
 })();
-

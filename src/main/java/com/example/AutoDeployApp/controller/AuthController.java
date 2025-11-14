@@ -1,6 +1,6 @@
 package com.example.AutoDeployApp.controller;
 
-import com.example.AutoDeployApp.entity.User;
+import com.example.AutoDeployApp.entity.UserEntity;
 import com.example.AutoDeployApp.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
@@ -26,7 +26,7 @@ public class AuthController {
         public ResponseEntity<?> register(@RequestBody Map<String, String> body) {
                 String username = body.get("username");
                 String password = body.get("password");
-                User created = userService.register(username, password);
+                UserEntity created = userService.register(username, password);
                 return ResponseEntity.ok(Map.of(
                                 "id", created.getId(),
                                 "username", created.getUsername(),

@@ -3,30 +3,69 @@
 <body>
 <div th:replace="admin/layout :: layout(~{::content})">
   <div th:fragment="content">
-    <div class="d-flex align-items-center justify-content-between mb-4">
-      <h1 class="m-0">☸️ Kubernetes Cluster</h1>
-      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">🧩 Quản lý Cluster</div>
+        <div class="page-subtitle">Danh sách các Kubernetes cluster. Admin có thể tạo, xem chi tiết, gán server vào cluster.</div>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn" id="refresh-clusters-btn">🔄 Làm mới</button>
+        <button class="btn btn-primary" onclick="if(window.toggleAccordion) window.toggleAccordion(document.getElementById('cluster-create-accordion')); else console.error('toggleAccordion not found');">+ Tạo Cluster</button>
+      </div>
     </div>
 
-    <div class="card mb-3" id="k8s-list">
-      <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between mb-2">
-          <h2 class="h6 m-0">Danh sách Cluster</h2>
-          <div class="d-flex align-items-center gap-2">
-            <input id="cluster-search" class="form-control form-control-sm" placeholder="Tìm theo tên...">
-            <select id="cluster-status-filter" class="form-select form-select-sm">
+    <!-- Create Cluster Accordion -->
+    <div class="accordion" id="cluster-create-accordion">
+      <div class="accordion-header" onclick="if(window.toggleAccordion) window.toggleAccordion(this.parentElement); else console.error('toggleAccordion not found');">
+        <span>➕ Tạo cluster mới</span>
+        <span class="arrow">›</span>
+      </div>
+      <div class="accordion-body">
+        <form id="create-cluster-form">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Tên Cluster <span style="color: #CC0000;">*</span></label>
+              <input type="text" name="name" id="cluster-name" placeholder="my-cluster" required 
+                     pattern="[a-zA-Z0-9-_]+" minlength="3" maxlength="50" autocomplete="off">
+              <small class="form-hint">Tên cluster (chỉ chứa chữ, số, dấu gạch ngang và gạch dưới)</small>
+            </div>
+            <div class="form-group">
+              <label>Mô tả</label>
+              <input type="text" name="description" id="cluster-description" placeholder="Mô tả cluster (tùy chọn)" 
+                     maxlength="255" autocomplete="off">
+              <small class="form-hint">Mô tả ngắn về cluster</small>
+            </div>
+          </div>
+          <div id="create-cluster-error" class="form-error" style="display: none; margin-top: 12px;"></div>
+          <div style="margin-top: 16px; display: flex; gap: 8px;">
+            <button type="submit" class="btn btn-primary" id="create-cluster-submit-btn">
+              <span id="create-cluster-text">💾 Tạo Cluster</span>
+              <span id="create-cluster-loading" style="display: none;">⏳ Đang tạo...</span>
+            </button>
+            <button type="button" class="btn" onclick="if(window.K8sClustersModule && window.K8sClustersModule.resetClusterForm) window.K8sClustersModule.resetClusterForm(); else document.getElementById('create-cluster-form').reset();">✖️ Hủy</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Filters and Cluster List -->
+    <div class="table-card" id="k8s-list">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <div style="flex: 1; min-width: 200px;">
+          <input id="cluster-search" class="form-control" placeholder="🔍 Tìm theo tên cluster..." style="max-width: 300px;">
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <select id="cluster-status-filter" class="form-control" style="width: 180px;">
               <option value="">Tất cả trạng thái</option>
-              <option value="HEALTHY">Healthy</option>
-              <option value="WARNING">Warning</option>
-              <option value="ERROR">Error</option>
+            <option value="HEALTHY">HEALTHY</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
             </select>
           </div>
         </div>
-        <div class="table-responsive table-fixed max-h-50vh">
-          <table class="table table-sm align-middle">
+      <table class="table">
             <thead>
             <tr>
-              <th>ID</th>
               <th>Cluster Name</th>
               <th>Master Node</th>
               <th>Số Worker</th>
@@ -34,65 +73,61 @@
               <th>Actions</th>
             </tr>
             </thead>
-            <tbody id="clusters-tbody"></tbody>
+        <tbody id="clusters-tbody">
+          <tr>
+            <td colspan="5" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+          </tr>
+        </tbody>
           </table>
-        </div>
         <!-- Pagination -->
-        <div id="clusters-pagination" class="mt-3"></div>
-      </div>
+      <div id="clusters-pagination" style="margin-top: 16px;"></div>
     </div>
 
-    <div class="card mb-3" id="k8s-create">
-      <div class="card-body">
-        <h2 class="h6">Tạo Cluster</h2>
-        <form id="create-cluster-form" class="row g-2 mt-2">
-          <div class="col-12 col-md-3"><input class="form-control" name="name" placeholder="Tên cluster" required></div>
-          <div class="col-12 col-md-6"><input class="form-control" name="description" placeholder="Mô tả (tuỳ chọn)"></div>
-          <div class="col-12 col-md-3"><button class="btn btn-success w-100" type="submit">Tạo</button></div>
-        </form>
+    <!-- Assign Servers Section -->
+    <div class="table-card" id="k8s-assign" style="margin-top: 20px;">
+      <div style="margin-bottom: 16px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">🔗 Gán máy chủ vào Cluster</div>
+        <div class="page-subtitle" style="font-size: 12px;">Chọn server và gán vào cluster với role tương ứng (MASTER hoặc WORKER)</div>
       </div>
+      <div class="form-grid" style="margin-bottom: 16px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+        <div class="form-group">
+          <label>Chọn Cluster</label>
+          <select class="form-control" id="k8s-cluster-select">
+            <option value="">-- Chọn cluster --</option>
+          </select>
     </div>
-
-    <div class="card mb-3" id="k8s-assign">
-      <div class="card-body">
-        <h2 class="h6">Gán máy chủ vào Cluster</h2>
-        <div class="row g-2 align-items-end mb-2">
-          <div class="col-12 col-md-3">
-            <label class="form-label">Chọn Cluster</label>
-            <select class="form-select" id="k8s-cluster-select"></select>
-          </div>
-          <div class="col-12 col-md-2">
-            <label class="form-label">Role trong Cluster</label>
-            <select class="form-select" id="k8s-role-select">
+        <div class="form-group">
+          <label>Role trong Cluster</label>
+          <select class="form-control" id="k8s-role-select">
               <option value="WORKER">WORKER</option>
               <option value="MASTER">MASTER</option>
             </select>
           </div>
-          <div class="col-12 col-md-7 text-md-end">
-            <button class="btn btn-primary me-2" id="btn-assign-selected">Gán vào Cluster</button>
-            <button class="btn btn-success me-2" id="btn-update-role-selected">Cập nhật Role</button>
-            <button class="btn btn-outline-danger" id="btn-remove-selected">Bỏ khỏi Cluster</button>
           </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+        <button class="btn btn-primary" id="btn-assign-selected">📌 Gán vào Cluster</button>
+        <button class="btn btn-success" id="btn-update-role-selected">🔄 Cập nhật Role</button>
+        <button class="btn btn-danger" id="btn-remove-selected">🗑️ Bỏ khỏi Cluster</button>
         </div>
-        <div class="table-responsive max-h-60vh">
-          <table class="table table-sm align-middle">
+      <table class="table">
             <thead>
             <tr>
-              <th style="width:36px;"><input type="checkbox" id="k8s-check-all"></th>
-              <th>ID</th>
+            <th style="width:40px;"><input type="checkbox" id="k8s-check-all" title="Chọn tất cả"></th>
               <th>Host</th>
               <th>Port</th>
               <th>Username</th>
               <th>Cluster</th>
               <th>Role</th>
               <th>Status</th>
-              <th>Hành động</th>
+            <th>Actions</th>
             </tr>
             </thead>
-            <tbody id="k8s-servers-tbody"></tbody>
+        <tbody id="k8s-servers-tbody">
+          <tr>
+            <td colspan="8" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+          </tr>
+        </tbody>
           </table>
-        </div>
-      </div>
     </div>
 
     <div class="card mb-3 d-none" id="k8s-detail">

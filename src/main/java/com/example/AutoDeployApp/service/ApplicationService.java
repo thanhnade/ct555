@@ -1,7 +1,7 @@
 package com.example.AutoDeployApp.service;
 
 import com.example.AutoDeployApp.entity.Application;
-import com.example.AutoDeployApp.entity.User;
+import com.example.AutoDeployApp.entity.UserEntity;
 import com.example.AutoDeployApp.repository.ApplicationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,7 +24,7 @@ public class ApplicationService {
     public Application createApplication(Long userId, String appName, String dockerImage,
             String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit) {
         // Lấy thông tin user để lấy username
-        User user = userService.findById(userId)
+        UserEntity user = userService.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         // Kiểm tra dữ liệu đầu vào

@@ -3,94 +3,210 @@
 <body>
 <div th:replace="admin/layout :: layout(~{::content})">
   <div th:fragment="content">
-    <div class="d-flex align-items-center justify-content-between mb-4">
-      <h1 class="m-0" th:text="#{admin.user.title}">👤 User Management</h1>
-      <div class="text-end">Hi, <strong th:text="${username}">Admin</strong></div>
-    </div>
-
-    <div class="card mb-4" id="user-list">
-      <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <h2 class="h6 m-0" th:text="#{admin.user.list.title}">📋 Danh sách người dùng</h2>
-          <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-outline-primary" id="refresh-users-btn">
-              <i class="bi bi-arrow-clockwise"></i> <span th:text="#{common.refresh}">Làm mới</span>
-            </button>
-            <button class="btn btn-sm btn-outline-success" id="export-users-btn">
-              <i class="bi bi-download"></i> <span th:text="#{admin.user.export}">Xuất danh sách</span>
-            </button>
-          </div>
-        </div>
-        <div class="table-responsive table-fixed max-h-60vh">
-          <table class="table table-sm align-middle">
-            <thead>
-            <tr>
-              <th th:text="#{admin.user.id}">ID</th>
-              <th th:text="#{admin.user.username}">Username</th>
-              <th th:text="#{admin.user.role}">Role</th>
-              <th th:text="#{admin.user.dataLimit}">Quota (MB)</th>
-              <th th:text="#{admin.user.pathOnServer}">Đường dẫn</th>
-              <th th:text="#{common.actions}">Hành động</th>
-            </tr>
-            </thead>
-            <tbody id="users-tbody"></tbody>
-          </table>
-        </div>
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">Quản lý người dùng</div>
+        <div class="page-subtitle">Admin có thể thêm, sửa, xóa, xem ứng dụng của người dùng.</div>
       </div>
+      <button class="btn btn-primary" onclick="window.toggleAccordion(document.getElementById('user-create-accordion'))">+ Thêm người dùng</button>
     </div>
 
-    <div class="card mb-4" id="user-create">
-      <div class="card-body">
-        <h2 class="h6" th:text="#{admin.user.create.title}">➕ Thêm người dùng mới</h2>
-        <form id="create-user-form" class="row g-2 align-items-end">
-          <div class="col-md-2">
-            <label class="form-label small">Tên đăng nhập <span class="text-danger">*</span></label>
-            <input class="form-control form-control-sm" name="username" th:placeholder="#{admin.user.username}" required>
+    <!-- Create User Accordion -->
+    <div class="accordion" id="user-create-accordion">
+      <div class="accordion-header" onclick="window.toggleAccordion(this.parentElement)">
+        <span>➕ Thêm người dùng mới</span>
+        <span class="arrow">›</span>
+      </div>
+      <div class="accordion-body">
+        <form id="create-user-form">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Họ tên <span style="color: #CC0000;">*</span></label>
+              <input type="text" name="fullname" id="fullname" placeholder="Nhập họ và tên đầy đủ" required 
+                     minlength="2" maxlength="100" autocomplete="name">
+              <small class="form-hint">Tối thiểu 2 ký tự</small>
+            </div>
+            <div class="form-group">
+              <label>Tên đăng nhập <span style="color: #CC0000;">*</span></label>
+              <input type="text" name="username" id="username" placeholder="username" required 
+                     pattern="[a-zA-Z0-9_]{3,20}" autocomplete="username">
+              <small class="form-hint">3-20 ký tự, chỉ chữ, số và dấu gạch dưới</small>
+            </div>
+            <div class="form-group">
+              <label>Mật khẩu <span style="color: #CC0000;">*</span></label>
+              <input type="password" name="password" id="password" placeholder="••••••••" required 
+                     minlength="6" autocomplete="new-password">
+              <small class="form-hint">Tối thiểu 6 ký tự</small>
+            </div>
+            <div class="form-group">
+              <label>Vai trò <span style="color: #CC0000;">*</span></label>
+              <select name="role" id="role" required>
+                <option value="">-- Chọn vai trò --</option>
+                <option value="USER" selected>USER - Người dùng thường</option>
+                <option value="ADMIN">ADMIN - Quản trị viên</option>
+              </select>
+              <small class="form-hint">Chọn quyền truy cập cho người dùng</small>
+            </div>
+            <div class="form-group">
+              <label>Gói dịch vụ <span style="color: #CC0000;">*</span></label>
+              <select name="tier" id="tier" required>
+                <option value="STANDARD" selected>STANDARD - Gói tiêu chuẩn</option>
+                <option value="PREMIUM">PREMIUM - Gói cao cấp</option>
+              </select>
+              <small class="form-hint">Chọn gói dịch vụ cho người dùng</small>
+            </div>
+            <div class="form-group">
+              <label>Trạng thái <span style="color: #CC0000;">*</span></label>
+              <select name="status" id="status" required>
+                <option value="ACTIVE" selected>ACTIVE - Kích hoạt</option>
+                <option value="INACTIVE">INACTIVE - Vô hiệu hóa</option>
+              </select>
+              <small class="form-hint">Trạng thái tài khoản</small>
+            </div>
           </div>
-          <div class="col-md-2">
-            <label class="form-label small">Mật khẩu <span class="text-danger">*</span></label>
-            <input class="form-control form-control-sm" type="password" name="password" placeholder="password" required>
-          </div>
-          <div class="col-md-2">
-            <label class="form-label small">Vai trò <span class="text-danger">*</span></label>
-            <select class="form-select form-select-sm" name="role" required>
-              <option value="">-- Chọn --</option>
-              <option value="ADMIN" th:text="#{role.admin}">ADMIN</option>
-              <option value="CLIENT" th:text="#{role.client}">CLIENT</option>
-            </select>
-          </div>
-          <div class="col-md-2">
-            <label class="form-label small" th:text="#{admin.user.dataLimit}">Quota (MB)</label>
-            <input class="form-control form-control-sm" type="number" name="dataLimitMb" value="1024" min="100" step="1">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label small" th:text="#{admin.user.pathOnServer}">Đường dẫn</label>
-            <input class="form-control form-control-sm" name="pathOnServer" th:placeholder="#{admin.user.pathOnServer}">
-          </div>
-          <div class="col-md-2">
-            <button class="btn btn-success btn-sm" type="submit">
-              <i class="bi bi-person-plus me-1"></i> <span th:text="#{common.save}">Thêm</span>
+          <div id="form-error" class="form-error" style="display: none; margin-top: 12px; padding: 10px; background: #fecaca; border: 1px solid #f87171; border-radius: 6px; color: #991b1b; font-size: 13px;"></div>
+          <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+            <button type="submit" class="btn btn-primary" id="submit-btn">
+              <span id="submit-text">💾 Lưu người dùng</span>
+              <span id="submit-loading" style="display: none;">⏳ Đang tạo...</span>
             </button>
+            <button type="button" class="btn" onclick="resetUserForm()">🔄 Đặt lại</button>
+            <button type="button" class="btn" onclick="window.toggleAccordion(document.getElementById('user-create-accordion'))">✖️ Hủy</button>
           </div>
         </form>
       </div>
     </div>
 
+    <!-- Users List -->
+    <div class="table-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="font-size: 15px; font-weight: 600; color: #003366;">Danh sách người dùng</div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" id="refresh-users-btn">🔄 Làm mới</button>
+          <button class="btn" id="export-users-btn">📥 Xuất CSV</button>
+        </div>
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Họ tên</th>
+            <th>Role</th>
+            <th>Trạng thái</th>
+            <th>Ngày tạo</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editUserPopup" class="popup-backdrop" style="display: none;">
+      <div class="popup-box" style="width: 600px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="popup-header" id="edit-user-title">✏️ Sửa thông tin người dùng</div>
+        <div style="padding: 20px; overflow-y: auto; max-height: 60vh; background: #FFFFFF; color: #333333;">
+          <form id="edit-user-form">
+            <input type="hidden" id="edit-user-id">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Họ tên <span style="color: #CC0000;">*</span></label>
+                <input type="text" id="edit-user-fullname" name="fullname" placeholder="Nhập họ và tên đầy đủ" required 
+                       minlength="2" maxlength="100" autocomplete="name">
+                <small class="form-hint">Tối thiểu 2 ký tự</small>
+              </div>
+              <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="edit-user-username" name="username" readonly 
+                       style="background: #F2F2F2; cursor: not-allowed;" autocomplete="username">
+                <small class="form-hint">Username không thể thay đổi</small>
+              </div>
+              <div class="form-group">
+                <label>Vai trò <span style="color: #CC0000;">*</span></label>
+                <select id="edit-user-role" name="role" required>
+                  <option value="">-- Chọn vai trò --</option>
+                  <option value="USER">USER - Người dùng thường</option>
+                  <option value="ADMIN">ADMIN - Quản trị viên</option>
+                </select>
+                <small class="form-hint">Chọn quyền truy cập cho người dùng</small>
+              </div>
+              <div class="form-group">
+                <label>Gói dịch vụ <span style="color: #CC0000;">*</span></label>
+                <select id="edit-user-tier" name="tier" required>
+                  <option value="STANDARD">STANDARD - Gói tiêu chuẩn</option>
+                  <option value="PREMIUM">PREMIUM - Gói cao cấp</option>
+                </select>
+                <small class="form-hint">Chọn gói dịch vụ cho người dùng</small>
+              </div>
+              <div class="form-group">
+                <label>Trạng thái <span style="color: #CC0000;">*</span></label>
+                <select id="edit-user-status" name="status" required>
+                  <option value="ACTIVE">ACTIVE - Kích hoạt</option>
+                  <option value="INACTIVE">INACTIVE - Vô hiệu hóa</option>
+                </select>
+                <small class="form-hint">Trạng thái tài khoản</small>
+              </div>
+            </div>
+            <div id="edit-form-error" class="form-error" style="display: none; margin-top: 12px;"></div>
+          </form>
+        </div>
+        <div class="popup-actions">
+          <button type="button" class="btn" onclick="window.closeEditUserPopup()">✖️ Hủy</button>
+          <button type="button" class="btn btn-primary" id="save-edit-user-btn" onclick="window.UsersModule.saveEditUser()">
+            <span id="save-edit-text">💾 Lưu thay đổi</span>
+            <span id="save-edit-loading" style="display: none;">⏳ Đang lưu...</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reset Password Modal -->
+    <div id="resetPasswordPopup" class="popup-backdrop" style="display: none;">
+      <div class="popup-box" style="width: 450px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="popup-header" id="reset-password-title">🔑 Đặt lại mật khẩu</div>
+        <div style="padding: 20px; overflow-y: auto; max-height: 60vh; background: #FFFFFF; color: #333333;">
+          <form id="reset-password-form">
+            <input type="hidden" id="reset-password-user-id">
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" id="reset-password-username" readonly 
+                     style="background: #F2F2F2; cursor: not-allowed;" autocomplete="username">
+              <small class="form-hint">Người dùng cần đặt lại mật khẩu</small>
+            </div>
+            <div class="form-group">
+              <label>Mật khẩu mới <span style="color: #CC0000;">*</span></label>
+              <input type="password" id="reset-password-new" name="password" placeholder="Nhập mật khẩu mới" required 
+                     minlength="6" autocomplete="new-password">
+              <small class="form-hint">Tối thiểu 6 ký tự</small>
+            </div>
+            <div class="form-group">
+              <label>Xác nhận mật khẩu <span style="color: #CC0000;">*</span></label>
+              <input type="password" id="reset-password-confirm" name="passwordConfirm" placeholder="Nhập lại mật khẩu" required 
+                     minlength="6" autocomplete="new-password">
+              <small class="form-hint">Nhập lại mật khẩu để xác nhận</small>
+            </div>
+            <div id="reset-password-error" class="form-error" style="display: none; margin-top: 12px;"></div>
+          </form>
+        </div>
+        <div class="popup-actions">
+          <button type="button" class="btn" onclick="window.closeResetPasswordPopup()">✖️ Hủy</button>
+          <button type="button" class="btn btn-primary" id="save-reset-password-btn" onclick="window.UsersModule.saveResetPassword()">
+            <span id="save-reset-text">💾 Đặt lại mật khẩu</span>
+            <span id="save-reset-loading" style="display: none;">⏳ Đang lưu...</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Activity Modal -->
-    <div th:replace="~{::#activityModal}"></div>
-    <div class="modal fade" id="activityModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-dialog-scrollable modal-lg">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="activity-title" th:text="#{admin.user.history}">📈 Lịch sử hoạt động</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{common.close}"></button>
-          </div>
-          <div class="modal-body">
-            <ul class="list-group" id="activity-list"></ul>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.close}">Đóng</button>
-          </div>
+    <div id="activityPopup" class="popup-backdrop" style="display: none;">
+      <div class="popup-box" style="width: 700px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="popup-header" id="activity-title">📈 Lịch sử hoạt động</div>
+        <div style="padding: 15px; overflow-y: auto; max-height: 60vh; background: #FFFFFF; color: #333333;">
+          <ul id="activity-list" style="list-style: none; padding: 0; margin: 0;"></ul>
+        </div>
+        <div class="popup-actions">
+          <button class="btn-close" onclick="window.closeActivityPopup()">Đóng</button>
         </div>
       </div>
     </div>

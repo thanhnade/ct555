@@ -2,7 +2,7 @@ package com.example.AutoDeployApp.controller;
 
 import com.example.AutoDeployApp.entity.Application;
 import com.example.AutoDeployApp.entity.Cluster;
-import com.example.AutoDeployApp.entity.User;
+import com.example.AutoDeployApp.entity.UserEntity;
 import com.example.AutoDeployApp.entity.UserActivity;
 import com.example.AutoDeployApp.service.ApplicationService;
 import com.example.AutoDeployApp.service.ClusterService;
@@ -44,39 +44,107 @@ public class AdminController {
     @GetMapping("/users")
     public List<Map<String, Object>> listUsers() {
         return userService.findAll().stream()
-                .map(u -> Map.<String, Object>of(
-                        "id", u.getId(),
-                        "username", u.getUsername(),
-                        "role", Objects.toString(u.getRole(), "CLIENT"),
-                        "dataLimitMb", u.getDataLimitMb(),
-                        "pathOnServer", Objects.toString(u.getPathOnServer(), "")))
+                .map(u -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", u.getId());
+                    map.put("fullname", u.getFullname());
+                    map.put("username", u.getUsername());
+                    map.put("role", Objects.toString(u.getRole(), "USER"));
+                    map.put("tier", Objects.toString(u.getTier(), "STANDARD"));
+                    map.put("status", Objects.toString(u.getStatus(), "INACTIVE"));
+                    map.put("createdAt", u.getCreatedAt());
+                    return map;
+                })
                 .toList();
     }
 
     @PostMapping("/users")
     public ResponseEntity<?> createUser(@RequestBody Map<String, Object> body) {
+        // Validate required fields
+        String fullname = (String) body.get("fullname");
         String username = (String) body.get("username");
         String password = (String) body.get("password");
-        String role = (String) body.getOrDefault("role", "CLIENT");
-        Integer dataLimitMb = body.get("dataLimitMb") != null ? ((Number) body.get("dataLimitMb")).intValue() : null;
-        String pathOnServer = (String) body.get("pathOnServer");
-        User created = userService.createUser(username, password, role, dataLimitMb, pathOnServer);
+        
+        if (username == null || username.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "ValidationError", "message", "Tên đăng nhập không được để trống"));
+        }
+        
+        if (password == null || password.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "ValidationError", "message", "Mật khẩu không được để trống"));
+        }
+        
+        if (password.length() < 6) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "ValidationError", "message", "Mật khẩu phải có ít nhất 6 ký tự"));
+        }
+        
+        // Validate username format
+        if (!username.matches("^[a-zA-Z0-9_]{3,20}$")) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "ValidationError", "message", "Tên đăng nhập phải có từ 3-20 ký tự, chỉ chứa chữ, số và dấu gạch dưới"));
+        }
+        
+        String role = (String) body.getOrDefault("role", "USER");
+        String tier = (String) body.getOrDefault("tier", "STANDARD");
+        String status = (String) body.getOrDefault("status", "ACTIVE");
+        
+        try {
+            UserEntity created = userService.createUser(fullname, username, password, role, tier, status);
         return ResponseEntity.ok(Map.of("id", created.getId()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "ValidationError", "message", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Error creating user", e);
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "InternalError", "message", "Lỗi khi tạo người dùng: " + e.getMessage()));
+        }
     }
 
     @PutMapping("/users/{id}")
     public ResponseEntity<?> updateUser(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        try {
+            String fullname = (String) body.get("fullname");
         String role = (String) body.get("role");
-        Integer dataLimitMb = body.get("dataLimitMb") != null ? ((Number) body.get("dataLimitMb")).intValue() : null;
-        String pathOnServer = (String) body.get("pathOnServer");
-        User updated = userService.updateUser(id, role, dataLimitMb, pathOnServer);
+            String tier = (String) body.get("tier");
+            String status = (String) body.get("status");
+            
+            // Validate status value if provided
+            if (status != null && !status.isEmpty() && !status.equals("ACTIVE") && !status.equals("INACTIVE")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "ValidationError", "message", "Trạng thái phải là ACTIVE hoặc INACTIVE"));
+            }
+            
+            // Validate role value if provided
+            if (role != null && !role.isEmpty() && !role.equals("USER") && !role.equals("ADMIN")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "ValidationError", "message", "Vai trò phải là USER hoặc ADMIN"));
+            }
+            
+            // Validate tier value if provided
+            if (tier != null && !tier.isEmpty() && !tier.equals("STANDARD") && !tier.equals("PREMIUM")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "ValidationError", "message", "Gói dịch vụ phải là STANDARD hoặc PREMIUM"));
+            }
+            
+            UserEntity updated = userService.updateUser(id, fullname, role, tier, status);
         return ResponseEntity.ok(Map.of("id", updated.getId()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "ValidationError", "message", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Error updating user {}", id, e);
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "InternalError", "message", "Lỗi khi cập nhật người dùng: " + e.getMessage()));
+        }
     }
 
     @DeleteMapping("/users/{id}")
     public ResponseEntity<?> deleteUser(@PathVariable Long id) {
         // Dọn tất cả ứng dụng và namespace của người dùng này trên mọi cluster rồi mới xóa tài khoản
-        User user = userService.findById(id)
+        UserEntity user = userService.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         String username = user.getUsername();
@@ -217,7 +285,7 @@ public class AdminController {
                 applications = applicationService.getAllApplications();
             }
 
-            Map<Long, User> userLookup = userService.findAllByIds(
+            Map<Long, UserEntity> userLookup = userService.findAllByIds(
                     applications.stream()
                             .map(Application::getUserId)
                             .filter(Objects::nonNull)
@@ -229,7 +297,7 @@ public class AdminController {
                         // Tra cứu username từ userId
                         String username = "Unknown";
                         if (app.getUserId() != null) {
-                            User matchedUser = userLookup.get(app.getUserId());
+                            UserEntity matchedUser = userLookup.get(app.getUserId());
                             if (matchedUser != null && matchedUser.getUsername() != null) {
                                 username = matchedUser.getUsername();
                             }
@@ -343,7 +411,7 @@ public class AdminController {
             }
 
             // Lấy thông tin user để có username
-            User user = userService.findById(application.getUserId())
+            UserEntity user = userService.findById(application.getUserId())
                     .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
             String username = user.getUsername();
@@ -1004,7 +1072,7 @@ public class AdminController {
                         String username = "Unknown";
                         if (app.getUserId() != null) {
                             username = userService.findById(app.getUserId())
-                                    .map(User::getUsername)
+                                    .map(UserEntity::getUsername)
                                     .orElse("Unknown");
                         }
 
