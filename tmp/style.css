@@ -7,8 +7,8 @@
 
 body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #0b1724;
-  color: #e5e7eb;
+  background: #FFFFFF;
+  color: #333333;
 }
 
 /* ==== LOGIN SCREEN ==== */
@@ -21,16 +21,16 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: radial-gradient(circle at top, #1d4ed8 0, #020617 55%, #000 100%);
+  background: #FFFFFF;
 }
 
 .login-box {
-  background: #020617ee;
+  background: #FFFFFF;
   padding: 24px 28px;
   border-radius: 12px;
-  border: 1px solid #1f2933;
+  border: 1px solid #E0E0E0;
   width: 320px;
-  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.1);
 }
 
 .login-logo {
@@ -38,12 +38,13 @@ body {
   font-weight: 700;
   margin-bottom: 18px;
   text-align: center;
+  color: #003366;
 }
 
 .login-box label {
   display: block;
   font-size: 13px;
-  color: #9ca3af;
+  color: #333333;
   margin-top: 10px;
 }
 
@@ -53,29 +54,47 @@ body {
   margin-bottom: 4px;
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid #1f2937;
-  background: #020617;
-  color: #e5e7eb;
+  border: 1px solid #E0E0E0;
+  background: #F2F2F2;
+  color: #333333;
 }
 
 .login-box input:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #003366;
 }
 
 .btn {
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid transparent;
-  background: #1f2937;
-  color: #e5e7eb;
+  border: 1px solid #E0E0E0;
+  background: #F2F2F2;
+  color: #333333;
   cursor: pointer;
   font-size: 13px;
 }
 
 .btn-primary {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: #003366;
+  border-color: #003366;
+  color: #FFFFFF;
+}
+
+.btn-primary:hover {
+  background: #004080;
+  border-color: #004080;
+}
+
+/* Alternative: Orange/Red button for emphasis */
+.btn-primary-alt {
+  background: #FF6600;
+  border-color: #FF6600;
+  color: #FFFFFF;
+}
+
+.btn-primary-alt:hover {
+  background: #CC0000;
+  border-color: #CC0000;
 }
 
 .btn:hover {
@@ -84,9 +103,32 @@ body {
 
 .login-hint {
   font-size: 11px;
-  color: #9ca3af;
+  color: #666666;
   margin-top: 8px;
   text-align: center;
+}
+
+/* ==== LINKS ==== */
+a {
+  color: #0066CC;
+  text-decoration: none;
+}
+
+a:hover {
+  color: #004080;
+  text-decoration: underline;
+}
+
+/* Links in sidebar (already white) */
+.sidebar a,
+.sidebar-k8s a {
+  color: #FFFFFF;
+}
+
+.sidebar a:hover,
+.sidebar-k8s a:hover {
+  color: #FFFFFF;
+  text-decoration: none;
 }
 
 /* ==== APP SHELL ==== */
@@ -98,8 +140,8 @@ body {
 /* ==== SIDEBAR ==== */
 .sidebar {
   width: 235px;
-  background: #050b12;
-  border-right: 1px solid #1f2933;
+  background: #003366;
+  border-right: 1px solid #004080;
   padding: 18px 12px;
   overflow-y: auto;
 }
@@ -108,14 +150,19 @@ body {
   display: flex;
   align-items: center;
   margin-bottom: 16px;
+  color: #ffffff;
+}
+
+.sidebar-header span {
+  color: #ffffff;
 }
 
 .logo-circle {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #2563eb;
-  color: white;
+  background: #FF6600;
+  color: #FFFFFF;
   font-weight: bold;
   display: flex;
   align-items: center;
@@ -124,11 +171,12 @@ body {
 }
 
 .sidebar-title {
-  color: #6b7280;
+  color: #FFFFFF;
   font-size: 11px;
   margin-top: 16px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  opacity: 0.8;
 }
 
 .sidebar a {
@@ -138,17 +186,17 @@ body {
   font-size: 13px;
   border-radius: 6px;
   text-decoration: none;
-  color: #9ca3af;
+  color: #FFFFFF;
 }
 
 .sidebar a:hover {
-  background: #111827;
-  color: #e5e7eb;
+  background: #004080;
+  color: #FFFFFF;
 }
 
 .sidebar a.active {
-  background: #1d4ed8;
-  color: white;
+  background: #FF6600;
+  color: #FFFFFF;
 }
 
 /* ==== MAIN LAYOUT ==== */
@@ -161,9 +209,9 @@ body {
 
 .topbar {
   height: 54px;
-  background: #020617dd;
+  background: #003366;
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid #1f2933;
+  border-bottom: 1px solid #004080;
   padding: 0 20px;
   display: flex;
   align-items: center;
@@ -173,6 +221,7 @@ body {
 .topbar-title {
   font-size: 17px;
   font-weight: 600;
+  color: #ffffff;
 }
 
 .topbar-right {
@@ -180,14 +229,15 @@ body {
   align-items: center;
   gap: 10px;
   font-size: 13px;
-  color: #9ca3af;
+  color: #ffffff;
 }
 
 .avatar-circle {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #1d4ed8;
+  background: #FF6600;
+  color: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -198,7 +248,7 @@ body {
 .content {
   flex: 1;
   padding: 18px 20px;
-  background: #0b1724;
+  background: #FFFFFF;
   overflow-y: auto;
 }
 
@@ -213,20 +263,22 @@ body {
 .page-title {
   font-size: 18px;
   font-weight: 600;
+  color: #333333;
 }
 
 .page-subtitle {
   font-size: 13px;
-  color: #9ca3af;
+  color: #666666;
   margin-top: 3px;
 }
 
 .card {
-  background: #020617;
-  border: 1px solid #1f2933;
+  background: #F2F2F2;
+  border: 1px solid #E0E0E0;
   border-radius: 10px;
   padding: 14px 16px;
   margin-bottom: 16px;
+  color: #333333;
 }
 
 .card-header {
@@ -239,6 +291,7 @@ body {
 .card-title {
   font-size: 15px;
   font-weight: 600;
+  color: #003366;
 }
 
 .stat-grid {
@@ -249,36 +302,39 @@ body {
 }
 
 .stat-card {
-  background: #020617;
-  border: 1px solid #1f2933;
+  background: #F2F2F2;
+  border: 1px solid #E0E0E0;
   border-radius: 10px;
   padding: 12px 14px;
+  color: #333333;
 }
 
 .stat-label {
   font-size: 12px;
-  color: #9ca3af;
+  color: #666666;
 }
 
 .stat-value {
   font-size: 18px;
   font-weight: 600;
   margin-top: 4px;
+  color: #003366;
 }
 
 .stat-sub {
   font-size: 11px;
-  color: #6b7280;
+  color: #666666;
   margin-top: 3px;
 }
 
 /* ==== TABLE ==== */
 .table-card {
-  background: #020617;
-  border: 1px solid #1f2933;
+  background: #FFFFFF;
+  border: 1px solid #E0E0E0;
   border-radius: 10px;
   padding: 12px 14px;
   margin-top: 10px;
+  color: #333333;
 }
 
 .table {
@@ -290,17 +346,18 @@ body {
 .table th,
 .table td {
   padding: 7px 8px;
-  border-bottom: 1px solid #111827;
+  border-bottom: 1px solid #E0E0E0;
+  color: #333333;
 }
 
 .table th {
   text-align: left;
-  color: #9ca3af;
+  color: #003366;
   font-weight: 500;
 }
 
 .table tbody tr:hover {
-  background: #111827;
+  background: #F2F2F2;
 }
 
 .chip {
@@ -334,7 +391,7 @@ body {
 .form-group label {
   display: block;
   font-size: 13px;
-  color: #9ca3af;
+  color: #333333;
   margin-bottom: 3px;
 }
 
@@ -345,9 +402,9 @@ body {
   font-size: 13px;
   padding: 7px 9px;
   border-radius: 6px;
-  border: 1px solid #1f2937;
-  background: #020617;
-  color: #e5e7eb;
+  border: 1px solid #E0E0E0;
+  background: #F2F2F2;
+  color: #333333;
 }
 
 .form-group textarea {
@@ -359,7 +416,7 @@ body {
 .form-group textarea:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #003366;
 }
 
 /* ==== YAML POPUP ==== */
@@ -369,7 +426,7 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -378,11 +435,12 @@ body {
 
 .popup-box {
   width: 60%;
-  background: #0f1928;
-  border: 1px solid #1f2933;
+  background: #FFFFFF;
+  border: 1px solid #E0E0E0;
   border-radius: 10px;
   padding: 20px;
   animation: fadeIn 0.2s ease-out;
+  color: #333333;
 }
 
 @keyframes fadeIn {
@@ -401,16 +459,17 @@ body {
   font-size: 17px;
   font-weight: 600;
   margin-bottom: 10px;
+  color: #003366;
 }
 
 .yaml-area {
   width: 100%;
   height: 420px;
-  background: #050b12;
-  border: 1px solid #1f2933;
+  background: #F2F2F2;
+  border: 1px solid #E0E0E0;
   border-radius: 6px;
   padding: 12px;
-  color: #93c5fd;
+  color: #333333;
   font-family: "Fira Code", monospace;
   font-size: 13px;
   overflow: auto;
@@ -425,14 +484,14 @@ body {
 .btn-close {
   padding: 6px 14px;
   border-radius: 6px;
-  background: #1f2937;
-  border: 1px solid #374151;
-  color: #e5e7eb;
+  background: #F2F2F2;
+  border: 1px solid #E0E0E0;
+  color: #333333;
   cursor: pointer;
 }
 
 .btn-close:hover {
-  background: #4b5563;
+  background: #E0E0E0;
 }
 
 /* ==== DROPDOWN MENU ==== */
@@ -442,7 +501,7 @@ body {
 
 .dropdown-header {
   font-size: 11px;
-  color: #9ca3af;
+  color: #FFFFFF;
   text-transform: uppercase;
   padding: 6px 4px;
   cursor: pointer;
@@ -450,10 +509,12 @@ body {
   justify-content: space-between;
   align-items: center;
   user-select: none;
+  opacity: 0.9;
 }
 
 .dropdown-header:hover {
-  color: #e5e7eb;
+  color: #FFFFFF;
+  opacity: 1;
 }
 
 .dropdown-content {
@@ -481,7 +542,7 @@ body {
 
 /* ===== ACCORDION (DROPDOWN CARD INSIDE PAGE) ===== */
 .accordion {
-  border: 1px solid #1f2933;
+  border: 1px solid #E0E0E0;
   border-radius: 8px;
   margin-bottom: 12px;
 }
@@ -489,7 +550,8 @@ body {
 .accordion-header {
   padding: 10px 12px;
   font-size: 14px;
-  background: #0f172a;
+  background: #F2F2F2;
+  color: #333333;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
@@ -499,7 +561,8 @@ body {
 .accordion-body {
   display: none;
   padding: 12px;
-  background: #0b1724;
+  background: #FFFFFF;
+  color: #333333;
 }
 
 .accordion.open .accordion-body {
@@ -515,13 +578,14 @@ body {
 }
 
 .blue {
-  background: #1e3a8a;
-  color: #93c5fd;
+  background: #003366;
+  color: #FFFFFF;
 }
 
 .btn-danger {
-  background: #7f1d1d;
-  border: 1px solid #7f1d1d;
+  background: #CC0000;
+  border: 1px solid #CC0000;
+  color: #FFFFFF;
 }
 
 .btn-danger:hover {
@@ -532,8 +596,8 @@ body {
 /* ==== K8S SIDEBAR ==== */
 .sidebar-k8s {
   width: 220px;
-  background: #1f2937;
-  color: #fff;
+  background: #003366;
+  color: #FFFFFF;
   padding: 10px 0;
   height: 100%;
   display: flex;
@@ -543,28 +607,29 @@ body {
 .sidebar-k8s a {
   padding: 10px 18px;
   cursor: pointer;
-  color: #cbd5e1;
+  color: #FFFFFF;
   text-decoration: none;
   display: block;
   font-size: 14px;
 }
 
 .sidebar-k8s a:hover {
-  background: #374151;
-  color: #fff;
+  background: #004080;
+  color: #FFFFFF;
 }
 
 .sidebar-k8s a.active {
-  background: #4b5563;
-  color: #fff;
+  background: #FF6600;
+  color: #FFFFFF;
 }
 
 .sidebar-section-title {
   padding: 12px 18px;
-  color: #9ca3af;
+  color: #FFFFFF;
   font-size: 12px;
   letter-spacing: 1px;
   font-weight: bold;
+  opacity: 0.8;
 }
 
 .overview-grid {
@@ -575,26 +640,30 @@ body {
 }
 
 .overview-card {
-  background: #1f2937;
+  background: #F2F2F2;
   padding: 16px;
   border-radius: 10px;
-  color: #fff;
+  color: #333333;
+  border: 1px solid #E0E0E0;
 }
 
 .ov-title {
   font-size: 14px;
-  opacity: 0.8;
+  opacity: 0.9;
+  color: #666666;
 }
 
 .ov-value {
   font-size: 32px;
   font-weight: bold;
   margin-top: 6px;
+  color: #003366;
 }
 
 .ov-sub {
   font-size: 12px;
-  opacity: 0.6;
+  opacity: 0.8;
+  color: #666666;
 }
 
 .usage-grid {
@@ -604,7 +673,7 @@ body {
 }
 
 .bar-bg {
-  background: #374151;
+  background: #E0E0E0;
   border-radius: 10px;
   height: 10px;
   margin-top: 4px;
@@ -627,6 +696,7 @@ body {
   display: flex;
   justify-content: space-between;
   padding: 4px 0;
+  color: #333333;
 }
 
 
@@ -640,27 +710,29 @@ body {
 
 .node-tabs {
   display: flex;
-  border-bottom: 1px solid #374151;
+  border-bottom: 1px solid #E0E0E0;
 }
 
 .node-tab {
   padding: 10px 16px;
   cursor: pointer;
-  background: #1f2937;
+  background: #F2F2F2;
   border: none;
-  color: #cbd5e1;
+  color: #333333;
   font-size: 14px;
 }
 
 .node-tab.active {
-  background: #374151;
-  color: #fff;
+  background: #003366;
+  color: #FFFFFF;
 }
 
 .node-tab-content {
   padding: 15px;
   overflow-y: auto;
   max-height: 60vh;
+  background: #FFFFFF;
+  color: #333333;
 }
 
 .info-grid {
@@ -674,10 +746,30 @@ body {
 }
 
 .yaml-box {
-  background: #111827;
-  color: #93c5fd;
+  background: #F2F2F2;
+  color: #333333;
   padding: 12px;
   border-radius: 6px;
   max-height: 60vh;
   overflow-y: auto;
+  border: 1px solid #E0E0E0;
+}
+
+/* ==== FOOTER (CTU e-Learning style) ==== */
+footer {
+  background: #003366;
+  color: #FFFFFF;
+  padding: 16px 20px;
+  text-align: center;
+  font-size: 12px;
+  border-top: 1px solid #004080;
+}
+
+footer a {
+  color: #FFFFFF;
+  text-decoration: underline;
+}
+
+footer a:hover {
+  color: #FF6600;
 }

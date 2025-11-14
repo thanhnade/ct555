@@ -25,7 +25,7 @@ public class AdminAccessInterceptor implements HandlerInterceptor {
         // Chưa đăng nhập
         if (session == null || role == null) {
             if (isAdminArea) {
-                writeJson(response, HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+                response.sendRedirect("/login");
             } else if (isAdminPage) {
                 response.sendRedirect("/login");
             }

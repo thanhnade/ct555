@@ -61,6 +61,65 @@ public class KubernetesService {
     private int defaultContainerPort;
 
     /**
+     * Kiểm tra nhanh xem kubelet service đã loaded chưa (bằng systemctl status kubelet)
+     * Nếu loaded, thử restart service một lần và gọi lại với timeout ngắn hơn
+     * Trả về true nếu kubelet service loaded, false nếu chưa
+     */
+    private boolean isKubeletLoaded(Server master) {
+        try {
+            String pem = serverService.resolveServerPrivateKeyPem(master.getId());
+            int port = master.getPort() != null ? master.getPort() : 22;
+            String username = master.getUsername();
+
+            if (pem == null || pem.trim().isEmpty()) {
+                return false; // Không có SSH key, không thể kiểm tra
+            }
+
+            // Kiểm tra nhanh: systemctl status kubelet - nếu loaded thì đã cài
+            String checkCmd = "sudo systemctl status kubelet 2>&1 | grep -q 'Loaded:' && echo 'LOADED' || echo 'NOT_LOADED'";
+            try {
+                String result = serverService.execCommandWithKey(master.getHost(), port, username, pem, checkCmd, 3000);
+                boolean isLoaded = result != null && result.trim().contains("LOADED");
+                
+                if (isLoaded) {
+                    logger.debug("Kubelet is loaded on master {}, attempting restart and retry...", master.getHost());
+                    
+                    // Nếu loaded, thử restart service một lần
+                    try {
+                        String restartCmd = "sudo systemctl restart kubelet";
+                        serverService.execCommandWithKey(master.getHost(), port, username, pem, restartCmd, 5000);
+                        logger.debug("Kubelet restarted on master {}", master.getHost());
+                        
+                        // Đợi một chút để service khởi động lại
+                        Thread.sleep(2000);
+                        
+                        // Gọi lại với timeout ngắn hơn (2 giây thay vì 3 giây)
+                        String retryCheckCmd = "sudo systemctl status kubelet 2>&1 | grep -q 'Loaded:' && echo 'LOADED' || echo 'NOT_LOADED'";
+                        String retryResult = serverService.execCommandWithKey(master.getHost(), port, username, pem, retryCheckCmd, 2000);
+                        boolean stillLoaded = retryResult != null && retryResult.trim().contains("LOADED");
+                        logger.debug("Kubelet status after restart on master {}: {}", master.getHost(), stillLoaded ? "LOADED" : "NOT_LOADED");
+                        return stillLoaded;
+                    } catch (Exception e) {
+                        logger.debug("Failed to restart kubelet on master {}: {}", master.getHost(), e.getMessage());
+                        // Nếu restart thất bại nhưng vẫn loaded, trả về true
+                        return true;
+                    }
+                }
+                
+                logger.debug("Kubelet status check on master {}: NOT_LOADED", master.getHost());
+                return false;
+            } catch (Exception e) {
+                logger.debug("Failed to check kubelet status on master {}: {}", master.getHost(), e.getMessage());
+                return false;
+            }
+
+        } catch (Exception e) {
+            logger.debug("Error checking kubelet status on master {}: {}", master.getHost(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Lấy Kubernetes client dựa trên cluster ID bằng cách kéo kubeconfig từ master node qua SSH
      */
     private KubernetesClient getKubernetesClient(Long clusterId) {
@@ -139,8 +198,8 @@ public class KubernetesService {
             // Thử lấy từ /etc/kubernetes/admin.conf trước
             String[] kubeconfigPaths = {
                     "sudo cat /etc/kubernetes/admin.conf",
-                    "cat /root/.kube/config",
-                    "cat $HOME/.kube/config"
+                    "sudo cat /root/.kube/config",
+                    "sudo cat $HOME/.kube/config"
             };
 
             String kubeconfig = null;
@@ -781,13 +840,50 @@ public class KubernetesService {
 
     /**
      * Lấy tất cả các node trong cluster
+     * Trả về null nếu kubelet chưa loaded hoặc không thể kết nối
      */
     public NodeList getNodes(Long clusterId) {
+        try {
+            // Kiểm tra nhanh xem kubelet đã loaded chưa
+            Cluster cluster = clusterService.findAll().stream()
+                    .filter(c -> c.getId().equals(clusterId))
+                    .findFirst()
+                    .orElse(null);
+            
+            if (cluster == null) {
+                return null;
+            }
+
+            var servers = serverService.findByClusterId(clusterId);
+            Server master = servers.stream()
+                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .findFirst()
+                    .orElse(null);
+
+            if (master == null || master.getStatus() != Server.ServerStatus.ONLINE) {
+                return null;
+            }
+
+            // Kiểm tra nhanh xem kubelet đã loaded chưa
+            if (!isKubeletLoaded(master)) {
+                logger.debug("Kubelet not loaded on master node for cluster: {}", clusterId);
+                return null; // Kubelet chưa loaded, bỏ qua
+            }
+
         try (KubernetesClient client = getKubernetesClient(clusterId)) {
             return client.nodes().list();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get nodes for cluster: {}", clusterId, e);
-            throw new RuntimeException("Failed to get nodes: " + e.getMessage(), e);
+                logger.warn("Failed to get nodes for cluster {}: {}. Kubernetes may not be fully set up.", 
+                        clusterId, e.getMessage());
+                return null; // Trả về null thay vì throw exception
+            } catch (Exception e) {
+                logger.warn("Failed to get nodes for cluster {}: {}. Kubernetes may not be running yet.", 
+                        clusterId, e.getMessage());
+                return null;
+            }
+        } catch (Exception e) {
+            logger.debug("Error checking kubelet status for cluster {}: {}", clusterId, e.getMessage());
+            return null;
         }
     }
 
@@ -903,9 +999,36 @@ public class KubernetesService {
 
     /**
      * Lấy phiên bản Kubernetes từ cluster (từ master node hoặc API server)
-     * Trả về chuỗi phiên bản (ví dụ: "v1.30.0") hoặc chuỗi rỗng nếu không có
+     * Trả về chuỗi phiên bản (ví dụ: "v1.30.0") hoặc chuỗi rỗng nếu không có hoặc kubelet chưa loaded
      */
     public String getKubernetesVersion(Long clusterId) {
+        try {
+            // Kiểm tra nhanh xem kubelet đã loaded chưa
+            Cluster cluster = clusterService.findAll().stream()
+                    .filter(c -> c.getId().equals(clusterId))
+                    .findFirst()
+                    .orElse(null);
+            
+            if (cluster == null) {
+                return "";
+            }
+
+            var servers = serverService.findByClusterId(clusterId);
+            Server master = servers.stream()
+                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .findFirst()
+                    .orElse(null);
+
+            if (master == null || master.getStatus() != Server.ServerStatus.ONLINE) {
+                return "";
+            }
+
+            // Kiểm tra nhanh xem kubelet đã loaded chưa
+            if (!isKubeletLoaded(master)) {
+                logger.debug("Kubelet not loaded on master node for cluster: {}", clusterId);
+                return ""; // Kubelet chưa loaded, bỏ qua
+            }
+
         try (KubernetesClient client = getKubernetesClient(clusterId)) {
             // Thử lấy phiên bản từ API server trước
             try {
@@ -919,6 +1042,10 @@ public class KubernetesService {
 
             // Dự phòng: lấy phiên bản từ kubelet version của master node
             NodeList nodeList = getNodes(clusterId);
+            if (nodeList == null || nodeList.getItems() == null) {
+                return "";
+            }
+            
             for (Node node : nodeList.getItems()) {
                 // Kiểm tra xem đây có phải là master/control-plane node không
                 Map<String, String> labels = node.getMetadata().getLabels();
@@ -948,8 +1075,15 @@ public class KubernetesService {
             }
 
             return "";
+            } catch (KubernetesClientException e) {
+                logger.debug("Failed to get Kubernetes version for cluster {}: {}", clusterId, e.getMessage());
+            return "";
         } catch (Exception e) {
-            logger.error("Failed to get Kubernetes version for cluster: {}", clusterId, e);
+                logger.debug("Failed to get Kubernetes version for cluster {}: {}", clusterId, e.getMessage());
+                return "";
+            }
+        } catch (Exception e) {
+            logger.debug("Error getting Kubernetes version for cluster {}: {}", clusterId, e.getMessage());
             return "";
         }
     }
