@@ -31,7 +31,8 @@
 			const allData = await window.ApiClient.get('/admin/clusters').catch(() => []);
 			const tbody = document.getElementById('clusters-tbody');
 			if (!tbody) {
-				console.error('clusters-tbody element not found');
+				// Element không tồn tại - có thể đang ở trang khác (add-cluster.html, kubernetes.html, etc.)
+				// Không cần log vì đây là hành vi bình thường khi ở trang khác
 				return;
 			}
 
@@ -68,6 +69,16 @@
 
 		tbody.innerHTML = '';
 
+		// Show/hide "Add Cluster" button based on cluster count
+		const addClusterBtn = document.getElementById('add-cluster-btn');
+		if (addClusterBtn) {
+			if (!clusters || clusters.length === 0) {
+				addClusterBtn.style.display = 'inline-block';
+			} else {
+				addClusterBtn.style.display = 'none';
+			}
+		}
+
 		if (!clusters || clusters.length === 0) {
 			const tr = document.createElement('tr');
 			tr.innerHTML = '<td colspan="5" class="text-center" style="color: #666666; padding: 20px;">Chưa có cluster nào</td>';
@@ -93,6 +104,7 @@
 				<td>${statusChip}</td>
 				<td style="white-space: nowrap;">
 					<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.location.href='/admin/kubernetes?clusterId=${c.id}'" title="Xem chi tiết">👁️</button>
+					<button class="btn btn-primary" style="padding: 4px 8px; font-size: 12px;" onclick="window.location.href='/admin/cluster/setup?clusterId=${c.id}'" title="Cài đặt">⚙️</button>
 					${c.isOwner ? `<button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.deleteCluster(${c.id}, '${escapeHtml(c.name || '')}')" title="Xóa">🗑️</button>` : ''}
 				</td>
 			`;
@@ -118,16 +130,53 @@
 				window.ApiClient.get('/admin/servers/connected').catch(() => [])
 			]);
 
-			// Fill cluster select
+			// Fill cluster select - hiển thị tên cluster dạng text, không cần dropdown
 			const sel = document.getElementById('k8s-cluster-select');
 			if (sel) {
-				sel.innerHTML = '';
-				(clusters || []).forEach(c => {
-					const opt = document.createElement('option');
-					opt.value = c.id;
-					opt.textContent = `${c.name}`;
-					sel.appendChild(opt);
-				});
+				const parent = sel.closest('div.form-group');
+				const label = parent ? parent.querySelector('label') : null;
+				
+				// Ẩn select hoàn toàn - không dùng dropdown nữa
+				sel.style.display = 'none';
+				
+				// Cập nhật label thành "Cluster hiện tại"
+				if (label) {
+					label.textContent = 'Cluster hiện tại';
+					label.style.fontWeight = '500';
+				}
+				
+				// Tìm hoặc tạo div hiển thị tên cluster
+				let clusterDisplay = parent ? parent.querySelector('.cluster-name-display') : null;
+				
+				if (clusters && clusters.length === 1) {
+					const clusterName = clusters[0].name || `Cluster ${clusters[0].id}`;
+					
+					// Set value của select ẩn để có thể lấy clusterId khi cần
+					sel.value = clusters[0].id;
+					
+					// Tạo hoặc cập nhật div hiển thị tên cluster
+					if (!clusterDisplay) {
+						clusterDisplay = document.createElement('div');
+						clusterDisplay.className = 'cluster-name-display';
+						clusterDisplay.style.cssText = 'padding: 7px 9px; font-size: 13px; font-weight: 600; color: #2E7D32; background: #E8F5E9; border: 1px solid #4CAF50; border-radius: 4px; min-height: 38px; display: flex; align-items: center;';
+						sel.parentNode.insertBefore(clusterDisplay, sel);
+					}
+					clusterDisplay.textContent = clusterName;
+					clusterDisplay.style.display = 'flex';
+				} else {
+					// Chưa có cluster - hiển thị "Chưa có cluster"
+					sel.value = '';
+					
+					// Tạo hoặc cập nhật div hiển thị "Chưa có cluster"
+					if (!clusterDisplay) {
+						clusterDisplay = document.createElement('div');
+						clusterDisplay.className = 'cluster-name-display';
+						clusterDisplay.style.cssText = 'padding: 7px 9px; font-size: 13px; color: #999; background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 4px; min-height: 38px; display: flex; align-items: center;';
+						sel.parentNode.insertBefore(clusterDisplay, sel);
+					}
+					clusterDisplay.textContent = 'Chưa có cluster';
+					clusterDisplay.style.display = 'flex';
+				}
 			}
 
 			// Display servers table
@@ -209,10 +258,21 @@
 					window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
 					return;
 				}
-				const clusterId = parseInt(document.getElementById('k8s-cluster-select').value, 10);
+				
+				// Tự động lấy clusterID nếu chưa chọn nhưng đã có cluster (hệ thống chỉ hỗ trợ 1 cluster)
+				let clusterId = parseInt(document.getElementById('k8s-cluster-select').value, 10);
 				if (!clusterId) {
-					window.showAlert('warning', 'Vui lòng chọn cluster');
-					return;
+					// Nếu chưa chọn, thử lấy cluster đầu tiên
+					const clusters = await window.ApiClient.get('/admin/clusters').catch(() => []);
+					if (clusters && clusters.length > 0) {
+						clusterId = clusters[0].id;
+						// Cập nhật dropdown
+						const sel = document.getElementById('k8s-cluster-select');
+						if (sel) sel.value = clusterId;
+					} else {
+						window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
+						return;
+					}
 				}
 				// Lấy role hiện tại của từng server từ dropdown trong bảng (giữ nguyên role)
 				const serverRoles = [];
@@ -241,6 +301,8 @@
 					window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
 					return;
 				}
+				
+				// Cập nhật role - không cần clusterID, chỉ cần role
 				const role = document.getElementById('k8s-role-select').value;
 				for (const serverId of selected) {
 					// Lấy cluster hiện tại của server từ dropdown trong bảng, giữ nguyên cluster
@@ -252,7 +314,7 @@
 						await saveServerClusterAndRole(serverId, currentClusterId, role);
 					} else {
 						// Nếu không tìm thấy row, chỉ cập nhật role, giữ cluster null
-						await saveServerClusterAndRole(serverId, null, role);
+					await saveServerClusterAndRole(serverId, null, role);
 					}
 				}
 				await loadClustersAndServers();
@@ -281,6 +343,15 @@
 	// Create cluster
 	async function createCluster(name, description) {
 		try {
+			// Check if cluster already exists (system only supports 1 cluster)
+			const existingClusters = await window.ApiClient.get('/admin/clusters').catch(() => []);
+			if (existingClusters && existingClusters.length > 0) {
+				const clusterName = existingClusters[0].name || `Cluster ${existingClusters[0].id}`;
+				const errorMsg = `⚠️ Đã có cluster "${clusterName}" trong hệ thống. Để tạo cluster mới, bạn phải xóa cluster cũ trước.`;
+				window.showAlert('error', errorMsg);
+				throw new Error(errorMsg);
+			}
+
 			// Create new cluster
 			const data = await window.ApiClient.post('/admin/clusters', {
 				name: name.trim(),
@@ -288,9 +359,11 @@
 			});
 			window.showAlert('success', 'Đã tạo cluster thành công');
 			
-			// Reload cluster list to show updated data
+			// Reload cluster list to show updated data (chỉ nếu đang ở trang cluster.html)
+			const isClusterListPage = document.getElementById('clusters-tbody') !== null;
 			const isAssignServersPage = document.getElementById('k8s-assign') && !document.getElementById('k8s-list');
-			if (!isAssignServersPage) {
+			
+			if (isClusterListPage && !isAssignServersPage) {
 				await loadClusterList();
 			}
 			// Also reload clusters for assign-servers page if exists
@@ -308,13 +381,13 @@
 
 	// Delete cluster
 	async function deleteCluster(id, name) {
-		if (!confirm(`Bạn có chắc chắn muốn xóa cluster "${name}" (ID: ${id})?\n\nCảnh báo: Tất cả dữ liệu liên quan sẽ bị xóa vĩnh viễn!`)) {
+		if (!confirm(`Bạn có chắc chắn muốn xóa cluster "${name}" (ID: ${id})?\n\nCảnh báo: Tất cả dữ liệu liên quan sẽ bị xóa vĩnh viễn!\n\nSau khi xóa, bạn có thể tạo cluster mới.`)) {
 			return;
 		}
 
 		try {
 			await window.ApiClient.delete(`/admin/clusters/${id}`);
-			window.showAlert('success', `Đã xóa cluster "${name}" thành công`);
+			window.showAlert('success', `Đã xóa cluster "${name}" thành công. Bây giờ bạn có thể tạo cluster mới.`);
 			await Promise.all([loadClusterList(), loadClustersAndServers()]);
 			if (currentClusterId === id) {
 				resetClusterData();
@@ -331,10 +404,10 @@
 		if (k8sListEl) {
 			// We're on cluster.html, switch back to list view
 			k8sListEl.classList.remove('d-none');
-			document.getElementById('k8s-create')?.classList.remove('d-none');
-			document.getElementById('k8s-assign')?.classList.remove('d-none');
-			document.getElementById('k8s-detail')?.classList.add('d-none');
-			resetClusterData();
+		document.getElementById('k8s-create')?.classList.remove('d-none');
+		document.getElementById('k8s-assign')?.classList.remove('d-none');
+		document.getElementById('k8s-detail')?.classList.add('d-none');
+		resetClusterData();
 		} else {
 			// We're on kubernetes.html, redirect to cluster.html
 			window.location.href = '/admin/cluster';
@@ -1611,6 +1684,13 @@
 			return; // Don't load cluster list on kubernetes.html page
 		}
 
+		// Check if we're on the add-cluster.html page - không cần load cluster list
+		const isAddClusterPage = document.getElementById('create-cluster-form') && !document.getElementById('clusters-tbody');
+		if (isAddClusterPage) {
+			// Trang add-cluster.html không cần load cluster list, module addCluster.js sẽ xử lý
+			return;
+		}
+
 		// Check if we're on the assign-servers.html page
 		const isAssignServersPage = document.getElementById('k8s-assign') && !document.getElementById('k8s-list');
 		
@@ -1622,7 +1702,10 @@
 					loadClustersAndServers();
 				} else {
 					// We're on cluster.html page - load cluster list and form
-					loadClusterList();
+					// Chỉ load nếu element clusters-tbody tồn tại
+					if (document.getElementById('clusters-tbody')) {
+						loadClusterList();
+					}
 					// Bind playbook manager modal (if exists)
 					bindPlaybookManagerModal();
 				}
@@ -1635,7 +1718,7 @@
 					refreshBtn.addEventListener('click', () => {
 						if (isAssignServersPage) {
 							// On assign-servers page
-							loadClustersAndServers();
+				loadClustersAndServers();
 						} else {
 							// On cluster page
 							loadClusterList();

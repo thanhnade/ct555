@@ -7,7 +7,7 @@
     <div class="page-title-row">
       <div>
         <div class="page-title">☸️ Kubernetes Cluster Detail</div>
-        <div class="page-subtitle">Chi tiết cluster: quản lý nodes, Ansible, và các tài nguyên Kubernetes.</div>
+        <div class="page-subtitle">Chi tiết cluster: quản lý nodes và các tài nguyên Kubernetes.</div>
       </div>
       <div style="display: flex; gap: 8px;">
         <button class="btn" id="cd-reload">🔄 Làm mới Cluster</button>
@@ -63,38 +63,6 @@
               </tr>
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <!-- Ansible Section -->
-      <div class="table-card" style="margin-top: 20px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
-          <div>
-            <div class="page-title" style="font-size: 16px; margin-bottom: 4px;">⚙️ Ansible</div>
-            <div class="page-subtitle" style="font-size: 12px;">Quản lý Ansible cho cụm: kiểm tra trạng thái, khởi tạo, cấu hình và playbook</div>
-          </div>
-          <button class="btn" id="cd-check-ansible">🔍 Kiểm tra trạng thái</button>
-        </div>
-        <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; padding: 12px; background: #F8F9FA; border-radius: 6px;">
-          <span class="chip" id="ansible-summary-install" style="background: #E0E0E0; color: #666666;">Chưa kiểm tra</span>
-          <span class="chip" id="ansible-summary-version" style="background: #E0E0E0; color: #666666;">Phiên bản: -</span>
-          <span class="chip" id="ansible-summary-master" style="background: #E0E0E0; color: #666666;">MASTER: -</span>
-          <div style="margin-left: auto;" id="ansible-summary-actions"></div>
-        </div>
-        <div style="padding: 12px; background: #F0F7FF; border-left: 3px solid #003366; border-radius: 6px; margin-bottom: 16px;">
-          <div style="font-weight: 600; margin-bottom: 8px; color: #003366;">📋 Hướng dẫn nhanh</div>
-          <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #333333;">
-            <li><strong>Khởi tạo</strong>: tạo cấu trúc, ghi cấu hình mặc định, đảm bảo SSH key và ping nodes.</li>
-            <li><strong>Cấu hình</strong>: xem/sửa ansible.cfg, hosts, group_vars/all.yml.</li>
-            <li><strong>Playbook</strong>: quản lý file, chạy playbook, theo dõi output.</li>
-          </ul>
-          <div style="margin-top: 8px; font-size: 12px; color: #666666;">Lưu ý: Sau khi thêm node mới, cần cập nhật cấu hình Ansible trước khi chạy playbook.</div>
-        </div>
-        <div id="ansible-status-display" style="margin-bottom: 16px;"></div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#initAnsibleModal">⚡ Khởi tạo</button>
-          <button class="btn" data-bs-toggle="modal" data-bs-target="#ansibleConfigModal">⚙️ Cấu hình</button>
-          <button class="btn" data-bs-toggle="modal" data-bs-target="#playbookManagerModal">📄 Playbook & K8s</button>
         </div>
       </div>
     </div>
@@ -346,7 +314,7 @@
     <!-- Modals -->
     <!-- Add Node Modal -->
     <div class="modal fade" id="addNodeModal" tabindex="-1" aria-labelledby="addNodeModalLabel" aria-hidden="true">
-      <div class="modal-dialog modal-lg">
+      <div class="modal-dialog modal-dialog-scrollable modal-lg">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="addNodeModalLabel">Thêm Node vào Cluster: <span id="add-node-cluster-name"></span></h5>
@@ -407,7 +375,7 @@
                   </div>
                   <div class="mb-3">
                     <label for="add-node-username" class="form-label">Username <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control" id="add-node-username" name="username" placeholder="root" required>
+                    <input type="text" class="form-control" id="add-node-username" name="username" placeholder="root" required autocomplete="username">
                   </div>
                   <div class="mb-3">
                     <label for="add-node-password" class="form-label">Password <span class="text-danger">*</span></label>
@@ -442,395 +410,9 @@
     </div>
     <!-- End Add Node Modal -->
 
-    <!-- Init Ansible Modal -->
-    <div class="modal fade" id="initAnsibleModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">⚡ Khởi tạo Ansible</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-body">
-            <!-- Shared Output Console (top) -->
-            <div class="card mb-3">
-              <div class="card-header d-flex justify-content-between align-items-center">
-                <span class="fw-semibold">Kết quả</span>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="init-output-clear-btn">
-                  🗑️ Xóa log
-                </button>
-              </div>
-              <div class="card-body p-0">
-                <div id="init-ansible-console" class="bg-dark text-light p-3" style="height: 320px; overflow: auto; font-family: monospace; font-size: 12px;">
-                </div>
-              </div>
-            </div>
-
-            <!-- Single consolidated guide -->
-            <div class="card border-0 bg-light">
-              <div class="card-body py-3">
-                <div class="small mb-2 fw-semibold">📋 Hướng dẫn nhanh (4 bước):</div>
-                <ol class="small mb-3 ps-3">
-                  <li class="mb-1">
-                    <strong>Tạo cấu trúc</strong>: /etc/ansible, group_vars, host_vars, ~/.ansible.
-                    Hệ thống sẽ xác minh và báo OK/FAIL.
-                  </li>
-                  <li class="mb-1">
-                    <strong>Ghi cấu hình</strong>: tạo/ghi đè ansible.cfg và hosts dựa trên cluster
-                    (nhóm master/workers và all:vars), sau đó kiểm tra hợp lệ (ansible-inventory).
-                  </li>
-                  <li class="mb-1">
-                    <strong>SSH key</strong>: đảm bảo MASTER có id_rsa/id_rsa.pub và tự ủy quyền
-                    vào authorized_keys (đăng nhập không mật khẩu).
-                  </li>
-                  <li class="mb-1">
-                    <strong>Ping nodes</strong>: kiểm tra kết nối tất cả hosts bằng inventory vừa tạo.
-                  </li>
-                </ol>
-                <div class="small text-muted">
-                  Mẹo: Nhấn "Khởi tạo" để chạy lần lượt 4 bước. Nếu tài khoản có <code>sudo NOPASSWD</code> sẽ không cần mật khẩu; nếu không, hệ thống sẽ yêu cầu nhập.
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <div class="btn-toolbar w-100 justify-content-between" role="toolbar" aria-label="Init toolbar">
-              <div class="btn-group" role="group" aria-label="Primary action">
-                <button type="button" class="btn btn-success" id="init-all-btn" title="Thực hiện toàn bộ 4 bước">
-                  ⚡ Khởi tạo
-                </button>
-              </div>
-              <div class="btn-group" role="group" aria-label="Secondary actions">
-                <button type="button" class="btn btn-outline-success btn-sm" id="init-structure-btn" title="Tạo cấu trúc thư mục Ansible">
-                  📁 Tạo cấu trúc
-                </button>
-                <button type="button" class="btn btn-outline-primary btn-sm" id="init-config-btn" title="Ghi ansible.cfg và hosts mặc định">
-                  📝 Config mặc định
-                </button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="init-sshkey-btn" title="Tạo SSH key cho MASTER">
-                  🔑 SSH key
-                </button>
-                <button type="button" class="btn btn-outline-info btn-sm" id="init-ping-btn" title="Kiểm tra kết nối các node">
-                  📡 Ping nodes
-                </button>
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" title="Đóng cửa sổ">Đóng</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- End Init Ansible Modal -->
-
-    <!-- Ansible Config Modal -->
-    <div class="modal fade" id="ansibleConfigModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">⚙️ Cấu hình Ansible</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-header bg-light border-bottom">
-            <div class="d-flex justify-content-between align-items-center w-100">
-              <div>
-                <strong>Cluster:</strong> <span id="current-cluster-name" class="text-primary">Đang tải...</span>
-              </div>
-              <div class="text-muted small">
-                ℹ️ Cấu hình sẽ được áp dụng cho server MASTER
-              </div>
-            </div>
-          </div>
-          <div class="modal-body">
-            <!-- Status Information Panel -->
-            <div class="mb-3">
-              <div class="alert alert-info d-flex align-items-center" id="config-status-panel" role="alert">
-                ℹ️
-                <div class="flex-grow-1 ms-2">
-                  <strong>Trạng thái cấu hình:</strong>
-                  <span id="config-status-text">Chưa kiểm tra</span>
-                </div>
-                <div class="ms-2">
-                  <small class="text-muted" id="config-last-check">-</small>
-                </div>
-              </div>
-            </div>
-
-            <!-- Tab Navigation -->
-            <ul class="nav nav-tabs mb-3" id="configTabs" role="tablist">
-              <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="tab-ansible-cfg" data-bs-toggle="tab"
-                  data-bs-target="#tab-pane-ansible-cfg" type="button" role="tab" aria-controls="tab-pane-ansible-cfg"
-                  aria-selected="true">
-                  📝 ansible.cfg
-                </button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" id="tab-inventory" data-bs-toggle="tab" data-bs-target="#tab-pane-inventory"
-                  type="button" role="tab" aria-controls="tab-pane-inventory" aria-selected="false">
-                  🖥 Inventory (hosts)
-                </button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" id="tab-variables" data-bs-toggle="tab" data-bs-target="#tab-pane-variables"
-                  type="button" role="tab" aria-controls="tab-pane-variables" aria-selected="false">
-                  ⚙️ Variables (group_vars/all.yml)
-                </button>
-              </li>
-            </ul>
-
-            <!-- Tab Contents -->
-            <div class="tab-content" id="configTabContent">
-              <!-- ansible.cfg Tab -->
-              <div class="tab-pane fade show active" id="tab-pane-ansible-cfg" role="tabpanel"
-                aria-labelledby="tab-ansible-cfg">
-                <div class="mb-3">
-                  <h6 class="mb-3">ansible.cfg</h6>
-                  <textarea id="ansible-cfg-editor" class="form-control" rows="15"
-                    placeholder="[defaults]\ninventory=/etc/ansible/hosts\n..."></textarea>
-                </div>
-              </div>
-
-              <!-- Inventory Tab -->
-              <div class="tab-pane fade" id="tab-pane-inventory" role="tabpanel" aria-labelledby="tab-inventory">
-                <div class="mb-3">
-                  <h6 class="mb-3">Inventory (hosts)</h6>
-                  <textarea id="ansible-inventory-editor" class="form-control" rows="15"
-                    placeholder="[master]\n127.0.0.1 ansible_connection=local\n..."></textarea>
-                </div>
-              </div>
-
-              <!-- Variables Tab -->
-              <div class="tab-pane fade" id="tab-pane-variables" role="tabpanel" aria-labelledby="tab-variables">
-                <div class="mb-3">
-                  <h6 class="mb-3">Variables (group_vars/all.yml)</h6>
-                  <textarea id="ansible-vars-editor" class="form-control" rows="15"
-                    placeholder="key: value\n..."></textarea>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-            <button type="button" class="btn btn-info" id="reload-config-btn">
-              🔄 Tải lại
-            </button>
-            <button type="button" class="btn btn-success" id="verify-ansible-btn">
-              ✅ Xác minh
-            </button>
-            <button type="button" class="btn btn-warning" id="rollback-config-btn">
-              ⏮️ Rollback
-            </button>
-            <button type="button" class="btn btn-primary" id="save-ansible-config-btn">
-              💾 Lưu cấu hình
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- End Ansible Config Modal -->
-
-    <!-- Playbook Manager Modal -->
-    <div class="modal fade" id="playbookManagerModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">📄 Quản lý playbook & cài đặt K8s</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-body">
-            <div class="d-flex justify-content-between mb-3">
-              <div>
-                <button type="button" class="btn btn-sm btn-outline-primary" id="create-playbook-btn">
-                  ➕ Tạo playbook</button>
-                <button type="button" class="btn btn-sm btn-outline-success" id="generate-from-template-btn">
-                  ✨ Tạo từ template</button>
-                <label class="btn btn-sm btn-outline-secondary mb-0">
-                  📤 Tải lên <input type="file" id="upload-playbook-input"
-                    accept=".yml,.yaml" hidden>
-                </label>
-                <button type="button" class="btn btn-sm btn-outline-info" id="refresh-playbooks-btn">
-                  🔄 Làm mới</button>
-              </div>
-              <div class="input-group input-group-sm" style="max-width: 320px;">
-                <span class="input-group-text">🔍</span>
-                <input type="text" id="search-playbook-input" class="form-control" placeholder="Tìm playbook...">
-              </div>
-            </div>
-            <hr>
-            <!-- Filename and Template in same row -->
-            <div class="row g-3 mb-3">
-              <div class="col-6">
-                <label class="form-label">Tên file playbook</label>
-                <div class="input-group">
-                  <input type="text" id="playbook-filename" class="form-control" placeholder="example" required>
-                  <span class="input-group-text">.yml</span>
-                </div>
-                <small class="text-muted">Extension .yml sẽ được thêm tự động</small>
-              </div>
-              <div class="col-6">
-                <label class="form-label">Template K8s (tùy chọn)</label>
-                <select id="playbook-template-select" class="form-select form-select-sm">
-                  <option value="">-- Chọn template K8s --</option>
-                  <optgroup label="I. Chuẩn bị môi trường">
-                    <option value="update-hosts-hostname">01 📝 Cập nhật hosts & hostname</option>
-                    <option value="kernel-sysctl">02 ⚙️ Cấu hình kernel & sysctl</option>
-                    <option value="install-containerd">03 🐳 Cài đặt containerd</option>
-                    <option value="install-kubernetes">04 ☸️ Cài đặt kubeadm/kubelet/kubectl</option>
-                  </optgroup>
-                  <optgroup label="II. Triển khai cluster">
-                    <option value="init-master">05 🚀 Khởi tạo master node</option>
-                    <option value="install-cni">06 🌐 Cài đặt Calico CNI</option>
-                    <option value="install-flannel">06 🌐 Cài đặt Flannel CNI</option>
-                    <option value="join-workers">07 🔗 Thêm worker nodes</option>
-                  </optgroup>
-                  <optgroup label="III. Kiểm tra & Tùy chọn mở rộng">
-                    <option value="verify-cluster">08 🧩 Xác minh trạng thái cụm</option>
-                    <option value="install-ingress">09 🌍 Cài đặt Nginx Ingress</option>
-                    <option value="install-metallb">10 ⚖️ Cài đặt MetalLB LoadBalancer</option>
-                    <option value="install-helm">11 📦 Cài đặt Helm 3</option>
-                    <option value="setup-storage">12 💾 Thiết lập Storage</option>
-                    <option value="prepare-and-join-worker">13 🔗 Chuẩn bị & Join Worker (02→03→04→07)</option>
-                  </optgroup>
-                  <optgroup label="IV. Triển khai toàn bộ">
-                    <option value="deploy-full-cluster">🚀 Triển khai toàn bộ cluster (0-8, Calico)</option>
-                    <option value="deploy-full-cluster-flannel">🚀 Triển khai toàn bộ cluster (0-8, Flannel)</option>
-                  </optgroup>
-                  <optgroup label="V. Bảo trì & Reset">
-                    <option value="reset-cluster">🧹 Reset toàn bộ cluster</option>
-                  </optgroup>
-                </select>
-                <small class="text-muted">Chọn template để tự động tạo nội dung playbook</small>
-              </div>
-            </div>
-            <hr>
-            <!-- Content sections -->
-            <div id="playbook-content-section">
-              <div class="row g-3">
-                <div class="col-12 col-md-4">
-                  <label class="form-label">Danh sách playbook</label>
-                  <div class="list-group small" id="playbook-list" style="overflow-y: auto;">
-                    <div class="list-group-item text-center text-muted">
-                      📁 Đang tải...
-                    </div>
-                  </div>
-                </div>
-                <div class="col-12 col-md-8">
-                  <div id="playbook-content-area">
-                    <label class="form-label">Nội dung playbook</label>
-                    <textarea id="playbook-editor" class="form-control" rows="18"
-                      placeholder="---\n- name: Example\n  hosts: all\n  tasks:\n    - debug: msg=\"hello\"\n"></textarea>
-                  </div>
-                  <!-- Execution status -->
-                  <div id="playbook-execution-status" class="d-none-initial"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <div class="d-flex justify-content-between w-100">
-              <div>
-                <button type="button" class="btn btn-outline-danger d-none-initial" id="delete-playbook-btn">
-                  🗑️ Xóa
-                </button>
-              </div>
-              <div>
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                <button type="button" class="btn btn-success d-none-initial" id="execute-playbook-btn">
-                  ▶️ Thực thi
-                </button>
-                <button type="button" class="btn btn-primary" id="save-playbook-btn">
-                  💾 Lưu
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- End Playbook Manager Modal -->
-
-    <!-- Ansible Installation Modal -->
-    <div class="modal fade" id="ansibleInstallModal" tabindex="-1" aria-labelledby="ansibleInstallModalLabel"
-      aria-hidden="true">
-      <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="ansibleInstallModalLabel">
-              📥 Cài đặt Ansible - Real-time Monitoring
-            </h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-body">
-            <!-- Sudo Password Input Section (Single Master) -->
-            <div id="sudo-password-section" class="mb-4">
-              <h6 class="mb-3">Nhập mật khẩu sudo:</h6>
-              <div id="sudo-password-inputs" class="row">
-                <!-- Sẽ được populate bằng JavaScript -->
-              </div>
-              <div class="d-flex justify-content-end mt-3">
-                <button type="button" class="btn btn-primary" id="start-ansible-install-btn">
-                  ▶️ Bắt đầu cài đặt
-                </button>
-              </div>
-            </div>
-
-            <!-- Real-time Output Section -->
-            <div id="ansible-output-section" class="d-none">
-              <div class="d-flex justify-content-between align-items-center mb-3">
-                <h6 class="mb-0">Tiến trình cài đặt:</h6>
-                <div class="d-flex gap-2">
-                  <button type="button" class="btn btn-sm btn-outline-secondary" id="clear-output-btn">
-                    🗑️ Xóa log
-                  </button>
-                  <button type="button" class="btn btn-sm btn-outline-primary" id="download-log-btn">
-                    📥 Tải log
-                  </button>
-                </div>
-              </div>
-
-              <!-- Progress Bar -->
-              <div class="progress mb-3 h-25">
-                <div id="ansible-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
-                  role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-                  <span id="progress-text">Chuẩn bị...</span>
-                </div>
-              </div>
-
-              <!-- Server Status (optional, single master) -->
-              <div id="server-status-cards" class="row mb-3 d-none">
-                <!-- Ẩn mặc định vì chỉ dùng 1 MASTER; có thể hiển thị lại khi cần -->
-              </div>
-
-              <!-- Real-time Output Console -->
-              <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                  <h6 class="mb-0">Output Console</h6>
-                  <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="auto-scroll-switch" checked>
-                    <label class="form-check-label" for="auto-scroll-switch">Auto-scroll</label>
-                  </div>
-                </div>
-                <div class="card-body p-0">
-                  <div id="ansible-output-console" class="bg-dark text-light p-3" style="height: 400px; overflow: auto; font-family: monospace; font-size: 12px;">
-                    <!-- Output sẽ được hiển thị ở đây -->
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-            <button type="button" class="btn btn-success d-none" id="ansible-complete-btn">
-              ✅ Hoàn thành
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- End Ansible Installation Modal -->
-
     <!-- K8s Output Modal (for describe operations) -->
     <div class="modal fade" id="k8s-output-modal" tabindex="-1" aria-labelledby="k8s-output-modalLabel" aria-hidden="true">
-      <div class="modal-dialog modal-xl">
+      <div class="modal-dialog modal-dialog-scrollable modal-xl">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="k8s-output-modalLabel">
@@ -856,7 +438,7 @@
 
     <!-- Scale Workload Modal -->
     <div class="modal fade" id="scale-workload-modal" tabindex="-1" aria-labelledby="scale-workload-modalLabel" aria-hidden="true">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="scale-workload-modalLabel">
@@ -894,10 +476,7 @@
   </div>
 </div>
 <script src="/js/modules/k8sResources.js"></script>
-<script src="/js/modules/ansibleConfig.js"></script>
-<script src="/js/modules/ansibleWebSocket.js"></script>
 <script src="/js/modules/k8sClusters.js"></script>
-<script src="/js/modules/k8s/playbook-manager.js"></script>
 </body>
 </html>
 

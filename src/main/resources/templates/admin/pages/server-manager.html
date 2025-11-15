@@ -8,7 +8,7 @@
         <div class="page-title">🖥 Quản lý Server</div>
         <div class="page-subtitle">Danh sách các server được AutoDeployApp quản lý. Admin có thể thêm, sửa, xóa, kết nối server.</div>
       </div>
-      <div style="display: flex; gap: 8px;">
+      <div class="d-flex gap-2">
         <button class="btn" id="refresh-servers-btn">🔄 Làm mới</button>
         <button class="btn" id="check-status-btn">🔍 Kiểm tra trạng thái</button>
         <button class="btn btn-primary" onclick="window.location.href='/admin/server/add'">+ Thêm Server</button>
@@ -29,131 +29,145 @@
             </thead>
         <tbody id="servers-tbody">
           <tr>
-            <td colspan="5" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+            <td colspan="5" class="text-center text-muted p-4">Đang tải...</td>
           </tr>
         </tbody>
           </table>
         </div>
 
     <!-- Edit Server Modal -->
-    <div id="editServerPopup" class="popup-backdrop" style="display: none;">
-      <div class="popup-box" style="width: 550px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;">
-        <div class="popup-header" id="edit-server-title">✏️ Sửa Server</div>
-        <div style="padding: 20px; overflow-y: auto; max-height: 60vh; background: #FFFFFF; color: #333333;">
-          <form id="edit-server-form">
-            <input type="hidden" id="edit-server-id">
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Host/IP <span style="color: #CC0000;">*</span></label>
-                <input type="text" id="edit-server-host" name="host" placeholder="192.168.1.100" required 
-                       pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-zA-Z0-9.-]+$" autocomplete="off">
-                <small class="form-hint">Địa chỉ IP hoặc hostname</small>
+    <div class="modal fade" id="editServerModal" tabindex="-1" aria-labelledby="editServerModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="editServerModalLabel">✏️ Sửa Server</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form id="edit-server-form">
+              <input type="hidden" id="edit-server-id">
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Host/IP <span class="text-danger">*</span></label>
+                  <input type="text" id="edit-server-host" name="host" placeholder="192.168.1.100" required 
+                         pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-zA-Z0-9.\-]+$" autocomplete="off" class="form-control">
+                  <small class="form-hint">Địa chỉ IP hoặc hostname</small>
+                </div>
+                <div class="form-group">
+                  <label>Port <span class="text-danger">*</span></label>
+                  <input type="number" id="edit-server-port" name="port" min="1" max="65535" required class="form-control">
+                  <small class="form-hint">Port SSH (mặc định: 22)</small>
+                </div>
+                <div class="form-group">
+                  <label>Username <span class="text-danger">*</span></label>
+                  <input type="text" id="edit-server-username" name="username" placeholder="root hoặc ubuntu" required 
+                         autocomplete="username" class="form-control">
+                  <small class="form-hint">Tên người dùng SSH</small>
+                </div>
+                <div class="form-group">
+                  <label>Password</label>
+                  <input type="password" id="edit-server-password" name="password" placeholder="Để trống nếu không đổi" 
+                         autocomplete="new-password" class="form-control">
+                  <small class="form-hint">Chỉ nhập nếu muốn đổi mật khẩu</small>
+                </div>
+                <div class="form-group">
+                  <label>Trạng thái</label>
+                  <select id="edit-server-status" name="status" class="form-control">
+                    <option value="ONLINE">ONLINE</option>
+                    <option value="OFFLINE">OFFLINE</option>
+                  </select>
+                  <small class="form-hint">Trạng thái server</small>
+                </div>
               </div>
-              <div class="form-group">
-                <label>Port <span style="color: #CC0000;">*</span></label>
-                <input type="number" id="edit-server-port" name="port" min="1" max="65535" required>
-                <small class="form-hint">Port SSH (mặc định: 22)</small>
-              </div>
-              <div class="form-group">
-                <label>Username <span style="color: #CC0000;">*</span></label>
-                <input type="text" id="edit-server-username" name="username" placeholder="root hoặc ubuntu" required 
-                       autocomplete="username">
-                <small class="form-hint">Tên người dùng SSH</small>
-              </div>
-              <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="edit-server-password" name="password" placeholder="Để trống nếu không đổi" 
-                       autocomplete="new-password">
-                <small class="form-hint">Chỉ nhập nếu muốn đổi mật khẩu</small>
-              </div>
-              <div class="form-group">
-                <label>Trạng thái</label>
-                <select id="edit-server-status" name="status" class="form-group select" style="width: 100%;">
-                  <option value="ONLINE">ONLINE</option>
-                  <option value="OFFLINE">OFFLINE</option>
-                </select>
-                <small class="form-hint">Trạng thái server</small>
-              </div>
-            </div>
-            <div id="edit-server-error" class="form-error" style="display: none; margin-top: 12px;"></div>
-          </form>
-        </div>
-        <div class="popup-actions">
-          <button type="button" class="btn" onclick="window.ServersModule.closeEditServerPopup()">✖️ Hủy</button>
-          <button type="button" class="btn btn-primary" id="save-edit-server-btn" onclick="window.ServersModule.saveEditServer()">
-            <span id="save-edit-text">💾 Lưu thay đổi</span>
-            <span id="save-edit-loading" style="display: none;">⏳ Đang lưu...</span>
-          </button>
+              <div id="edit-server-error" class="form-error d-none mt-3"></div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">✖️ Hủy</button>
+            <button type="button" class="btn btn-primary" id="save-edit-server-btn" onclick="window.ServersModule.saveEditServer()">
+              <span id="save-edit-text">💾 Lưu thay đổi</span>
+              <span id="save-edit-loading" class="d-none">⏳ Đang lưu...</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Reconnect Server Modal -->
-    <div id="reconnectServerPopup" class="popup-backdrop" style="display: none;">
-      <div class="popup-box" style="width: 450px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;">
-        <div class="popup-header" id="reconnect-server-title">🔌 Kết nối lại Server</div>
-        <div style="padding: 20px; overflow-y: auto; max-height: 60vh; background: #FFFFFF; color: #333333;">
-          <form id="reconnect-server-form">
-            <input type="hidden" id="reconnect-server-id">
-            <div class="form-group">
-              <label>Host</label>
-              <input type="text" id="reconnect-server-host" readonly 
-                     style="background: #F2F2F2; cursor: not-allowed;" autocomplete="off">
-            </div>
-            <div class="form-group">
-              <label>Password <span style="color: #CC0000;">*</span></label>
-              <input type="password" id="reconnect-server-password" name="password" placeholder="Nhập mật khẩu SSH" required 
-                     autocomplete="current-password">
-              <small class="form-hint">Nhập mật khẩu để kết nối lại (SSH key không khả dụng)</small>
-            </div>
-            <div id="reconnect-server-error" class="form-error" style="display: none; margin-top: 12px;"></div>
-          </form>
-        </div>
-        <div class="popup-actions">
-          <button type="button" class="btn" onclick="window.ServersModule.closeReconnectServerPopup()">✖️ Hủy</button>
-          <button type="button" class="btn btn-primary" id="save-reconnect-btn" onclick="window.ServersModule.saveReconnect()">
-            <span id="save-reconnect-text">🔌 Kết nối</span>
-            <span id="save-reconnect-loading" style="display: none;">⏳ Đang kết nối...</span>
-          </button>
+    <div class="modal fade" id="reconnectServerModal" tabindex="-1" aria-labelledby="reconnectServerModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="reconnectServerModalLabel">🔌 Kết nối lại Server</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form id="reconnect-server-form">
+              <input type="hidden" id="reconnect-server-id">
+              <div class="form-group">
+                <label>Host</label>
+                <input type="text" id="reconnect-server-host" readonly 
+                       class="form-control bg-light" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label>Password <span class="text-danger">*</span></label>
+                <input type="password" id="reconnect-server-password" name="password" placeholder="Nhập mật khẩu SSH" required 
+                       autocomplete="current-password" class="form-control">
+                <small class="form-hint">Nhập mật khẩu để kết nối lại (SSH key không khả dụng)</small>
+              </div>
+              <div id="reconnect-server-error" class="form-error d-none mt-3"></div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">✖️ Hủy</button>
+            <button type="button" class="btn btn-primary" id="save-reconnect-btn" onclick="window.ServersModule.saveReconnect()">
+              <span id="save-reconnect-text">🔌 Kết nối</span>
+              <span id="save-reconnect-loading" class="d-none">⏳ Đang kết nối...</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Terminal Modal -->
-    <div id="terminalModal" class="popup-backdrop" style="display: none;">
-      <div class="popup-box terminal-popup" style="width: 90vw; max-width: 1200px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; background: #FFFFFF;">
-        <div class="popup-header" style="background: #003366; color: #FFFFFF; border-bottom: 2px solid #004080; padding: 16px 20px;">
-          <span style="font-size: 16px; font-weight: 600;">💻 Terminal - <span id="terminal-title">Server</span></span>
-          <button type="button" class="btn-close-terminal" onclick="window.ServersModule.closeTerminal()" style="float: right; border: none; background: transparent; color: #FFFFFF; font-size: 22px; cursor: pointer; padding: 0; width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='transparent'">✕</button>
-        </div>
-        <div style="padding: 16px; background: #F8F9FA; flex: 1; overflow: hidden; display: flex; flex-direction: column; border-bottom: 1px solid #E0E0E0;">
-          <div class="terminal-info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px;">
-            <div class="terminal-info-item">
-              <label style="display: block; font-size: 11px; color: #666666; margin-bottom: 4px; font-weight: 600;">Host/IP</label>
-              <input id="term-host" class="terminal-input" placeholder="Host" readonly>
-            </div>
-            <div class="terminal-info-item">
-              <label style="display: block; font-size: 11px; color: #666666; margin-bottom: 4px; font-weight: 600;">Port</label>
-              <input id="term-port" type="number" class="terminal-input" placeholder="Port" readonly>
-            </div>
-            <div class="terminal-info-item">
-              <label style="display: block; font-size: 11px; color: #666666; margin-bottom: 4px; font-weight: 600;">Username</label>
-              <input id="term-user" class="terminal-input" placeholder="Username" readonly>
+    <div class="modal fade" id="terminalModal" tabindex="-1" aria-labelledby="terminalModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-fullscreen-lg-down modal-xl">
+        <div class="modal-content terminal-modal-content">
+          <div class="modal-header terminal-modal-header">
+            <h5 class="modal-title text-white" id="terminalModalLabel">💻 Terminal - <span id="terminal-title">Server</span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
-            <div class="terminal-info-item">
-              <label style="display: block; font-size: 11px; color: #666666; margin-bottom: 4px; font-weight: 600;">Password (tùy chọn)</label>
-              <input id="term-pass" type="password" class="terminal-input" placeholder="Nhập password nếu cần">
-            </div>
-          </div>
-          <div id="term-output" class="terminal-box"></div>
+          <div class="modal-body terminal-modal-body">
+            <form id="term-connection-form" onsubmit="return false;">
+              <div class="terminal-info-grid mb-3">
+                <div class="terminal-info-item">
+                  <label class="terminal-label">Host/IP</label>
+                  <input id="term-host" class="form-control terminal-input" placeholder="Host" readonly>
+                </div>
+                <div class="terminal-info-item">
+                  <label class="terminal-label">Port</label>
+                  <input id="term-port" type="number" class="form-control terminal-input" placeholder="Port" readonly>
+                </div>
+                <div class="terminal-info-item">
+                  <label class="terminal-label">Username</label>
+                  <input id="term-user" name="username" class="form-control terminal-input" placeholder="Username" readonly autocomplete="username">
+                </div>
+                <div class="terminal-info-item">
+                  <label class="terminal-label">Password (tùy chọn)</label>
+                  <input id="term-pass" type="password" name="password" class="form-control terminal-input" placeholder="Nhập password nếu cần" autocomplete="current-password">
+                </div>
               </div>
-        <div class="terminal-footer" style="background: #FFFFFF; border-top: 1px solid #E0E0E0; padding: 12px 16px; display: flex; gap: 10px; align-items: center;">
-          <button id="term-connect-btn" type="button" class="btn btn-primary" style="white-space: nowrap;">🔌 Kết nối</button>
-          <form id="term-input-form" style="flex: 1; display: flex; gap: 8px; margin: 0;">
-            <input id="term-input" class="terminal-command-input" placeholder="Nhập lệnh và nhấn Enter để gửi" autocomplete="off">
-            <button class="btn btn-primary" type="submit" style="white-space: nowrap;">▶️ Gửi</button>
             </form>
-          <button type="button" class="btn" onclick="window.ServersModule.closeTerminal()" style="white-space: nowrap;">✖️ Đóng</button>
+            <div id="term-output" class="terminal-box flex-fill"></div>
+          </div>
+          <div class="modal-footer terminal-modal-footer">
+            <button id="term-connect-btn" type="button" class="btn btn-primary text-nowrap">🔌 Kết nối</button>
+            <form id="term-input-form" class="d-flex flex-fill gap-2 m-0">
+              <input id="term-input" class="form-control terminal-command-input" placeholder="Nhập lệnh và nhấn Enter để gửi" autocomplete="off">
+              <button class="btn btn-primary text-nowrap" type="submit">▶️ Gửi</button>
+            </form>
+            <button type="button" class="btn btn-secondary text-nowrap" data-bs-dismiss="modal">✖️ Đóng</button>
+          </div>
         </div>
       </div>
     </div>

@@ -6,9 +6,10 @@
     <div class="page-title-row">
       <div>
         <div class="page-title">🧩 Quản lý Cluster</div>
-        <div class="page-subtitle">Tạo và quản lý Kubernetes cluster. Sử dụng nút "Thêm Cluster" để tạo cluster mới.</div>
+        <div class="page-subtitle">Xem và quản lý các Kubernetes cluster trong hệ thống.</div>
       </div>
       <div style="display: flex; gap: 8px;">
+        <button class="btn btn-primary" id="add-cluster-btn" style="display: none;" onclick="window.location.href='/admin/cluster/add'">+ Thêm Cluster</button>
         <button class="btn" id="refresh-clusters-btn">🔄 Làm mới</button>
       </div>
     </div>
@@ -18,42 +19,7 @@
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
         <div>
           <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">📊 Danh sách Cluster</div>
-          <div class="page-subtitle" style="font-size: 12px;">Thông tin chi tiết về các cluster trong hệ thống. Click "Thêm Cluster" để tạo cluster mới.</div>
-        </div>
-        <button class="btn btn-primary" onclick="if(window.K8sClustersModule && window.K8sClustersModule.toggleCreateCluster) window.K8sClustersModule.toggleCreateCluster(); else { const accordion = document.getElementById('create-cluster-accordion'); if(accordion) accordion.classList.toggle('open'); }">+ Thêm Cluster</button>
-      </div>
-      
-      <!-- Create Cluster Accordion (inline trong danh sách) -->
-      <div class="accordion" id="create-cluster-accordion" style="margin-bottom: 16px;">
-        <div class="accordion-header" onclick="if(window.K8sClustersModule && window.K8sClustersModule.toggleCreateCluster) window.K8sClustersModule.toggleCreateCluster();">
-          <span>➕ Tạo cluster mới</span>
-          <span class="arrow">›</span>
-        </div>
-        <div class="accordion-body">
-          <form id="create-cluster-inline-form">
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Tên Cluster <span style="color: #CC0000;">*</span></label>
-                <input type="text" name="name" id="cluster-name-inline" placeholder="my-cluster" required 
-                       pattern="[a-zA-Z0-9-_]+" minlength="3" maxlength="50" autocomplete="off">
-                <small class="form-hint">Tên cluster (chỉ chứa chữ, số, dấu gạch ngang và gạch dưới)</small>
-              </div>
-              <div class="form-group">
-                <label>Mô tả</label>
-                <input type="text" name="description" id="cluster-description-inline" placeholder="Mô tả cluster (tùy chọn)" 
-                       maxlength="255" autocomplete="off">
-                <small class="form-hint">Mô tả ngắn về cluster</small>
-              </div>
-            </div>
-            <div id="create-cluster-inline-error" class="form-error" style="display: none; margin-top: 12px;"></div>
-            <div style="margin-top: 16px; display: flex; gap: 8px;">
-              <button type="submit" class="btn btn-primary" id="create-cluster-inline-submit-btn">
-                <span id="create-cluster-inline-text">💾 Tạo Cluster</span>
-                <span id="create-cluster-inline-loading" style="display: none;">⏳ Đang tạo...</span>
-              </button>
-              <button type="button" class="btn" onclick="if(window.K8sClustersModule && window.K8sClustersModule.toggleCreateCluster) window.K8sClustersModule.toggleCreateCluster(); else { const accordion = document.getElementById('create-cluster-accordion'); if(accordion) accordion.classList.remove('open'); }">✖️ Hủy</button>
-            </div>
-          </form>
+          <div class="page-subtitle" style="font-size: 12px;">Thông tin chi tiết về các cluster trong hệ thống.</div>
         </div>
       </div>
       

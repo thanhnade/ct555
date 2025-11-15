@@ -16,45 +16,106 @@ function getClusterId() {
 }
 // Load playbook cho cluster hiện tại (optional override)
 async function loadPlaybooks(clusterIdOverride) {
-	const cid = clusterIdOverride || getClusterId();
+	let cid = clusterIdOverride || getClusterId();
 	if (!cid) {
 		console.error('No cluster selected');
+		const playbookList = document.getElementById('playbook-list');
+		if (playbookList) {
+			playbookList.innerHTML = '<div class="list-group-item text-center text-warning">Chưa chọn cluster. Vui lòng chọn cluster trước.</div>';
+		}
+		return;
+	}
+
+	// Validate và parse clusterId thành số
+	try {
+		cid = typeof cid === 'string' ? parseInt(cid, 10) : Number(cid);
+		if (isNaN(cid) || cid <= 0) {
+			throw new Error(`Cluster ID không hợp lệ: ${clusterIdOverride || getClusterId()}`);
+		}
+	} catch (err) {
+		console.error('Invalid cluster ID:', err);
+		const playbookList = document.getElementById('playbook-list');
+		if (playbookList) {
+			playbookList.innerHTML = `<div class="list-group-item text-center text-danger">
+      <i class="bi bi-exclamation-triangle me-2"></i>
+      Cluster ID không hợp lệ: ${clusterIdOverride || getClusterId()}
+      </div>`;
+		}
 		return;
 	}
 
 	try {
 		// Lưu lại override nếu có
 		if (clusterIdOverride) {
-			window.currentClusterId = clusterIdOverride;
+			window.currentClusterId = cid;
 		}
+		
 		const response = await fetch(`/api/ansible-playbook/list/${cid}`);
+		
+		// Handle error response với message từ server nếu có
 		if (!response.ok) {
-			throw new Error('Failed to load playbooks');
+			let errorMessage = 'Không thể tải danh sách playbook';
+			
+			// Nếu là 400, hiển thị message rõ ràng hơn về kết nối master
+			if (response.status === 400) {
+				errorMessage = 'Không thể kết nối đến máy master của cluster. Vui lòng kiểm tra kết nối server hoặc cluster ID.';
+			} else {
+				// Thử đọc error message từ response cho các status code khác
+				try {
+					const errorText = await response.text();
+					if (errorText) {
+						try {
+							const errorData = JSON.parse(errorText);
+							if (errorData && errorData.error) {
+								errorMessage = errorData.error;
+							} else if (errorData && errorData.message) {
+								errorMessage = errorData.message;
+							}
+						} catch (_) {
+							// Nếu không parse được JSON, sử dụng text trực tiếp nếu có
+							if (errorText.trim().length > 0) {
+								errorMessage = errorText;
+							}
+						}
+					}
+				} catch (_) {
+					// Nếu không đọc được response, sử dụng message mặc định
+				}
+			}
+			
+			throw new Error(errorMessage);
 		}
 
 		const playbooks = await response.json();
 		const playbookList = document.getElementById('playbook-list');
 
-		if (playbooks.length === 0) {
+		if (!playbookList) {
+			console.warn('playbook-list element not found');
+			return;
+		}
+
+		if (!playbooks || playbooks.length === 0) {
 			playbookList.innerHTML = '<div class="list-group-item text-center text-muted">Chưa có playbook nào</div>';
 		} else {
 			playbookList.innerHTML = '';
 			playbooks.forEach(pb => {
+				// Escape HTML để tránh XSS
+				const escapedPb = pb.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 				const item = document.createElement('div');
 				item.className = 'list-group-item d-flex justify-content-between align-items-center';
 				item.innerHTML = `
-      <div class="playbook-item" data-name="${pb}">
-        <div class="fw-bold">${pb}</div>
+      <div class="playbook-item" data-name="${escapedPb}">
+        <div class="fw-bold">${escapedPb}</div>
         <div class="small text-muted">Playbook file</div>
       </div>
       <div class="btn-group btn-group-sm">
-        <button class="btn btn-outline-primary btn-sm" onclick="loadPlaybook('${pb}')" title="Xem">
+        <button class="btn btn-outline-primary btn-sm" onclick="loadPlaybook('${escapedPb}')" title="Xem">
         👁️
         </button>
-        <button class="btn btn-outline-success btn-sm" onclick="executePlaybook('${pb}')" title="Thực thi">
+        <button class="btn btn-outline-success btn-sm" onclick="executePlaybook('${escapedPb}')" title="Thực thi">
         ▶️
         </button>
-        <button class="btn btn-outline-danger btn-sm" onclick="deletePlaybook('${pb}')" title="Xóa">
+        <button class="btn btn-outline-danger btn-sm" onclick="deletePlaybook('${escapedPb}')" title="Xóa">
         🗑️
         </button>
       </div>
@@ -64,15 +125,20 @@ async function loadPlaybooks(clusterIdOverride) {
 		}
 	} catch (error) {
 		console.error('Error loading playbooks:', error);
-		// Hiển thị lỗi trong playbook list thay vì dùng showAlert
+		// Hiển thị lỗi trong playbook list
 		const playbookList = document.getElementById('playbook-list');
 		if (playbookList) {
+			const errorMsg = error.message || 'Lỗi không xác định';
 			playbookList.innerHTML = `
       <div class="list-group-item text-center text-danger">
       <i class="bi bi-exclamation-triangle me-2"></i>
-      Lỗi tải danh sách playbook: ${error.message}
+      ${errorMsg}
       </div>
     `;
+		}
+		// Cũng hiển thị alert nếu có
+		if (window.showAlert && typeof window.showAlert === 'function') {
+			window.showAlert('error', error.message || 'Không thể tải danh sách playbook');
 		}
 	}
 }

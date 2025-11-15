@@ -3,6 +3,41 @@
 (function () {
 	'use strict';
 
+	// Global utility: Force cleanup stuck modal backdrops
+	// Can be called from console: window.cleanupModalBackdrops()
+	window.cleanupModalBackdrops = function() {
+		const backdrops = document.querySelectorAll('.modal-backdrop');
+		const showingModals = document.querySelectorAll('.modal.show');
+		
+		if (showingModals.length === 0) {
+			// No modals showing - remove all backdrops
+			backdrops.forEach(backdrop => backdrop.remove());
+			document.body.classList.remove('modal-open');
+			document.body.style.removeProperty('padding-right');
+			document.body.style.removeProperty('overflow');
+			console.log('✅ Cleaned up all modal backdrops');
+		} else {
+			// Some modals are showing - only remove non-showing backdrops
+			let removedCount = 0;
+			backdrops.forEach(backdrop => {
+				if (!backdrop.classList.contains('show')) {
+					backdrop.remove();
+					removedCount++;
+				}
+			});
+			if (removedCount > 0) {
+				console.log(`✅ Cleaned up ${removedCount} stuck modal backdrop(s)`);
+			} else {
+				console.log('ℹ️ No stuck backdrops found');
+			}
+		}
+		
+		// Also try using Modal.cleanupBackdrop if available
+		if (window.Modal && typeof window.Modal.cleanupBackdrop === 'function') {
+			window.Modal.cleanupBackdrop();
+		}
+	};
+
 	// Global showAlert utility - Uses Toast component if available
 	window.showAlert = function (type, message) {
 		try {
@@ -98,6 +133,17 @@
 								focus: true
 							});
 						}
+						
+						// Add event listener to ensure aria-hidden is properly managed
+						// Remove aria-hidden before modal gains focus (in show.bs.modal event)
+						// Use capture phase to ensure it runs before Bootstrap's handler
+						modalEl.addEventListener('show.bs.modal', function() {
+							// Ensure aria-hidden is removed before modal becomes visible and gains focus
+							this.removeAttribute('aria-hidden');
+						}, { once: false, capture: true });
+						
+						// NOTE: Không cần thêm individual hidden.bs.modal listener ở đây
+						// vì đã có global listener trong modal.js (line 355) sẽ cleanup cho TẤT CẢ modals
 					} catch (err) {
 						console.warn(`Could not pre-initialize modal ${modalId}:`, err);
 						// Remove data-bs-toggle to prevent Bootstrap from trying to auto-initialize
@@ -164,9 +210,30 @@
 							});
 						}
 						
-						// Modal is now initialized, Bootstrap's event handler will handle showing it
-						// Don't prevent default - let Bootstrap handle the show
-						return true;
+						// Cleanup any stuck backdrops before showing new modal
+						if (window.Modal && typeof window.Modal.cleanupBackdrop === 'function') {
+							window.Modal.cleanupBackdrop();
+						}
+						
+						// CRITICAL: Remove aria-hidden TRƯỚC KHI show modal để tránh accessibility violation
+						// khi focus vào button trong modal. Phải remove ngay lập tức, nhiều lần để đảm bảo.
+						modalEl.removeAttribute('aria-hidden');
+						
+						// Prevent Bootstrap's default handler from running to avoid duplicate initialization
+						e.preventDefault();
+						e.stopPropagation();
+						
+						// Đảm bảo aria-hidden vẫn bị remove trước khi show
+						// Sử dụng requestAnimationFrame để đảm bảo remove trước khi Bootstrap xử lý
+						requestAnimationFrame(() => {
+							// Remove aria-hidden một lần nữa trước khi show để đảm bảo
+							modalEl.removeAttribute('aria-hidden');
+							// Modal is now initialized, show it explicitly
+							// This ensures the modal opens even if Bootstrap's default handler doesn't fire
+							modalInstance.show();
+						});
+						
+						return false;
 					} catch (err) {
 						console.error(`Error initializing modal ${modalId}:`, err);
 						// Prevent Bootstrap from trying to initialize with invalid options
@@ -207,6 +274,19 @@
 											focus: true
 										});
 									}
+									
+									// Add event listener to ensure aria-hidden is properly managed
+									// Remove aria-hidden TRƯỚC KHI modal gains focus (in show.bs.modal event)
+									// Sử dụng capture phase để chạy TRƯỚC Bootstrap's handler
+									modalEl.addEventListener('show.bs.modal', function() {
+										// CRITICAL: Remove aria-hidden TRƯỚC KHI modal becomes visible và focus vào button
+										if (this.hasAttribute('aria-hidden')) {
+											this.removeAttribute('aria-hidden');
+										}
+									}, { once: false, capture: true, passive: false });
+									
+									// NOTE: Không cần thêm individual hidden.bs.modal listener ở đây
+									// vì đã có global listener trong modal.js (line 355) sẽ cleanup cho TẤT CẢ modals
 								} catch (err) {
 									console.warn(`Could not initialize dynamically added modal ${modalEl.id}:`, err);
 								}
@@ -226,8 +306,26 @@
 		}
 	}
 
+	// Cleanup stuck backdrops on initialization
+	function cleanupStuckBackdrops() {
+		// Remove all stuck backdrops that don't have a corresponding showing modal
+		const backdrops = document.querySelectorAll('.modal-backdrop');
+		const showingModals = document.querySelectorAll('.modal.show');
+		
+		if (showingModals.length === 0 && backdrops.length > 0) {
+			// No modals showing but backdrops exist - remove them
+			backdrops.forEach(backdrop => backdrop.remove());
+			document.body.classList.remove('modal-open');
+			document.body.style.removeProperty('padding-right');
+			document.body.style.removeProperty('overflow');
+		}
+	}
+
 	// Initialize on DOM ready
 	function init() {
+		// Cleanup stuck backdrops first
+		cleanupStuckBackdrops();
+		
 		initPageRouting();
 		// Setup click interceptor first to catch early clicks
 		setupModalClickInterceptor();

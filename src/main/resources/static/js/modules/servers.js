@@ -298,7 +298,7 @@
 			document.getElementById('edit-server-password').value = '';
 
 			// Update title
-			const titleEl = document.getElementById('edit-server-title');
+			const titleEl = document.getElementById('editServerModalLabel');
 			if (titleEl) {
 				titleEl.textContent = `✏️ Sửa Server: ${escapeHtml(server.host || 'Unknown')}`;
 			}
@@ -391,14 +391,22 @@
 
 	// Open edit server popup
 	function openEditServerPopup() {
-		const popup = document.getElementById('editServerPopup');
-		if (popup) popup.style.display = 'flex';
+		const modalEl = document.getElementById('editServerModal');
+		if (modalEl) {
+			const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+			modal.show();
+		}
 	}
 
 	// Close edit server popup
 	function closeEditServerPopup() {
-		const popup = document.getElementById('editServerPopup');
-		if (popup) popup.style.display = 'none';
+		const modalEl = document.getElementById('editServerModal');
+		if (modalEl) {
+			const modal = bootstrap.Modal.getInstance(modalEl);
+			if (modal) {
+				modal.hide();
+			}
+		}
 		const form = document.getElementById('edit-server-form');
 		if (form) form.reset();
 		hideEditServerError();
@@ -435,7 +443,7 @@
 			document.getElementById('reconnect-server-host').value = server.host || '';
 
 			// Update title
-			const titleEl = document.getElementById('reconnect-server-title');
+			const titleEl = document.getElementById('reconnectServerModalLabel');
 			if (titleEl) {
 				titleEl.textContent = `🔌 Kết nối lại: ${escapeHtml(server.host || 'Unknown')}`;
 			}
@@ -445,8 +453,11 @@
 			hideReconnectServerError();
 
 			// Show modal
-			const popup = document.getElementById('reconnectServerPopup');
-			if (popup) popup.style.display = 'flex';
+			const modalEl = document.getElementById('reconnectServerModal');
+			if (modalEl) {
+				const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+				modal.show();
+			}
 		} catch (error) {
 			window.showAlert('error', 'Không thể tải thông tin server: ' + (error.message || 'Lỗi không xác định'));
 		}
@@ -506,8 +517,13 @@
 
 	// Close reconnect server popup
 	function closeReconnectServerPopup() {
-		const popup = document.getElementById('reconnectServerPopup');
-		if (popup) popup.style.display = 'none';
+		const modalEl = document.getElementById('reconnectServerModal');
+		if (modalEl) {
+			const modal = bootstrap.Modal.getInstance(modalEl);
+			if (modal) {
+				modal.hide();
+			}
+		}
 		const form = document.getElementById('reconnect-server-form');
 		if (form) form.reset();
 		hideReconnectServerError();
@@ -748,11 +764,14 @@
 			}
 			
 			// Show modal
-			const modal = document.getElementById('terminalModal');
-			if (modal) modal.style.display = 'flex';
-			
-			if (isConnected) {
-				setTimeout(() => connectTerminalAuto(), 200);
+			const modalEl = document.getElementById('terminalModal');
+			if (modalEl) {
+				const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+				modal.show();
+				
+				if (isConnected) {
+					setTimeout(() => connectTerminalAuto(), 200);
+				}
 			}
 		}).catch(err => {
 			window.showAlert('error', 'Không thể tải thông tin server: ' + (err.message || 'Lỗi'));
@@ -760,8 +779,13 @@
 	}
 
 	function closeTerminal() {
-		const modal = document.getElementById('terminalModal');
-		if (modal) modal.style.display = 'none';
+		const modalEl = document.getElementById('terminalModal');
+		if (modalEl) {
+			const modal = bootstrap.Modal.getInstance(modalEl);
+			if (modal) {
+				modal.hide();
+			}
+		}
 		try { termWS?.close(); } catch (_) { }
 		termWS = null;
 		if (term) {
@@ -831,8 +855,35 @@
 
 	function init() {
 		const form = document.getElementById('create-server-form');
-		if (form) {
-			form.addEventListener('submit', createServer);
+		if (form && !form.dataset.bound) {
+			form.dataset.bound = '1';
+			
+			// Check if we're on add-server page (need redirect after success)
+			const isAddServerPage = window.location.pathname.includes('/server/add');
+			
+			if (isAddServerPage) {
+				// For add-server page: bind with redirect logic
+				form.addEventListener('submit', async function(e) {
+					e.preventDefault();
+					if (window.ServersModule && window.ServersModule.createServer) {
+						try {
+							await window.ServersModule.createServer(e);
+							// Redirect to server list on success (if no error displayed)
+							const errorEl = document.getElementById('create-server-error');
+							if (!errorEl || errorEl.style.display === 'none' || !errorEl.textContent.trim()) {
+								setTimeout(() => {
+									window.location.href = '/admin/server';
+								}, 1000);
+							}
+						} catch (err) {
+							console.error('Error creating server:', err);
+						}
+					}
+				});
+			} else {
+				// For server-manager page: bind normally
+				form.addEventListener('submit', createServer);
+			}
 		}
 
 		const refreshBtn = document.getElementById('refresh-servers-btn');

@@ -3,7 +3,7 @@
 <body>
 <div th:fragment="sidebar" class="sidebar">
   <div class="sidebar-header">
-    <div class="logo-circle">MMT</div>
+    <div class="logo-circle">AD</div>
     <span th:href="@{/admin}">AutoDeploy</span>
   </div>
 
@@ -17,6 +17,7 @@
       <a th:href="@{/admin/server}" onclick="setActiveNav(this)">🖥 Servers</a>
       <a th:href="@{/admin/server/add}" onclick="setActiveNav(this)">➕ Add Server</a>
       <a th:href="@{/admin/cluster}" onclick="setActiveNav(this)">🧩 Clusters</a>
+      <a th:href="@{/admin/cluster/add}" onclick="setActiveNav(this)">➕ Add Cluster</a>
       <a th:href="@{/admin/cluster/assign}" onclick="setActiveNav(this)">🔗 Assign Servers</a>
       <a th:href="@{/admin/cluster/setup}" onclick="setActiveNav(this)">⚙ Cluster Setup</a>
     </div>
@@ -25,7 +26,7 @@
   <!-- GROUP 2 – KUBERNETES -->
   <div class="dropdown-group">
     <div class="dropdown-header" onclick="toggleDropdown(this)">
-      Kubernetes (Rancher View)
+      Kubernetes
       <span class="arrow">›</span>
     </div>
     <div class="dropdown-content">
@@ -50,8 +51,8 @@
       <a th:href="@{/admin/deployments}" onclick="setActiveNav(this)">🧩 User Apps</a>
       <a th:href="@{/admin/deployments}" onclick="setActiveNav(this)">📝 Review Requests</a>
     </div>
+    </div>
   </div>
-</div>
 </body>
 </html>
 

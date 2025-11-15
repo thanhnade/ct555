@@ -11,7 +11,8 @@
 			this.modalElement = document.getElementById(modalId);
 			if (!this.modalElement) {
 				console.warn(`ModalManager: Modal #${modalId} not found`);
-				return;
+				// Throw error to prevent creating invalid instance
+				throw new Error(`ModalManager: Modal #${modalId} not found in DOM`);
 			}
 
 			this.options = {
@@ -28,32 +29,41 @@
 			this.onHidden = options.onHidden || null;
 			this.onHidePrevented = options.onHidePrevented || null;
 
+			// Store event listeners for cleanup
+			this._eventListeners = [];
+
 			this._init();
 		}
 
 		_init() {
-			// Initialize Bootstrap modal
-			// Ensure backdrop is a valid value (true, false, or 'static')
-			const backdropValue = this.options.backdrop === undefined ? true : this.options.backdrop;
-			const keyboardValue = this.options.keyboard === undefined ? true : this.options.keyboard;
-			const focusValue = this.options.focus === undefined ? true : this.options.focus;
+			// Use Bootstrap's getOrCreateInstance to ensure proper initialization
+			// This automatically handles existing instances and prevents duplicates
+			const modalConfig = {
+				backdrop: this.options.backdrop !== undefined ? this.options.backdrop : true,
+				keyboard: this.options.keyboard !== undefined ? this.options.keyboard : true,
+				focus: this.options.focus !== undefined ? this.options.focus : true
+			};
 
-			this.modal = new bootstrap.Modal(this.modalElement, {
-				backdrop: backdropValue,
-				keyboard: keyboardValue,
-				focus: focusValue
-			});
+			this.modal = bootstrap.Modal.getOrCreateInstance(this.modalElement, modalConfig);
 
-			// Bind event listeners
-			this.modalElement.addEventListener('show.bs.modal', (e) => {
+			// Bind event listeners and store references for cleanup
+			const showHandler = (e) => {
+				// Ensure aria-hidden is removed for accessibility
+				if (this.modalElement.hasAttribute('aria-hidden')) {
+					this.modalElement.removeAttribute('aria-hidden');
+				}
 				if (this.onShow) this.onShow(e);
-			});
+			};
+			this.modalElement.addEventListener('show.bs.modal', showHandler);
+			this._eventListeners.push({ event: 'show.bs.modal', handler: showHandler });
 
-			this.modalElement.addEventListener('shown.bs.modal', (e) => {
+			const shownHandler = (e) => {
 				if (this.onShown) this.onShown(e);
-			});
+			};
+			this.modalElement.addEventListener('shown.bs.modal', shownHandler);
+			this._eventListeners.push({ event: 'shown.bs.modal', handler: shownHandler });
 
-			this.modalElement.addEventListener('hide.bs.modal', (e) => {
+			const hideHandler = (e) => {
 				if (this.onHide) {
 					const result = this.onHide(e);
 					if (result === false) {
@@ -61,11 +71,15 @@
 						if (this.onHidePrevented) this.onHidePrevented(e);
 					}
 				}
-			});
+			};
+			this.modalElement.addEventListener('hide.bs.modal', hideHandler);
+			this._eventListeners.push({ event: 'hide.bs.modal', handler: hideHandler });
 
-			this.modalElement.addEventListener('hidden.bs.modal', (e) => {
+			const hiddenHandler = (e) => {
 				if (this.onHidden) this.onHidden(e);
-			});
+			};
+			this.modalElement.addEventListener('hidden.bs.modal', hiddenHandler);
+			this._eventListeners.push({ event: 'hidden.bs.modal', handler: hiddenHandler });
 		}
 
 		/**
@@ -96,9 +110,18 @@
 		}
 
 		/**
-		 * Dispose the modal instance
+		 * Dispose the modal instance and cleanup event listeners
 		 */
 		dispose() {
+			// Remove event listeners to prevent memory leaks
+			if (this._eventListeners && this.modalElement) {
+				this._eventListeners.forEach(({ event, handler }) => {
+					this.modalElement.removeEventListener(event, handler);
+				});
+				this._eventListeners = [];
+			}
+
+			// Dispose Bootstrap modal instance
 			if (this.modal) {
 				this.modal.dispose();
 				this.modal = null;
@@ -171,8 +194,24 @@
 			window.__MODAL_INSTANCES__ = new Map();
 		}
 
+		// Check if instance exists and modal element still exists in DOM
+		const existingInstance = window.__MODAL_INSTANCES__.get(modalId);
+		const modalElement = document.getElementById(modalId);
+
+		// If instance exists but modal element was removed, dispose and create new
+		if (existingInstance && !modalElement) {
+			existingInstance.dispose();
+			window.__MODAL_INSTANCES__.delete(modalId);
+		}
+
+		// Create new instance if not exists or was disposed
 		if (!window.__MODAL_INSTANCES__.has(modalId)) {
-			window.__MODAL_INSTANCES__.set(modalId, new ModalManager(modalId, options));
+			try {
+				window.__MODAL_INSTANCES__.set(modalId, new ModalManager(modalId, options));
+			} catch (err) {
+				console.error(`Failed to create ModalManager for #${modalId}:`, err);
+				return null;
+			}
 		}
 
 		return window.__MODAL_INSTANCES__.get(modalId);
@@ -183,7 +222,9 @@
 	 */
 	function showModal(modalId, options = {}) {
 		const modal = getModal(modalId, options);
-		modal.show();
+		if (modal) {
+			modal.show();
+		}
 		return modal;
 	}
 
@@ -194,14 +235,52 @@
 		const modalEl = document.getElementById(modalId);
 		if (modalEl) {
 			try {
-				const modalInstance = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+				const modalInstance = bootstrap.Modal.getInstance(modalEl);
 				if (modalInstance) {
 					modalInstance.hide();
+				} else {
+					// If no instance exists, create one and hide it
+					const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+					modal.hide();
 				}
 			} catch (err) {
 				console.error(`Error hiding modal ${modalId}:`, err);
 			}
 		}
+	}
+
+	/**
+	 * Force cleanup stuck backdrop elements
+	 * Bootstrap handles backdrop cleanup automatically, but this function
+	 * can be used as a fallback to clean up any stuck backdrops
+	 */
+	function forceCleanupBackdrop() {
+		const showingModals = document.querySelectorAll('.modal.show');
+		const backdrops = document.querySelectorAll('.modal-backdrop');
+		
+		// Only cleanup if no modals are showing
+		if (showingModals.length === 0 && backdrops.length > 0) {
+			backdrops.forEach(backdrop => backdrop.remove());
+			document.body.classList.remove('modal-open');
+			document.body.style.removeProperty('padding-right');
+			document.body.style.removeProperty('overflow');
+		}
+	}
+
+	// Global event listener to cleanup stuck backdrops after modal is hidden
+	// Bootstrap handles cleanup automatically, but this ensures any stuck backdrops are removed
+	document.addEventListener('hidden.bs.modal', function() {
+		// Use requestAnimationFrame to ensure Bootstrap's cleanup has completed
+		requestAnimationFrame(() => {
+			forceCleanupBackdrop();
+		});
+	});
+
+	// Cleanup stuck backdrops on page load
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', forceCleanupBackdrop);
+	} else {
+		forceCleanupBackdrop();
 	}
 
 	/**
@@ -223,8 +302,8 @@
 			onHidden = null
 		} = options;
 
-		// Generate unique ID
-		const modalId = `dynamic-modal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+		// Generate unique ID (use substring instead of deprecated substr)
+		const modalId = `dynamic-modal-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
 		// Create modal HTML
 		const modalHtml = `
@@ -277,7 +356,7 @@
 		get: getModal,
 		show: showModal,
 		hide: hideModal,
-		create: createModal
+		create: createModal,
+		cleanupBackdrop: forceCleanupBackdrop
 	};
 })();
-

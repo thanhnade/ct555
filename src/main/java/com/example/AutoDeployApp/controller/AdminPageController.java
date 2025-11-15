@@ -53,6 +53,13 @@ public class AdminPageController {
 		return "admin/pages/cluster";
 	}
 
+	@GetMapping("/cluster/add")
+	public String addClusterPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Add Cluster");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/add-cluster";
+	}
+
 	@GetMapping("/cluster/assign")
 	public String assignServersPage(Model model, HttpServletRequest request) {
 		model.addAttribute("pageTitle", "Assign Servers to Cluster");

@@ -19,7 +19,7 @@
           <div class="form-group">
             <label>Host/IP <span style="color: #CC0000;">*</span></label>
             <input type="text" name="host" id="server-host" placeholder="192.168.1.100" required 
-                   pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-zA-Z0-9.-]+$" autocomplete="off">
+                   pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-zA-Z0-9.\-]+$" autocomplete="off">
             <small class="form-hint">Địa chỉ IP hoặc hostname</small>
           </div>
           <div class="form-group">
@@ -53,32 +53,6 @@
   </div>
 </div>
 <script src="/js/modules/servers.js"></script>
-<script>
-  // Initialize form for add-server page
-  (function() {
-    const form = document.getElementById('create-server-form');
-    if (form && !form.dataset.bound) {
-      form.dataset.bound = '1';
-      form.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        if (window.ServersModule && window.ServersModule.createServer) {
-          try {
-            await window.ServersModule.createServer(e);
-            // Redirect to server list on success (if no error displayed)
-            const errorEl = document.getElementById('create-server-error');
-            if (!errorEl || errorEl.style.display === 'none' || !errorEl.textContent.trim()) {
-              setTimeout(() => {
-                window.location.href = '/admin/server';
-              }, 1000);
-            }
-          } catch (err) {
-            console.error('Error creating server:', err);
-          }
-        }
-      });
-    }
-  })();
-</script>
 </body>
 </html>
 
