@@ -134,27 +134,44 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
             String username, String password, Long serverId) {
         Session ssh = null;
         boolean connected = false;
+        boolean triedSshKey = false;
 
         try {
             // Ưu tiên xác thực bằng SSH key trước
             if (serverId != null) {
                 String pem = getServerPrivateKey(serverId);
                 if (pem != null && !pem.isBlank()) {
+                    triedSshKey = true;
+                    logger.info("Trying SSH key authentication for {}@{}:{}", username, host, port);
                     ssh = createSshSessionWithKey(username, host, port, pem);
                     if (ssh != null && ssh.isConnected()) {
                         connected = true;
+                        logger.info("SSH key authentication successful for {}@{}:{}", username, host, port);
+                    } else {
+                        logger.warn("SSH key authentication failed for {}@{}:{}, will try password if available", username, host, port);
                     }
+                } else {
+                    logger.debug("SSH key not found for serverId: {}", serverId);
                 }
             }
 
             // Nếu không được thì quay về xác thực mật khẩu
             if (!connected) {
                 if (password == null || password.isBlank()) {
-                    sendErrorMessage(ws, "Missing password and SSH key not available");
+                    // Nếu đã thử SSH key và thất bại, thông báo rõ ràng hơn
+                    if (triedSshKey) {
+                        sendErrorMessage(ws, "SSH key authentication failed. Please provide password");
+                    } else {
+                        sendErrorMessage(ws, "Missing password and SSH key not available");
+                    }
                     return null;
                 }
+                logger.info("Trying password authentication for {}@{}:{}", username, host, port);
                 ssh = createSshSessionWithPassword(username, host, port, password);
                 connected = ssh != null && ssh.isConnected();
+                if (connected) {
+                    logger.info("Password authentication successful for {}@{}:{}", username, host, port);
+                }
             }
 
             if (!connected || ssh == null) {

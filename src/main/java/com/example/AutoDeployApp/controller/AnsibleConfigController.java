@@ -21,7 +21,8 @@ public class AnsibleConfigController {
     public ResponseEntity<Map<String, Object>> readConfig(@PathVariable Long clusterId,
             @RequestParam(required = false) String host) {
         try {
-            var servers = serverService.findByClusterId(clusterId);
+            // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             Server target = pickTarget(servers, host, true);
 
             if (target == null) {
@@ -103,7 +104,8 @@ public class AnsibleConfigController {
             @RequestParam String hosts,
             @RequestParam(required = false) String vars) {
         try {
-            var servers = serverService.findByClusterId(clusterId);
+            // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             Server target = pickTarget(servers, host, true);
 
             if (target == null) {
@@ -407,7 +409,7 @@ public class AnsibleConfigController {
 
         if (preferMaster) {
             return servers.stream()
-                    .filter(s -> s.getRole() != null && "MASTER".equalsIgnoreCase(s.getRole().toString()))
+                    .filter(s -> "MASTER".equals(s.getRole()))
                     .findFirst()
                     .orElse(servers.get(0));
         }
@@ -441,7 +443,8 @@ public class AnsibleConfigController {
     public ResponseEntity<Map<String, Object>> verifyAnsible(@PathVariable Long clusterId,
             @RequestParam(required = false) String host) {
         try {
-            var servers = serverService.findByClusterId(clusterId);
+            // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             Server target = pickTarget(servers, host, true);
 
             if (target == null) {
@@ -491,7 +494,8 @@ public class AnsibleConfigController {
     public ResponseEntity<Map<String, Object>> checkSudoNopasswd(@PathVariable Long clusterId,
             @RequestParam(required = false) String host) {
         try {
-            var servers = serverService.findByClusterId(clusterId);
+            // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             Server target = pickTarget(servers, host, true);
 
             if (target == null) {
@@ -537,7 +541,8 @@ public class AnsibleConfigController {
             @RequestParam(required = false) String host,
             @RequestParam(required = false) String sudoPassword) {
         try {
-            var servers = serverService.findByClusterId(clusterId);
+            // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             Server target = pickTarget(servers, host, true);
 
             if (target == null) {

@@ -6,59 +6,73 @@
     <div class="page-title-row">
       <div>
         <div class="page-title">🔗 Gán máy chủ vào Cluster</div>
-        <div class="page-subtitle">Chọn server và gán vào cluster. Role của từng server sẽ được giữ nguyên (có thể thay đổi trước khi gán trong cột Role của bảng).</div>
+        <div class="page-subtitle">Chọn server và set clusterStatus = "AVAILABLE" để thêm vào cluster duy nhất. Cho phép chọn server và thay đổi role cho từng server.</div>
       </div>
       <div style="display: flex; gap: 8px;">
         <button class="btn" id="refresh-servers-btn">🔄 Làm mới</button>
       </div>
     </div>
 
-    <!-- Server List and Assignment -->
-    <div class="table-card" id="k8s-assign">
+    <!-- Servers trong hệ thống -->
+    <div class="table-card" id="available-servers-card" style="margin-bottom: 20px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
         <div>
-          <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">🖥 Danh sách Server</div>
-          <div class="page-subtitle" style="font-size: 12px;">Chọn server để gán vào cluster. Role của từng server có thể thay đổi trong cột "Role" của bảng. Nút "Cập nhật Role" chỉ thay đổi role, không thay đổi cluster.</div>
+          <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">🖥 Servers trong hệ thống</div>
+          <div class="page-subtitle" style="font-size: 12px;">Danh sách tất cả servers trong hệ thống. Chọn server và role để gán vào cluster.</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-primary" id="btn-assign-selected">📌 Thêm vào Cluster (AVAILABLE)</button>
         </div>
       </div>
       
-      <!-- Controls: Cluster, Role và Buttons -->
-      <div style="display: flex; align-items: flex-end; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; padding: 12px; background: #F9F9F9; border-radius: 8px; border: 1px solid #E0E0E0;">
-        <div class="form-group" style="margin-bottom: 0; min-width: 200px;">
-          <label style="font-size: 12px; margin-bottom: 4px;">Chọn Cluster</label>
-          <select class="form-control" id="k8s-cluster-select" style="font-size: 13px; padding: 7px 9px;">
-            <option value="">-- Chọn cluster --</option>
-          </select>
-        </div>
-        <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
-          <label style="font-size: 12px; margin-bottom: 4px;">Role trong Cluster</label>
-          <select class="form-control" id="k8s-role-select" style="font-size: 13px; padding: 7px 9px;">
-            <option value="WORKER">WORKER</option>
-            <option value="MASTER">MASTER</option>
-          </select>
-        </div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;">
-          <button class="btn btn-primary" id="btn-assign-selected">📌 Gán vào Cluster</button>
-          <button class="btn btn-success" id="btn-update-role-selected">🔄 Cập nhật Role</button>
-          <button class="btn btn-danger" id="btn-remove-selected">🗑️ Bỏ khỏi Cluster</button>
-        </div>
-      </div>
       <table class="table">
         <thead>
           <tr>
-            <th style="width:40px;"><input type="checkbox" id="k8s-check-all" title="Chọn tất cả"></th>
+            <th style="width:40px;"><input type="checkbox" id="available-check-all" title="Chọn tất cả"></th>
             <th>Host</th>
             <th>Port</th>
             <th>Username</th>
-            <th>Cluster</th>
             <th>Role</th>
             <th>Status</th>
-            <th>Actions</th>
+            <th>Cluster Status</th>
           </tr>
         </thead>
-        <tbody id="k8s-servers-tbody">
+        <tbody id="available-servers-tbody">
           <tr>
-            <td colspan="8" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+            <td colspan="7" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Máy chủ đã gán vào cluster -->
+    <div class="table-card" id="assigned-servers-card">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">✅ Máy chủ đã gán vào cluster</div>
+          <div class="page-subtitle" style="font-size: 12px;">Danh sách servers có <code>clusterStatus = "AVAILABLE"</code>. Có thể thay đổi role hoặc bỏ khỏi cluster.</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-success" id="btn-update-role-selected">🔄 Cập nhật Role</button>
+          <button class="btn btn-danger" id="btn-remove-selected">🗑️ Bỏ khỏi Cluster (UNAVAILABLE)</button>
+        </div>
+      </div>
+      
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:40px;"><input type="checkbox" id="assigned-check-all" title="Chọn tất cả"></th>
+            <th>Host</th>
+            <th>Port</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Cluster Status</th>
+          </tr>
+        </thead>
+        <tbody id="assigned-servers-tbody">
+          <tr>
+            <td colspan="7" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
           </tr>
         </tbody>
       </table>

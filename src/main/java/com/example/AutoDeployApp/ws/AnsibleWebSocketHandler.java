@@ -136,12 +136,13 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 }
 
                 // Lấy danh sách servers
-                var allClusterServers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var allClusterServers = serverService.findByClusterStatus("AVAILABLE");
                 java.util.List<com.example.AutoDeployApp.entity.Server> clusterServers;
 
                 // Chỉ thao tác trên MASTER server
                 clusterServers = allClusterServers.stream()
-                        .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                        .filter(s -> "MASTER".equals(s.getRole()))
                         .collect(java.util.stream.Collectors.toList());
 
                 if (clusterServers.isEmpty()) {
@@ -326,7 +327,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     private void streamInitAll(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
-                var servers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
                 if (target == null) {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
@@ -384,7 +386,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 StringBuilder hosts = new StringBuilder();
                 hosts.append("[master]\n");
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    if ("MASTER".equals(s.getRole())) {
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
                                 .append(" ansible_host=").append(s.getHost())
@@ -395,7 +397,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 }
                 hosts.append("\n[workers]\n");
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER) {
+                    if ("WORKER".equals(s.getRole())) {
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
                                 .append(" ansible_host=").append(s.getHost())
@@ -465,7 +467,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     private void streamInitStructure(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
-                var servers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
                 if (target == null) {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
@@ -500,7 +503,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     private void streamInitConfig(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
-                var servers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
                 if (target == null) {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
@@ -548,7 +552,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
                 hosts.append("[master]\n");
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    if ("MASTER".equals(s.getRole())) {
                         // Dùng hostname làm inventory_hostname (không có thì dùng IP tạm)
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
@@ -562,7 +566,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
                 hosts.append("\n[workers]\n");
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER) {
+                    if ("WORKER".equals(s.getRole())) {
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
                                 .append(" ansible_host=").append(s.getHost())
@@ -603,7 +607,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     private void streamInitSshKey(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
-                var servers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
                 if (target == null) {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
@@ -663,7 +668,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     // Chuẩn bị danh sách kết nối WORKER và nạp sẵn privateKey PEM để tránh lazy-load
                     java.util.List<Object[]> workerConns = new java.util.ArrayList<>();
                     for (var s : servers) {
-                        if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER
+                        if ("WORKER".equals(s.getRole())
                                 && !s.getId().equals(target.getId())) {
                             String pem = serverService.resolveServerPrivateKeyPem(s.getId());
                             String hostW = s.getHost();
@@ -797,7 +802,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     private void streamInitPing(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
-                var servers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
                 if (target == null) {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
@@ -819,7 +825,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     private void streamReadAnsibleConfig(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
-                var servers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
                 if (target == null) {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
@@ -929,7 +936,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             String sudoPassword, String cfgContent, String hostsContent, String varsContent) {
         CompletableFuture.runAsync(() -> {
             try {
-                var servers = serverService.findByClusterId(clusterId);
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
                 if (target == null) {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
@@ -1137,7 +1145,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         }
         if (preferMaster) {
             for (var s : servers) {
-                if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                if ("MASTER".equals(s.getRole()))
                     return s;
             }
         }

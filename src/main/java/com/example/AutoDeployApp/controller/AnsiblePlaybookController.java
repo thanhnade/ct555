@@ -29,12 +29,13 @@ public class AnsiblePlaybookController {
         if (session == null)
             return false;
 
-        var clusterServers = serverService.findByClusterId(clusterId);
+        // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+        var clusterServers = serverService.findByClusterStatus("AVAILABLE");
         if (clusterServers == null || clusterServers.isEmpty())
             return false;
 
         var master = clusterServers.stream()
-                .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                .filter(s -> "MASTER".equals(s.getRole()))
                 .findFirst()
                 .orElse(null);
         if (master == null)

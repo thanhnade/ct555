@@ -147,11 +147,11 @@ public class AnsibleInstallationService {
      * Kiểm tra Ansible đã cài đặt trên 1 máy MASTER duy nhất trong cluster
      */
     public Map<String, Object> checkAnsibleInstallation(Long clusterId, Map<Long, String> passwordCache) {
-        List<Server> allClusterServers = serverService.findByClusterId(clusterId);
+        List<Server> allClusterServers = serverService.findByClusterStatus("AVAILABLE");
 
         // Chỉ lấy 1 MASTER server đầu tiên
         Server masterServer = allClusterServers.stream()
-                .filter(server -> server.getRole() == Server.ServerRole.MASTER)
+                .filter(server -> "MASTER".equals(server.getRole()))
                 .findFirst()
                 .orElse(null);
 
@@ -190,7 +190,7 @@ public class AnsibleInstallationService {
         }
 
         Map<String, Object> detailedResults = new java.util.HashMap<>();
-        String serverInfo = String.format("%s (%s)", masterServer.getHost(), masterServer.getRole().name());
+        String serverInfo = String.format("%s (%s)", masterServer.getHost(), masterServer.getRole() != null && !masterServer.getRole().isBlank() ? masterServer.getRole() : "WORKER");
 
         try {
             String checkCmd = "ansible --version";
@@ -227,7 +227,7 @@ public class AnsibleInstallationService {
 
             Map<String, Object> serverStatus = new java.util.HashMap<>();
             serverStatus.put("installed", isInstalled);
-            serverStatus.put("role", masterServer.getRole().name());
+            serverStatus.put("role", masterServer.getRole() != null && !masterServer.getRole().isBlank() ? masterServer.getRole() : "WORKER");
             serverStatus.put("serverInfo", serverInfo);
 
             if (isInstalled) {
@@ -272,7 +272,7 @@ public class AnsibleInstallationService {
             Map<String, Object> serverStatus = new java.util.HashMap<>();
             serverStatus.put("installed", false);
             serverStatus.put("error", errorMessage);
-            serverStatus.put("role", masterServer.getRole().name());
+            serverStatus.put("role", masterServer.getRole() != null && !masterServer.getRole().isBlank() ? masterServer.getRole() : "WORKER");
             serverStatus.put("serverInfo", serverInfo);
             detailedResults.put(masterServer.getHost(), serverStatus);
 
@@ -345,7 +345,7 @@ public class AnsibleInstallationService {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 // 1. Lấy danh sách servers trong cluster
-                List<Server> allClusterServers = serverService.findByClusterId(clusterId);
+                List<Server> allClusterServers = serverService.findByClusterStatus("AVAILABLE");
 
                 if (allClusterServers.isEmpty()) {
                     throw new RuntimeException("Cluster không có servers nào");
@@ -353,7 +353,7 @@ public class AnsibleInstallationService {
 
                 // 2. Chỉ lấy 1 MASTER server đầu tiên
                 Server masterServer = allClusterServers.stream()
-                        .filter(server -> server.getRole() == Server.ServerRole.MASTER)
+                        .filter(server -> "MASTER".equals(server.getRole()))
                         .findFirst()
                         .orElse(null);
 

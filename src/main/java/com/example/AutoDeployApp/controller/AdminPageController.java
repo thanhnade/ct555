@@ -39,13 +39,6 @@ public class AdminPageController {
 		return "admin/pages/server-manager";
 	}
 
-	@GetMapping("/server/add")
-	public String addServerPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Add Server");
-		model.addAttribute("username", getUsernameFromSession(request));
-		return "admin/pages/add-server";
-	}
-
 	@GetMapping("/cluster")
 	public String clusterPage(Model model, HttpServletRequest request) {
 		model.addAttribute("pageTitle", "Cluster Management");

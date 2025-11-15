@@ -22,8 +22,7 @@
       <div class="topbar">
         <div class="topbar-title" th:text="${pageTitle} ?: 'Admin Dashboard'">Admin Dashboard</div>
         <div class="topbar-right">
-          <span th:text="${username} ?: 'Admin'">Admin</span>
-          <div class="avatar-circle" th:attr="data-initials=${#strings.substring((username ?: 'MMT'), 0, 2).toUpperCase()}">AD</div>
+          <span th:text="${#messages.msg('admin.dashboard.welcome', username)}"></span>
           <a th:href="@{/auth/logout}" style="margin-left: 12px; color: #ffffff; text-decoration: none; font-size: 12px;">Đăng xuất</a>
         </div>
       </div>

@@ -6,10 +6,6 @@ import jakarta.persistence.*;
 @Table(name = "servers", uniqueConstraints = @UniqueConstraint(columnNames = { "host", "port", "username" }))
 public class Server {
 
-    public enum ServerRole {
-        MASTER, WORKER, STANDALONE
-    }
-
     public enum ServerStatus {
         ONLINE, OFFLINE
     }
@@ -38,17 +34,24 @@ public class Server {
     @JoinColumn(name = "ssh_key_id")
     private SshKey sshKey;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
-    private ServerRole role = ServerRole.WORKER;
+    @Column(nullable = false, length = 20)
+    private String role = "WORKER"; // MASTER, WORKER, DOCKER, DATABASE, ANSIBLE
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "cluster_id")
-    private Cluster cluster;
+    @Column(name = "cluster_status", nullable = false, length = 20)
+    private String clusterStatus = "UNAVAILABLE"; // AVAILABLE, UNAVAILABLE
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private ServerStatus status = ServerStatus.OFFLINE;
+
+    @Column(name = "cpu_cores", length = 20)
+    private String cpuCores; // Số CPU cores, ví dụ: "4"
+
+    @Column(name = "ram_total", length = 20)
+    private String ramTotal; // Tổng RAM, ví dụ: "8.0Gi", "16G"
+
+    @Column(name = "disk_total", length = 20)
+    private String diskTotal; // Tổng Disk, ví dụ: "50G", "100Gi"
 
     public Long getId() {
         return id;
@@ -98,20 +101,20 @@ public class Server {
         this.sshKey = sshKey;
     }
 
-    public ServerRole getRole() {
+    public String getRole() {
         return role;
     }
 
-    public void setRole(ServerRole role) {
+    public void setRole(String role) {
         this.role = role;
     }
 
-    public Cluster getCluster() {
-        return cluster;
+    public String getClusterStatus() {
+        return clusterStatus;
     }
 
-    public void setCluster(Cluster cluster) {
-        this.cluster = cluster;
+    public void setClusterStatus(String clusterStatus) {
+        this.clusterStatus = clusterStatus;
     }
 
     public ServerStatus getStatus() {
@@ -120,5 +123,29 @@ public class Server {
 
     public void setStatus(ServerStatus status) {
         this.status = status;
+    }
+
+    public String getCpuCores() {
+        return cpuCores;
+    }
+
+    public void setCpuCores(String cpuCores) {
+        this.cpuCores = cpuCores;
+    }
+
+    public String getRamTotal() {
+        return ramTotal;
+    }
+
+    public void setRamTotal(String ramTotal) {
+        this.ramTotal = ramTotal;
+    }
+
+    public String getDiskTotal() {
+        return diskTotal;
+    }
+
+    public void setDiskTotal(String diskTotal) {
+        this.diskTotal = diskTotal;
     }
 }

@@ -1,6 +1,5 @@
 package com.example.AutoDeployApp.controller;
 
-import com.example.AutoDeployApp.entity.Cluster;
 import com.example.AutoDeployApp.service.ClusterService;
 import com.example.AutoDeployApp.service.ServerService;
 import com.example.AutoDeployApp.service.AnsibleInstallationService;
@@ -9,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -32,7 +32,7 @@ public class ClusterAdminController {
             String host,
             int port,
             String username,
-            com.example.AutoDeployApp.entity.Server.ServerRole role,
+            String role,
             com.example.AutoDeployApp.entity.Server.ServerStatus status,
             String sshPrivateKey,
             boolean isConnected) {
@@ -88,7 +88,7 @@ public class ClusterAdminController {
             String host = body != null ? (String) body.getOrDefault("host", null) : null;
             String sudoPassword = body != null ? (String) body.get("sudoPassword") : null;
 
-            var servers = serverService.findByClusterId(id);
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             if (servers == null || servers.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
             }
@@ -104,7 +104,7 @@ public class ClusterAdminController {
             }
             if (target == null) {
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    if ("MASTER".equals(s.getRole())) {
                         target = s;
                         break;
                     }
@@ -792,7 +792,7 @@ public class ClusterAdminController {
             String host = body != null ? (String) body.getOrDefault("host", null) : null;
             String sudoPassword = body != null ? (String) body.get("sudoPassword") : null;
 
-            var servers = serverService.findByClusterId(id);
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             if (servers == null || servers.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
             }
@@ -808,7 +808,7 @@ public class ClusterAdminController {
             }
             if (target == null) {
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    if ("MASTER".equals(s.getRole())) {
                         target = s;
                         break;
                     }
@@ -844,10 +844,10 @@ public class ClusterAdminController {
                 }
             }
 
-            // Xác định master chính xác theo cluster summary; các máy còn lại là worker
+            // Xác định master chính xác trong các server AVAILABLE; các máy còn lại là worker
             String masterHost = null;
             var summaries = clusterService.listSummaries();
-            var sum = summaries.stream().filter(s -> s.id().equals(id)).findFirst().orElse(null);
+            var sum = summaries.stream().findFirst().orElse(null);
             if (sum != null && sum.masterNode() != null && !sum.masterNode().isBlank()) {
                 masterHost = sum.masterNode().trim();
             }
@@ -856,7 +856,7 @@ public class ClusterAdminController {
             com.example.AutoDeployApp.entity.Server chosenMaster = null;
             if (masterHost != null) {
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER
+                    if ("MASTER".equals(s.getRole())
                             && masterHost.equals(s.getHost())) {
                         chosenMaster = s;
                         break;
@@ -865,7 +865,7 @@ public class ClusterAdminController {
             }
             if (chosenMaster == null) {
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    if ("MASTER".equals(s.getRole())) {
                         chosenMaster = s;
                         break;
                     }
@@ -874,7 +874,7 @@ public class ClusterAdminController {
             if (chosenMaster != null)
                 filtered.add(chosenMaster);
             for (var s : servers) {
-                if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER)
+                if ("WORKER".equals(s.getRole()))
                     filtered.add(s);
             }
 
@@ -904,7 +904,7 @@ public class ClusterAdminController {
         try {
             String host = body != null ? (String) body.getOrDefault("host", null) : null;
 
-            var servers = serverService.findByClusterId(id);
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             if (servers == null || servers.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
             }
@@ -920,7 +920,7 @@ public class ClusterAdminController {
             }
             if (target == null) {
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    if ("MASTER".equals(s.getRole())) {
                         target = s;
                         break;
                     }
@@ -956,7 +956,7 @@ public class ClusterAdminController {
         try {
             String host = body != null ? (String) body.getOrDefault("host", null) : null;
 
-            var servers = serverService.findByClusterId(id);
+            var servers = serverService.findByClusterStatus("AVAILABLE");
             if (servers == null || servers.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Cluster không có server"));
             }
@@ -972,7 +972,7 @@ public class ClusterAdminController {
             }
             if (target == null) {
                 for (var s : servers) {
-                    if (s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+                    if ("MASTER".equals(s.getRole())) {
                         target = s;
                         break;
                     }
@@ -1393,7 +1393,7 @@ public class ClusterAdminController {
      * Lấy phiên bản Kubernetes từ master node
      */
     private String getKubernetesVersion(ServerData serverData, Map<Long, String> pwCache) {
-        if (serverData.role != com.example.AutoDeployApp.entity.Server.ServerRole.MASTER) {
+        if (!"MASTER".equals(serverData.role)) {
             return "";
         }
 
@@ -1458,15 +1458,18 @@ public class ClusterAdminController {
         }
 
         final Long userId = currentUserId;
-        return clusterService.listSummaries().stream().map(s -> Map.<String, Object>of(
-                "id", s.id(),
-                "name", s.name(),
-                "description", s.description(),
-                "masterNode", s.masterNode(),
-                "workerCount", s.workerCount(),
-                "status", s.status(),
-                "createdBy", s.createdBy(),
-                "isOwner", userId != null && userId.equals(s.createdBy()))).toList();
+        return clusterService.listSummaries().stream().map(s -> {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("id", s.id());
+            map.put("name", s.name());
+            map.put("description", s.description());
+            map.put("masterNode", s.masterNode());
+            map.put("workerCount", s.workerCount());
+            map.put("status", s.status());
+            map.put("createdBy", s.createdBy());
+            map.put("isOwner", userId != null && userId.equals(s.createdBy()));
+            return map;
+        }).toList();
     }
 
     @PostMapping
@@ -1484,25 +1487,27 @@ public class ClusterAdminController {
                 createdBy = n.longValue();
         }
 
-        Cluster c = clusterService.create(name, description, createdBy);
-        return ResponseEntity.ok(Map.of("id", c.getId()));
+        // Với 1 cluster duy nhất, không cần create cluster nữa
+        // Trả về id = 1 để tương thích với API
+        return ResponseEntity.ok(Map.of("id", 1L, "message", "Cluster không cần tạo. Chỉ cần set clusterStatus = 'AVAILABLE' cho servers."));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<?> delete(@PathVariable Long id) {
-        clusterService.deleteCluster(id);
-        return ResponseEntity.noContent().build();
+        // Với 1 cluster duy nhất, không cần delete cluster nữa
+        // Có thể set tất cả servers về clusterStatus = "UNAVAILABLE" nếu muốn
+        return ResponseEntity.ok(Map.of("message", "Cluster không cần xóa. Có thể set clusterStatus = 'UNAVAILABLE' cho servers nếu muốn."));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<?> detail(@PathVariable Long id) {
         var summaries = clusterService.listSummaries();
-        var sum = summaries.stream().filter(s -> s.id().equals(id)).findFirst().orElse(null);
+        var sum = summaries.stream().findFirst().orElse(null);
         if (sum == null)
             return ResponseEntity.notFound().build();
 
-        // Get servers for this cluster (optimized query)
-        var clusterServers = serverService.findByClusterId(id);
+        // Get servers for this cluster (các server có clusterStatus = "AVAILABLE")
+        var clusterServers = serverService.findByClusterStatus("AVAILABLE");
         var nodes = new java.util.ArrayList<java.util.Map<String, Object>>();
 
         for (var s : clusterServers) {
@@ -1511,7 +1516,7 @@ public class ClusterAdminController {
                     "ip", s.getHost(),
                     "port", s.getPort() != null ? s.getPort() : 22,
                     "username", s.getUsername(),
-                    "role", s.getRole().name(),
+                    "role", s.getRole() != null && !s.getRole().isBlank() ? s.getRole() : "WORKER",
                     "status", s.getStatus().name()));
         }
 
@@ -1527,7 +1532,7 @@ public class ClusterAdminController {
     @GetMapping("/{id}/detail")
     public ResponseEntity<?> detailWithMetrics(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
         var summaries = clusterService.listSummaries();
-        var sum = summaries.stream().filter(s -> s.id().equals(id)).findFirst().orElse(null);
+        var sum = summaries.stream().findFirst().orElse(null);
         if (sum == null)
             return ResponseEntity.notFound().build();
 
@@ -1535,8 +1540,8 @@ public class ClusterAdminController {
         var session = request.getSession(false);
         java.util.Map<Long, String> pwCache = getPasswordCache(session);
 
-        // Lấy servers cho cluster này (query tối ưu)
-        var clusterServers = serverService.findByClusterId(id);
+        // Lấy servers cho cluster này (các server có clusterStatus = "AVAILABLE")
+        var clusterServers = serverService.findByClusterStatus("AVAILABLE");
 
         // Lấy danh sách connected servers từ session
         java.util.Set<Long> connectedIds = new java.util.HashSet<>();
@@ -1585,7 +1590,7 @@ public class ClusterAdminController {
                                 java.util.Map.of(
                                         "id", serverDataItem.id,
                                         "ip", serverDataItem.host,
-                                        "role", serverDataItem.role.name(),
+                                        "role", serverDataItem.role != null && !serverDataItem.role.isBlank() ? serverDataItem.role : "WORKER",
                                         "status", serverDataItem.status.name(),
                                         "isConnected", false,
                                         "cpu", "-",
@@ -1601,7 +1606,7 @@ public class ClusterAdminController {
                                 return java.util.Map.<String, Object>of(
                                         "id", serverDataItem.id,
                                         "ip", serverDataItem.host,
-                                        "role", serverDataItem.role.name(),
+                                        "role", serverDataItem.role != null && !serverDataItem.role.isBlank() ? serverDataItem.role : "WORKER",
                                         "status", serverDataItem.status.name(),
                                         "isConnected", serverDataItem.isConnected,
                                         "cpu", metrics.get("cpu"),
@@ -1624,7 +1629,7 @@ public class ClusterAdminController {
             System.err.println("Lỗi lấy Kubernetes version: " + e.getMessage());
             // Fallback: thử lấy từ SSH nếu API không available
             var masterServer = serverData.stream()
-                    .filter(s -> s.role == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER &&
+                    .filter(s -> "MASTER".equals(s.role) &&
                             s.isConnected &&
                             s.status != com.example.AutoDeployApp.entity.Server.ServerStatus.OFFLINE)
                     .findFirst();
@@ -1661,7 +1666,7 @@ public class ClusterAdminController {
                 var fallbackNode = new java.util.HashMap<String, Object>();
                 fallbackNode.put("id", serverDataItem.id);
                 fallbackNode.put("ip", serverDataItem.host);
-                fallbackNode.put("role", serverDataItem.role.name());
+                fallbackNode.put("role", serverDataItem.role != null && !serverDataItem.role.isBlank() ? serverDataItem.role : "WORKER");
                 fallbackNode.put("status", serverDataItem.status.name());
                 fallbackNode.put("isConnected", false);
                 fallbackNode.put("cpu", "-");
@@ -1679,7 +1684,7 @@ public class ClusterAdminController {
                 var fallbackNode = new java.util.HashMap<String, Object>();
                 fallbackNode.put("id", serverDataItem.id);
                 fallbackNode.put("ip", serverDataItem.host);
-                fallbackNode.put("role", serverDataItem.role.name());
+                fallbackNode.put("role", serverDataItem.role != null && !serverDataItem.role.isBlank() ? serverDataItem.role : "WORKER");
                 fallbackNode.put("status", serverDataItem.status.name());
                 fallbackNode.put("isConnected", serverDataItem.isConnected);
                 fallbackNode.put("cpu", "-");
@@ -1748,7 +1753,7 @@ public class ClusterAdminController {
             System.out.println("DEBUG: Password cache size: " + pwCache.size());
 
             // Lấy thông tin cluster
-            var clusterServers = serverService.findByClusterId(id);
+            var clusterServers = serverService.findByClusterStatus("AVAILABLE");
             System.out.println("DEBUG: Cluster servers count: " + clusterServers.size());
 
             if (clusterServers.isEmpty()) {
@@ -1770,11 +1775,11 @@ public class ClusterAdminController {
                     "totalServers", clusterServers.size(),
                     "masterCount",
                     clusterServers.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.MASTER)
+                            .filter(s -> "MASTER".equals(s.getRole()))
                             .count(),
                     "workerCount",
                     clusterServers.stream()
-                            .filter(s -> s.getRole() == com.example.AutoDeployApp.entity.Server.ServerRole.WORKER)
+                            .filter(s -> "WORKER".equals(s.getRole()))
                             .count()));
 
             return ResponseEntity.ok(status);
@@ -1818,7 +1823,7 @@ public class ClusterAdminController {
 
             // Convert sudo passwords to Map<Long, String>
             java.util.Map<Long, String> sudoPasswordCache = new java.util.HashMap<>();
-            var clusterServers = serverService.findByClusterId(id);
+            var clusterServers = serverService.findByClusterStatus("AVAILABLE");
             for (com.example.AutoDeployApp.entity.Server server : clusterServers) {
                 String sudoPassword = sudoPasswords.get(server.getHost());
                 if (sudoPassword != null && !sudoPassword.trim().isEmpty()) {

@@ -445,6 +445,89 @@ body.modal-open {
   color: var(--color-text);
 }
 
+/* Servers Grid Layout - Using Bootstrap Grid */
+
+.server-card {
+  background: #FFFFFF;
+  border: 1px solid #E0E0E0;
+  border-radius: 10px;
+  padding: 16px;
+  height: 100%;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.server-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  border-color: var(--color-primary);
+}
+
+.server-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid #F0F0F0;
+  padding-bottom: 12px;
+}
+
+.server-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.server-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.server-card-info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.server-card-info-label {
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.server-card-info-value {
+  color: var(--color-text);
+}
+
+.server-card-metrics {
+  background: #F8F9FA;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.server-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid #F0F0F0;
+  margin-top: auto;
+}
+
+.server-card-actions .btn {
+  flex: 1;
+  min-width: 70px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

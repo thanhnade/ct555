@@ -18,7 +18,7 @@
 	let clusterPagination = null;
 	let allClusters = []; // Store all clusters for pagination
 
-	// Load cluster list
+	// Load cluster list - hiển thị servers có clusterStatus = AVAILABLE
 	async function loadClusterList() {
 		// Ensure ApiClient is loaded
 		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
@@ -28,22 +28,181 @@
 		}
 
 		try {
-			const allData = await window.ApiClient.get('/admin/clusters').catch(() => []);
-			const tbody = document.getElementById('clusters-tbody');
-			if (!tbody) {
-				// Element không tồn tại - có thể đang ở trang khác (add-cluster.html, kubernetes.html, etc.)
-				// Không cần log vì đây là hành vi bình thường khi ở trang khác
+			// Load cluster summary và servers
+			const [clusterData, servers, connectedIds] = await Promise.all([
+				window.ApiClient.get('/admin/clusters').catch(() => []),
+				window.ApiClient.get('/admin/servers').catch(() => []),
+				window.ApiClient.get('/admin/servers/connected').catch(() => [])
+			]);
+
+			// Render cluster summary
+			const summaryDiv = document.getElementById('cluster-summary-content');
+			if (summaryDiv) {
+				const cluster = (clusterData && clusterData.length > 0) ? clusterData[0] : null;
+				if (cluster) {
+					const status = cluster.status || 'ERROR';
+					let statusChip = '';
+					if (status === 'HEALTHY') {
+						statusChip = '<span class="chip green">HEALTHY</span>';
+					} else if (status === 'WARNING') {
+						statusChip = '<span class="chip yellow">WARNING</span>';
+					} else {
+						statusChip = '<span class="chip red">ERROR</span>';
+					}
+					summaryDiv.innerHTML = `
+						<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+							<div>
+								<div style="font-size: 12px; color: #666; margin-bottom: 4px;">Cluster Name</div>
+								<div style="font-size: 16px; font-weight: 600;">${escapeHtml(cluster.name || 'Default Cluster')}</div>
+							</div>
+							<div>
+								<div style="font-size: 12px; color: #666; margin-bottom: 4px;">Master Node</div>
+								<div style="font-size: 16px; font-weight: 600;">${escapeHtml(cluster.masterNode || 'Chưa có')}</div>
+							</div>
+							<div>
+								<div style="font-size: 12px; color: #666; margin-bottom: 4px;">Số Worker</div>
+								<div style="font-size: 16px; font-weight: 600;">${cluster.workerCount ?? 0}</div>
+							</div>
+							<div>
+								<div style="font-size: 12px; color: #666; margin-bottom: 4px;">Status</div>
+								<div style="font-size: 16px;">${statusChip}</div>
+							</div>
+						</div>
+						<div style="margin-top: 16px; display: flex; gap: 8px;">
+							<button class="btn btn-primary" style="padding: 6px 12px; font-size: 13px;" onclick="window.location.href='/admin/kubernetes?clusterId=${cluster.id}'">👁️ Xem chi tiết</button>
+							<button class="btn" style="padding: 6px 12px; font-size: 13px;" onclick="window.location.href='/admin/cluster/setup?clusterId=${cluster.id}'">⚙️ Cluster Setup</button>
+						</div>
+					`;
+				} else {
+					summaryDiv.innerHTML = `
+						<div class="text-center" style="color: #666666; padding: 16px;">
+							<div style="margin-bottom: 8px;">Chưa có cluster nào</div>
+							<div style="font-size: 12px; color: #999;">Thêm servers vào cluster bằng cách set <code>clusterStatus = "AVAILABLE"</code> trong phần "Gán máy chủ vào Cluster" bên dưới</div>
+						</div>
+					`;
+				}
+			}
+
+			// Render servers có clusterStatus = AVAILABLE (Grid Layout)
+			const grid = document.getElementById('cluster-servers-grid');
+			if (!grid) {
+				// Fallback to old table layout if grid doesn't exist
+				const tbody = document.getElementById('cluster-servers-tbody');
+				if (!tbody) {
+					// Element không tồn tại - có thể đang ở trang khác
+					return;
+				}
+				// Old table rendering logic (backward compatibility)
+				// ... existing table code ...
 				return;
 			}
 
-			// Since system has only 1 cluster, simplify display (no search/filter/pagination needed)
-			allClusters = allData || [];
-			renderClusters(allClusters);
+			// Lọc servers có clusterStatus = AVAILABLE
+			const clusterServers = (servers || []).filter(s => {
+				const clusterStatus = s.clusterStatus || 'UNAVAILABLE';
+				return clusterStatus === 'AVAILABLE';
+			});
+
+			grid.innerHTML = '';
+
+			if (clusterServers.length === 0) {
+				grid.innerHTML = '<div class="col-12 text-center text-muted p-4">Chưa có server nào trong cluster. Thêm servers bằng cách set <code>clusterStatus = "AVAILABLE"</code> trong phần "Gán máy chủ vào Cluster".</div>';
+				return;
+			}
+
+			clusterServers.forEach(s => {
+				const isConnected = (connectedIds || []).includes(s.id);
+				let statusChip = '';
+				if (isConnected) {
+					statusChip = '<span class="chip green">CONNECTED</span>';
+				} else if (s.status === 'ONLINE') {
+					statusChip = '<span class="chip blue">ONLINE</span>';
+				} else {
+					statusChip = '<span class="chip red">OFFLINE</span>';
+				}
+
+				const role = s.role || 'WORKER';
+				let roleBadge = '';
+				if (role === 'MASTER') {
+					roleBadge = '<span class="badge bg-primary">MASTER</span>';
+				} else if (role === 'WORKER') {
+					roleBadge = '<span class="badge bg-secondary">WORKER</span>';
+				} else if (role === 'DOCKER') {
+					roleBadge = '<span class="badge bg-info">DOCKER</span>';
+				} else if (role === 'DATABASE') {
+					roleBadge = '<span class="badge bg-warning">DATABASE</span>';
+				} else if (role === 'ANSIBLE') {
+					roleBadge = '<span class="badge bg-success">ANSIBLE</span>';
+				} else {
+					roleBadge = `<span class="badge bg-secondary">${escapeHtml(role)}</span>`;
+				}
+
+				// Get hardware specs from database
+				const cpuCores = s.cpuCores || '-';
+				const ramTotal = s.ramTotal || '-';
+				const diskTotal = s.diskTotal || '-';
+				
+				// Format CPU
+				let cpuDisplay = '-';
+				if (cpuCores !== '-') {
+					const cores = parseInt(cpuCores, 10);
+					if (!isNaN(cores)) {
+						cpuDisplay = `${cores} cores`;
+					} else {
+						cpuDisplay = escapeHtml(cpuCores);
+					}
+				}
+				
+				const ramDisplay = ramTotal !== '-' ? escapeHtml(ramTotal) : '-';
+				const diskDisplay = diskTotal !== '-' ? escapeHtml(diskTotal) : '-';
+
+				// Create server card with Bootstrap grid column
+				const cardWrapper = document.createElement('div');
+				cardWrapper.className = 'col-12 col-sm-6 col-md-4 col-lg-3';
+				
+				const card = document.createElement('div');
+				card.className = 'server-card';
+				card.innerHTML = `
+					<div class="server-card-header">
+						<h3 class="server-card-title">${escapeHtml(s.host || '-')}</h3>
+						${statusChip}
+					</div>
+					
+					<div class="server-card-info">
+						<div class="server-card-info-item">
+							<span class="server-card-info-label">Role:</span>
+							<span class="server-card-info-value">${roleBadge}</span>
+						</div>
+					</div>
+					
+					<div class="server-card-metrics">
+						<div><strong>CPU:</strong> ${cpuDisplay}</div>
+						<div><strong>RAM:</strong> ${ramDisplay}</div>
+						<div><strong>DISK:</strong> ${diskDisplay}</div>
+					</div>
+					
+					<div class="server-card-actions">
+						<button class="btn btn-sm" onclick="window.location.href='/admin/server'" title="Quản lý server">⚙️ Quản lý</button>
+					</div>
+				`;
+				cardWrapper.appendChild(card);
+				grid.appendChild(cardWrapper);
+			});
+
 		} catch (err) {
 			console.error('Error loading cluster list:', err);
-			const tbody = document.getElementById('clusters-tbody');
+			const grid = document.getElementById('cluster-servers-grid');
+			if (grid) {
+				grid.innerHTML = `<div class="col-12 text-center text-danger p-4">Lỗi tải danh sách: ${escapeHtml(err.message || 'Unknown error')}</div>`;
+			}
+			// Fallback to old table if grid doesn't exist
+			const tbody = document.getElementById('cluster-servers-tbody');
 			if (tbody) {
-				tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="color: #CC0000; padding: 20px;">Lỗi tải danh sách: ${escapeHtml(err.message || 'Unknown error')}</td></tr>`;
+				tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color: #CC0000; padding: 20px;">Lỗi tải danh sách: ${escapeHtml(err.message || 'Unknown error')}</td></tr>`;
+			}
+			const summaryDiv = document.getElementById('cluster-summary-content');
+			if (summaryDiv) {
+				summaryDiv.innerHTML = `<div class="text-center" style="color: #CC0000; padding: 16px;">Lỗi tải thông tin cluster: ${escapeHtml(err.message || 'Unknown error')}</div>`;
 			}
 		}
 	}
@@ -179,64 +338,186 @@
 				}
 			}
 
-			// Display servers table
-			const tbody = document.getElementById('k8s-servers-tbody');
-			if (tbody) {
-				tbody.innerHTML = '';
-				if (!servers || servers.length === 0) {
-					const tr = document.createElement('tr');
-					tr.innerHTML = '<td colspan="8" class="text-center" style="color: #666666; padding: 20px;">Chưa có server nào</td>';
-					tbody.appendChild(tr);
-					return;
-				}
-				(servers || []).forEach(s => {
-					const cName = (clusters || []).find(c => Number(c.id) === Number(s.clusterId))?.name || '';
-					const isConnected = (connectedIds || []).includes(s.id);
-					let statusChip = '';
-					if (isConnected) {
-						statusChip = '<span class="chip green">CONNECTED</span>';
-					} else if (s.status === 'ONLINE') {
-						statusChip = '<span class="chip blue">ONLINE</span>';
-					} else {
-						statusChip = '<span class="chip red">OFFLINE</span>';
-					}
-					const tr = document.createElement('tr');
-					tr.innerHTML = `
-						<td><input type="checkbox" class="k8s-sel" value="${s.id}"></td>
-						<td><strong>${escapeHtml(s.host || '')}</strong></td>
-						<td>${s.port || 22}</td>
-						<td>${escapeHtml(s.username || '')}</td>
-						<td>
-							<select class="form-control" style="font-size: 13px; padding: 6px 8px;" data-id="${s.id}" data-field="cluster">
-								<option value="">-- Chọn cluster --</option>
-								${(clusters || []).map(c => `<option value="${c.id}" ${s.clusterId === c.id ? 'selected' : ''}>${escapeHtml(c.name || '')}</option>`).join('')}
-							</select>
-						</td>
-						<td>
-							<select class="form-control" style="font-size: 13px; padding: 6px 8px;" data-id="${s.id}" data-field="role">
-								<option value="WORKER" ${s.role === 'WORKER' ? 'selected' : ''}>WORKER</option>
-								<option value="MASTER" ${s.role === 'MASTER' ? 'selected' : ''}>MASTER</option>
-							</select>
-						</td>
-						<td>${statusChip}</td>
-						<td style="white-space: nowrap;">
-							<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.saveServerClusterAndRole(${s.id})" title="Lưu thay đổi">💾</button>
-							<button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.removeSingleServerFromCluster(${s.id})" title="Bỏ khỏi Cluster">🗑️</button>
-						</td>
-					`;
-					tbody.appendChild(tr);
+			// Check if we're on the assign-servers page (with 2 separate tables)
+			const availableTbody = document.getElementById('available-servers-tbody');
+			const assignedTbody = document.getElementById('assigned-servers-tbody');
+			
+			if (availableTbody && assignedTbody) {
+				// Split servers into available (not in cluster) and assigned (in cluster)
+				const availableServers = (servers || []).filter(s => {
+					const clusterStatus = s.clusterStatus || 'UNAVAILABLE';
+					return clusterStatus !== 'AVAILABLE';
 				});
-			}
+				const assignedServers = (servers || []).filter(s => {
+					const clusterStatus = s.clusterStatus || 'UNAVAILABLE';
+					return clusterStatus === 'AVAILABLE';
+				});
 
-			// Bind check-all
-			const chkAll = document.getElementById('k8s-check-all');
-			if (chkAll && !chkAll.dataset.bound) {
-				chkAll.dataset.bound = '1';
-				chkAll.addEventListener('change', () => {
-					document.querySelectorAll('#k8s-servers-tbody .k8s-sel').forEach(el => {
-						el.checked = chkAll.checked;
+				// Render available servers (chưa gán vào cluster)
+				availableTbody.innerHTML = '';
+				if (availableServers.length === 0) {
+					const tr = document.createElement('tr');
+					tr.innerHTML = '<td colspan="7" class="text-center" style="color: #666666; padding: 20px;">Chưa có server nào chưa gán vào cluster</td>';
+					availableTbody.appendChild(tr);
+				} else {
+					availableServers.forEach(s => {
+						const isConnected = (connectedIds || []).includes(s.id);
+						let statusChip = '';
+						if (isConnected) {
+							statusChip = '<span class="chip green">CONNECTED</span>';
+						} else if (s.status === 'ONLINE') {
+							statusChip = '<span class="chip blue">ONLINE</span>';
+						} else {
+							statusChip = '<span class="chip red">OFFLINE</span>';
+						}
+						const role = s.role || 'WORKER';
+						const tr = document.createElement('tr');
+						tr.innerHTML = `
+							<td><input type="checkbox" class="available-sel" value="${s.id}"></td>
+							<td><strong>${escapeHtml(s.host || '')}</strong></td>
+							<td>${s.port || 22}</td>
+							<td>${escapeHtml(s.username || '')}</td>
+							<td>
+								<select class="form-control" style="font-size: 13px; padding: 6px 8px; min-width: 120px;" data-id="${s.id}" data-field="role" data-server-id="${s.id}">
+									<option value="WORKER" ${role === 'WORKER' ? 'selected' : ''}>WORKER</option>
+									<option value="MASTER" ${role === 'MASTER' ? 'selected' : ''}>MASTER</option>
+									<option value="DOCKER" ${role === 'DOCKER' ? 'selected' : ''}>DOCKER</option>
+									<option value="DATABASE" ${role === 'DATABASE' ? 'selected' : ''}>DATABASE</option>
+									<option value="ANSIBLE" ${role === 'ANSIBLE' ? 'selected' : ''}>ANSIBLE</option>
+								</select>
+							</td>
+							<td>${statusChip}</td>
+							<td><span class="badge bg-secondary">UNAVAILABLE</span></td>
+						`;
+						availableTbody.appendChild(tr);
 					});
-				});
+				}
+
+				// Render assigned servers (đã gán vào cluster)
+				assignedTbody.innerHTML = '';
+				if (assignedServers.length === 0) {
+					const tr = document.createElement('tr');
+					tr.innerHTML = '<td colspan="7" class="text-center" style="color: #666666; padding: 20px;">Chưa có server nào được gán vào cluster</td>';
+					assignedTbody.appendChild(tr);
+				} else {
+					assignedServers.forEach(s => {
+						const isConnected = (connectedIds || []).includes(s.id);
+						let statusChip = '';
+						if (isConnected) {
+							statusChip = '<span class="chip green">CONNECTED</span>';
+						} else if (s.status === 'ONLINE') {
+							statusChip = '<span class="chip blue">ONLINE</span>';
+						} else {
+							statusChip = '<span class="chip red">OFFLINE</span>';
+						}
+						const role = s.role || 'WORKER';
+						const tr = document.createElement('tr');
+						tr.innerHTML = `
+							<td><input type="checkbox" class="assigned-sel" value="${s.id}"></td>
+							<td><strong>${escapeHtml(s.host || '')}</strong></td>
+							<td>${s.port || 22}</td>
+							<td>${escapeHtml(s.username || '')}</td>
+							<td>
+								<select class="form-control" style="font-size: 13px; padding: 6px 8px; min-width: 120px;" data-id="${s.id}" data-field="role" data-server-id="${s.id}">
+									<option value="WORKER" ${role === 'WORKER' ? 'selected' : ''}>WORKER</option>
+									<option value="MASTER" ${role === 'MASTER' ? 'selected' : ''}>MASTER</option>
+									<option value="DOCKER" ${role === 'DOCKER' ? 'selected' : ''}>DOCKER</option>
+									<option value="DATABASE" ${role === 'DATABASE' ? 'selected' : ''}>DATABASE</option>
+									<option value="ANSIBLE" ${role === 'ANSIBLE' ? 'selected' : ''}>ANSIBLE</option>
+								</select>
+							</td>
+							<td>${statusChip}</td>
+							<td><span class="badge bg-success">AVAILABLE</span></td>
+						`;
+						assignedTbody.appendChild(tr);
+					});
+				}
+
+				// Bind check-all for available servers
+				const availableCheckAll = document.getElementById('available-check-all');
+				if (availableCheckAll && !availableCheckAll.dataset.bound) {
+					availableCheckAll.dataset.bound = '1';
+					availableCheckAll.addEventListener('change', () => {
+						document.querySelectorAll('#available-servers-tbody .available-sel').forEach(el => {
+							el.checked = availableCheckAll.checked;
+						});
+					});
+				}
+
+				// Bind check-all for assigned servers
+				const assignedCheckAll = document.getElementById('assigned-check-all');
+				if (assignedCheckAll && !assignedCheckAll.dataset.bound) {
+					assignedCheckAll.dataset.bound = '1';
+					assignedCheckAll.addEventListener('change', () => {
+						document.querySelectorAll('#assigned-servers-tbody .assigned-sel').forEach(el => {
+							el.checked = assignedCheckAll.checked;
+						});
+					});
+				}
+			} else {
+				// Fallback: old single table format (for backward compatibility)
+				const tbody = document.getElementById('k8s-servers-tbody');
+				if (tbody) {
+					tbody.innerHTML = '';
+					if (!servers || servers.length === 0) {
+						const tr = document.createElement('tr');
+						tr.innerHTML = '<td colspan="8" class="text-center" style="color: #666666; padding: 20px;">Chưa có server nào</td>';
+						tbody.appendChild(tr);
+						return;
+					}
+					(servers || []).forEach(s => {
+						const clusterStatus = s.clusterStatus || 'UNAVAILABLE';
+						const isInCluster = clusterStatus === 'AVAILABLE';
+						const isConnected = (connectedIds || []).includes(s.id);
+						let statusChip = '';
+						if (isConnected) {
+							statusChip = '<span class="chip green">CONNECTED</span>';
+						} else if (s.status === 'ONLINE') {
+							statusChip = '<span class="chip blue">ONLINE</span>';
+						} else {
+							statusChip = '<span class="chip red">OFFLINE</span>';
+						}
+						const tr = document.createElement('tr');
+						tr.innerHTML = `
+							<td><input type="checkbox" class="k8s-sel" value="${s.id}"></td>
+							<td><strong>${escapeHtml(s.host || '')}</strong></td>
+							<td>${s.port || 22}</td>
+							<td>${escapeHtml(s.username || '')}</td>
+							<td>
+								<select class="form-control" style="font-size: 13px; padding: 6px 8px;" data-id="${s.id}" data-field="clusterStatus">
+									<option value="UNAVAILABLE" ${!isInCluster ? 'selected' : ''}>UNAVAILABLE</option>
+									<option value="AVAILABLE" ${isInCluster ? 'selected' : ''}>AVAILABLE</option>
+								</select>
+							</td>
+							<td>
+								<select class="form-control" style="font-size: 13px; padding: 6px 8px;" data-id="${s.id}" data-field="role">
+									<option value="WORKER" ${s.role === 'WORKER' ? 'selected' : ''}>WORKER</option>
+									<option value="MASTER" ${s.role === 'MASTER' ? 'selected' : ''}>MASTER</option>
+									<option value="DOCKER" ${s.role === 'DOCKER' ? 'selected' : ''}>DOCKER</option>
+									<option value="DATABASE" ${s.role === 'DATABASE' ? 'selected' : ''}>DATABASE</option>
+									<option value="ANSIBLE" ${s.role === 'ANSIBLE' ? 'selected' : ''}>ANSIBLE</option>
+								</select>
+							</td>
+							<td>${statusChip}</td>
+							<td style="white-space: nowrap;">
+								<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.saveServerClusterAndRole(${s.id})" title="Lưu thay đổi">💾</button>
+								<button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.removeSingleServerFromCluster(${s.id})" title="Bỏ khỏi Cluster">🗑️</button>
+							</td>
+						`;
+						tbody.appendChild(tr);
+					});
+				}
+
+				// Bind check-all
+				const chkAll = document.getElementById('k8s-check-all');
+				if (chkAll && !chkAll.dataset.bound) {
+					chkAll.dataset.bound = '1';
+					chkAll.addEventListener('change', () => {
+						document.querySelectorAll('#k8s-servers-tbody .k8s-sel').forEach(el => {
+							el.checked = chkAll.checked;
+						});
+					});
+				}
 			}
 
 			// Bind assignment buttons
@@ -248,99 +529,164 @@
 
 	// Bind assignment buttons
 	function bindAssignmentButtons() {
-		// Assign selected - gán server vào cluster, giữ nguyên role hiện tại
-		const assignBtn = document.getElementById('btn-assign-selected');
-		if (assignBtn && !assignBtn.dataset.bound) {
-			assignBtn.dataset.bound = '1';
-			assignBtn.addEventListener('click', async () => {
-				const selected = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value, 10));
-				if (selected.length === 0) {
-					window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
-					return;
-				}
-				
-				// Tự động lấy clusterID nếu chưa chọn nhưng đã có cluster (hệ thống chỉ hỗ trợ 1 cluster)
-				let clusterId = parseInt(document.getElementById('k8s-cluster-select').value, 10);
-				if (!clusterId) {
-					// Nếu chưa chọn, thử lấy cluster đầu tiên
-					const clusters = await window.ApiClient.get('/admin/clusters').catch(() => []);
-					if (clusters && clusters.length > 0) {
-						clusterId = clusters[0].id;
-						// Cập nhật dropdown
-						const sel = document.getElementById('k8s-cluster-select');
-						if (sel) sel.value = clusterId;
-					} else {
-						window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
+		// Check if we're using the new 2-table layout (assign-servers page)
+		const availableTbody = document.getElementById('available-servers-tbody');
+		const assignedTbody = document.getElementById('assigned-servers-tbody');
+
+		if (availableTbody && assignedTbody) {
+			// New layout: 2 separate tables
+			
+			// Assign selected from available servers - gán server vào cluster với role đã chọn
+			const assignBtn = document.getElementById('btn-assign-selected');
+			if (assignBtn && !assignBtn.dataset.bound) {
+				assignBtn.dataset.bound = '1';
+				assignBtn.addEventListener('click', async () => {
+					const selected = Array.from(document.querySelectorAll('#available-servers-tbody .available-sel:checked')).map(el => parseInt(el.value, 10));
+					if (selected.length === 0) {
+						window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
 						return;
 					}
-				}
-				// Lấy role hiện tại của từng server từ dropdown trong bảng (giữ nguyên role)
-				const serverRoles = [];
-				selected.forEach(serverId => {
-					const row = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
-					if (row) {
-						const roleSelect = row.querySelector('select[data-field="role"]');
-						const role = roleSelect ? roleSelect.value : 'WORKER'; // Lấy role từ dropdown trong bảng
-						serverRoles.push({ serverId, role });
-					} else {
-						// Nếu không tìm thấy row, dùng role mặc định
-						serverRoles.push({ serverId, role: 'WORKER' });
-					}
+					
+					// Lấy role từ dropdown trong bảng cho từng server
+					const serverRoles = [];
+					selected.forEach(serverId => {
+						const row = document.querySelector(`#available-servers-tbody tr:has(input[value="${serverId}"])`);
+						if (row) {
+							const roleSelect = row.querySelector('select[data-field="role"]');
+							const role = roleSelect && roleSelect.value ? roleSelect.value : 'WORKER';
+							serverRoles.push({ serverId, role });
+						} else {
+							serverRoles.push({ serverId, role: 'WORKER' });
+						}
+					});
+					// Gán server vào cluster (set clusterStatus = "AVAILABLE")
+					await addServersToCluster(selected, serverRoles);
+					await loadClustersAndServers();
 				});
-				await addExistingNodesToClusterWithRoles(selected, serverRoles, clusterId);
-			});
-		}
+			}
 
-		// Update role selected - chỉ cập nhật role, giữ nguyên cluster hiện tại
-		const updateRoleBtn = document.getElementById('btn-update-role-selected');
-		if (updateRoleBtn && !updateRoleBtn.dataset.bound) {
-			updateRoleBtn.dataset.bound = '1';
-			updateRoleBtn.addEventListener('click', async () => {
-				const selected = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value, 10));
-				if (selected.length === 0) {
-					window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
-					return;
-				}
-				
-				// Cập nhật role - không cần clusterID, chỉ cần role
-				const role = document.getElementById('k8s-role-select').value;
-				for (const serverId of selected) {
-					// Lấy cluster hiện tại của server từ dropdown trong bảng, giữ nguyên cluster
-					const row = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
-					if (row) {
-						const clusterSelect = row.querySelector('select[data-field="cluster"]');
-						const currentClusterId = clusterSelect && clusterSelect.value ? parseInt(clusterSelect.value, 10) : null;
-						// Chỉ cập nhật role, giữ nguyên clusterId hiện tại (null nếu chưa có cluster)
-						await saveServerClusterAndRole(serverId, currentClusterId, role);
-					} else {
-						// Nếu không tìm thấy row, chỉ cập nhật role, giữ cluster null
-					await saveServerClusterAndRole(serverId, null, role);
+			// Update role selected from assigned servers - chỉ cập nhật role, giữ nguyên clusterStatus = "AVAILABLE"
+			const updateRoleBtn = document.getElementById('btn-update-role-selected');
+			if (updateRoleBtn && !updateRoleBtn.dataset.bound) {
+				updateRoleBtn.dataset.bound = '1';
+				updateRoleBtn.addEventListener('click', async () => {
+					const selected = Array.from(document.querySelectorAll('#assigned-servers-tbody .assigned-sel:checked')).map(el => parseInt(el.value, 10));
+					if (selected.length === 0) {
+						window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
+						return;
 					}
-				}
-				await loadClustersAndServers();
-			});
-		}
+					
+					// Cập nhật role - giữ nguyên clusterStatus = "AVAILABLE"
+					for (const serverId of selected) {
+						const row = document.querySelector(`#assigned-servers-tbody tr:has(input[value="${serverId}"])`);
+						if (row) {
+							const roleSelect = row.querySelector('select[data-field="role"]');
+							const role = roleSelect && roleSelect.value ? roleSelect.value : 'WORKER';
+							await saveServerClusterAndRole(serverId, 'AVAILABLE', role);
+						}
+					}
+					await loadClustersAndServers();
+				});
+			}
 
-		// Remove selected
-		const removeBtn = document.getElementById('btn-remove-selected');
-		if (removeBtn && !removeBtn.dataset.bound) {
-			removeBtn.dataset.bound = '1';
-			removeBtn.addEventListener('click', async () => {
-				const selected = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value, 10));
-				if (selected.length === 0) {
-					window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
-					return;
-				}
-				if (!confirm(`Bỏ ${selected.length} server khỏi cluster?`)) return;
-				for (const serverId of selected) {
-					await removeSingleServerFromCluster(serverId);
-				}
-				await loadClustersAndServers();
-			});
+			// Remove selected from assigned servers - bỏ khỏi cluster (set clusterStatus = "UNAVAILABLE")
+			const removeBtn = document.getElementById('btn-remove-selected');
+			if (removeBtn && !removeBtn.dataset.bound) {
+				removeBtn.dataset.bound = '1';
+				removeBtn.addEventListener('click', async () => {
+					const selected = Array.from(document.querySelectorAll('#assigned-servers-tbody .assigned-sel:checked')).map(el => parseInt(el.value, 10));
+					if (selected.length === 0) {
+						window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
+						return;
+					}
+					if (!confirm(`Bỏ ${selected.length} server khỏi cluster?`)) return;
+					for (const serverId of selected) {
+						await removeSingleServerFromCluster(serverId);
+					}
+					await loadClustersAndServers();
+				});
+			}
+		} else {
+			// Old layout: single table (for backward compatibility)
+			
+			// Assign selected - gán server vào cluster, giữ nguyên role hiện tại
+			const assignBtn = document.getElementById('btn-assign-selected');
+			if (assignBtn && !assignBtn.dataset.bound) {
+				assignBtn.dataset.bound = '1';
+				assignBtn.addEventListener('click', async () => {
+					const selected = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value, 10));
+					if (selected.length === 0) {
+						window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
+						return;
+					}
+					
+					const roleFromSelect = document.getElementById('k8s-role-select')?.value || 'WORKER';
+					const serverRoles = [];
+					selected.forEach(serverId => {
+						const row = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
+						if (row) {
+							const roleSelect = row.querySelector('select[data-field="role"]');
+							const role = roleSelect && roleSelect.value ? roleSelect.value : roleFromSelect;
+							serverRoles.push({ serverId, role });
+						} else {
+							serverRoles.push({ serverId, role: roleFromSelect });
+						}
+					});
+					await addServersToCluster(selected, serverRoles);
+				});
+			}
+
+			// Update role selected - chỉ cập nhật role, giữ nguyên cluster hiện tại
+			const updateRoleBtn = document.getElementById('btn-update-role-selected');
+			if (updateRoleBtn && !updateRoleBtn.dataset.bound) {
+				updateRoleBtn.dataset.bound = '1';
+				updateRoleBtn.addEventListener('click', async () => {
+					const selected = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value, 10));
+					if (selected.length === 0) {
+						window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
+						return;
+					}
+					
+					const role = document.getElementById('k8s-role-select').value;
+					for (const serverId of selected) {
+						const row = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
+						if (row) {
+							const clusterStatusSelect = row.querySelector('select[data-field="clusterStatus"]');
+							const currentClusterStatus = clusterStatusSelect && clusterStatusSelect.value ? clusterStatusSelect.value : 'UNAVAILABLE';
+							await saveServerClusterAndRole(serverId, currentClusterStatus, role);
+						} else {
+							const servers = await window.ApiClient.get('/admin/servers').catch(() => []);
+							const server = servers.find(s => s.id === serverId);
+							const currentClusterStatus = server ? (server.clusterStatus || 'UNAVAILABLE') : 'UNAVAILABLE';
+							await saveServerClusterAndRole(serverId, currentClusterStatus, role);
+						}
+					}
+					await loadClustersAndServers();
+				});
+			}
+
+			// Remove selected
+			const removeBtn = document.getElementById('btn-remove-selected');
+			if (removeBtn && !removeBtn.dataset.bound) {
+				removeBtn.dataset.bound = '1';
+				removeBtn.addEventListener('click', async () => {
+					const selected = Array.from(document.querySelectorAll('#k8s-servers-tbody .k8s-sel:checked')).map(el => parseInt(el.value, 10));
+					if (selected.length === 0) {
+						window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
+						return;
+					}
+					if (!confirm(`Bỏ ${selected.length} server khỏi cluster?`)) return;
+					for (const serverId of selected) {
+						await removeSingleServerFromCluster(serverId);
+					}
+					await loadClustersAndServers();
+				});
+			}
 		}
 	}
 
-	// Create cluster
+	// Create cluster - Với 1 cluster duy nhất, không cần tạo cluster nữa
+	// Chỉ cần set clusterStatus = "AVAILABLE" cho servers
 	async function createCluster(name, description) {
 		try {
 			// Check if cluster already exists (system only supports 1 cluster)
@@ -360,7 +706,7 @@
 			window.showAlert('success', 'Đã tạo cluster thành công');
 			
 			// Reload cluster list to show updated data (chỉ nếu đang ở trang cluster.html)
-			const isClusterListPage = document.getElementById('clusters-tbody') !== null;
+			const isClusterListPage = (document.getElementById('cluster-servers-tbody') !== null) || (document.getElementById('clusters-tbody') !== null);
 			const isAssignServersPage = document.getElementById('k8s-assign') && !document.getElementById('k8s-list');
 			
 			if (isClusterListPage && !isAssignServersPage) {
@@ -1168,91 +1514,10 @@
 		});
 	}
 
-	// Save server cluster and role
-	async function saveServerClusterAndRole(serverId, clusterId = null, role = null) {
-		const serverRow = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
-		const clusterSelect = serverRow ? serverRow.querySelector('select[data-field="cluster"]') : null;
-		const roleSelect = serverRow ? serverRow.querySelector('select[data-field="role"]') : null;
-
-		if (!clusterSelect || !roleSelect) {
-			console.error('Không tìm thấy cluster hoặc role select cho server', serverId);
-			return;
-		}
-
-		const newClusterId = clusterId !== null ? clusterId : (clusterSelect.value ? parseInt(clusterSelect.value, 10) : null);
-		const newRole = role !== null ? role : roleSelect.value;
-
-		try {
-			const body = { role: newRole };
-			if (newClusterId) {
-				body.clusterId = newClusterId;
-			} else {
-				body.clusterId = null;
-			}
-
-			await window.ApiClient.put(`/admin/servers/${serverId}`, body);
-
-			const clusterName = newClusterId ? clusterSelect.options[clusterSelect.selectedIndex]?.text : 'không có cluster';
-			window.showAlert('success', `Đã cập nhật server ${serverId}: cluster "${clusterName}", role ${newRole}`);
-
-			await Promise.all([loadClusterList(), loadClustersAndServers()]);
-		} catch (err) {
-			console.error('Lỗi khi lưu cluster và role máy chủ:', err);
-			window.showAlert('error', err.message || 'Cập nhật cluster và role thất bại');
-		}
-	}
-
-	// Remove single server from cluster
-	async function removeSingleServerFromCluster(serverId) {
-		if (!confirm('Bỏ server này khỏi cluster?')) return;
-
-		try {
-			const servers = await window.ApiClient.get('/admin/servers').catch(() => []);
-			const server = servers.find(s => s.id === serverId);
-			const currentRole = server ? server.role : 'WORKER';
-
-			const body = { clusterId: null, role: currentRole };
-			await window.ApiClient.put(`/admin/servers/${serverId}`, body);
-
-			window.showAlert('success', `Đã bỏ server ${serverId} khỏi cluster`);
-
-			await Promise.all([loadClusterList(), loadClustersAndServers()]);
-		} catch (err) {
-			console.error('Lỗi khi bỏ máy chủ đơn lẻ khỏi cluster:', err);
-			window.showAlert('error', err.message || 'Bỏ khỏi cluster thất bại');
-		}
-	}
-
-	// Add existing nodes to cluster (called from modal button)
-	async function addExistingNodesToClusterFromModal() {
-		const checkboxes = document.querySelectorAll('.existing-node-checkbox:checked');
-		const nodeIds = Array.from(checkboxes).map(cb => parseInt(cb.value, 10));
-		const role = 'WORKER'; // Default role, có thể thêm dropdown sau
-
-		if (nodeIds.length === 0) {
-			window.showAlert('warning', 'Vui lòng chọn ít nhất một node');
-			return;
-		}
-
-		const clusterIdInput = document.getElementById('add-node-cluster-id');
-		if (!clusterIdInput || !clusterIdInput.value) {
-			window.showAlert('error', 'Không tìm thấy cluster ID');
-			return;
-		}
-
-		const clusterId = parseInt(clusterIdInput.value, 10);
-		await addExistingNodesToCluster(nodeIds, role, clusterId, true);
-	}
-
-	// Add existing nodes to cluster with individual roles (giữ nguyên role của từng server)
-	async function addExistingNodesToClusterWithRoles(nodeIds, serverRoles, clusterId) {
+	// Add servers to cluster (set clusterStatus = "AVAILABLE")
+	async function addServersToCluster(nodeIds, serverRoles) {
 		if (!nodeIds || nodeIds.length === 0) {
 			window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
-			return;
-		}
-
-		if (!clusterId || isNaN(clusterId)) {
-			window.showAlert('warning', 'Vui lòng chọn cluster');
 			return;
 		}
 
@@ -1265,17 +1530,167 @@
 				assignBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang gán...';
 			}
 
-			// Gán từng server vào cluster với role riêng của nó (giữ nguyên role)
+			// Gán từng server vào cluster với role riêng của nó (set clusterStatus = "AVAILABLE")
 			for (const { serverId, role } of serverRoles) {
-				const body = { clusterId, role };
+				const body = { clusterStatus: 'AVAILABLE', role: role || 'WORKER' };
 				await window.ApiClient.put(`/admin/servers/${serverId}`, body);
 			}
 
-			window.showAlert('success', `✓ Đã gán ${nodeIds.length} server vào cluster với role tương ứng`);
+			window.showAlert('success', `✓ Đã gán ${nodeIds.length} server vào cluster (clusterStatus = "AVAILABLE") với role tương ứng`);
 
 			// Refresh ngay
-			if (currentClusterId === clusterId) {
-				await showClusterDetail(clusterId);
+			if (currentClusterId) {
+				await showClusterDetail(currentClusterId);
+			}
+			await Promise.all([loadClusterList(), loadClustersAndServers()]);
+		} catch (error) {
+			console.error('Error adding servers to cluster:', error);
+			window.showAlert('error', error.message || 'Gán server thất bại');
+		} finally {
+			// Restore button state
+			if (assignBtn) {
+				assignBtn.disabled = false;
+				assignBtn.innerHTML = '📌 Thêm vào Cluster (AVAILABLE)';
+			}
+		}
+	}
+
+	// Save server cluster status and role
+	async function saveServerClusterAndRole(serverId, clusterStatus = null, role = null) {
+		// Try to find server row in new layout (2 separate tables)
+		let serverRow = document.querySelector(`#available-servers-tbody tr:has(input[value="${serverId}"])`) ||
+		                document.querySelector(`#assigned-servers-tbody tr:has(input[value="${serverId}"])`);
+		
+		// If not found, try old layout
+		if (!serverRow) {
+			serverRow = document.querySelector(`#k8s-servers-tbody tr:has(input[value="${serverId}"])`);
+		}
+
+		// Determine clusterStatus based on which table the server is in (if not explicitly provided)
+		let newClusterStatus = clusterStatus;
+		if (newClusterStatus === null) {
+			if (serverRow) {
+				// Check if server is in assigned table (AVAILABLE) or available table (UNAVAILABLE)
+				if (serverRow.closest('#assigned-servers-tbody')) {
+					newClusterStatus = 'AVAILABLE';
+				} else if (serverRow.closest('#available-servers-tbody')) {
+					newClusterStatus = 'UNAVAILABLE';
+				} else {
+					// Old layout: try to get from clusterStatus select
+					const clusterStatusSelect = serverRow.querySelector('select[data-field="clusterStatus"]');
+					newClusterStatus = clusterStatusSelect ? clusterStatusSelect.value : 'UNAVAILABLE';
+				}
+			} else {
+				// If row not found, default to UNAVAILABLE
+				newClusterStatus = 'UNAVAILABLE';
+			}
+		}
+
+		// Get role from role select
+		let newRole = role;
+		if (newRole === null) {
+			if (serverRow) {
+				const roleSelect = serverRow.querySelector('select[data-field="role"]');
+				if (roleSelect) {
+					newRole = roleSelect.value;
+				} else {
+					// If no role select found, try to get from API
+					const servers = await window.ApiClient.get('/admin/servers').catch(() => []);
+					const server = servers.find(s => s.id === serverId);
+					newRole = server ? (server.role || 'WORKER') : 'WORKER';
+				}
+			} else {
+				// If row not found, try to get from API
+				const servers = await window.ApiClient.get('/admin/servers').catch(() => []);
+				const server = servers.find(s => s.id === serverId);
+				newRole = server ? (server.role || 'WORKER') : 'WORKER';
+			}
+		}
+
+		try {
+			const body = { 
+				role: newRole || 'WORKER',
+				clusterStatus: newClusterStatus || 'UNAVAILABLE'
+			};
+
+			await window.ApiClient.put(`/admin/servers/${serverId}`, body);
+
+			const clusterStatusText = newClusterStatus === 'AVAILABLE' ? 'AVAILABLE (trong cluster)' : 'UNAVAILABLE (ngoài cluster)';
+			window.showAlert('success', `Đã cập nhật server ${serverId}: clusterStatus = "${newClusterStatus}", role = "${newRole}"`);
+
+			await Promise.all([loadClusterList(), loadClustersAndServers()]);
+		} catch (err) {
+			console.error('Lỗi khi lưu clusterStatus và role máy chủ:', err);
+			window.showAlert('error', err.message || 'Cập nhật clusterStatus và role thất bại');
+		}
+	}
+
+	// Remove single server from cluster (set clusterStatus = "UNAVAILABLE")
+	async function removeSingleServerFromCluster(serverId) {
+		if (!confirm('Bỏ server này khỏi cluster (set clusterStatus = "UNAVAILABLE")?')) return;
+
+		try {
+			const servers = await window.ApiClient.get('/admin/servers').catch(() => []);
+			const server = servers.find(s => s.id === serverId);
+			const currentRole = server ? (server.role || 'WORKER') : 'WORKER';
+
+			const body = { clusterStatus: 'UNAVAILABLE', role: currentRole };
+			await window.ApiClient.put(`/admin/servers/${serverId}`, body);
+
+			window.showAlert('success', `Đã bỏ server ${serverId} khỏi cluster (clusterStatus = "UNAVAILABLE")`);
+
+			await Promise.all([loadClusterList(), loadClustersAndServers()]);
+		} catch (err) {
+			console.error('Lỗi khi bỏ máy chủ đơn lẻ khỏi cluster:', err);
+			window.showAlert('error', err.message || 'Bỏ khỏi cluster thất bại');
+		}
+	}
+
+	// Add existing nodes to cluster (called from modal button)
+	// Với 1 cluster duy nhất, luôn set clusterStatus = "AVAILABLE"
+	async function addExistingNodesToClusterFromModal() {
+		const checkboxes = document.querySelectorAll('.existing-node-checkbox:checked');
+		const nodeIds = Array.from(checkboxes).map(cb => parseInt(cb.value, 10));
+		const role = 'WORKER'; // Default role, có thể thêm dropdown sau
+
+		if (nodeIds.length === 0) {
+			window.showAlert('warning', 'Vui lòng chọn ít nhất một node');
+			return;
+		}
+
+		// Với 1 cluster duy nhất, không cần clusterId nữa, luôn set clusterStatus = "AVAILABLE"
+		await addExistingNodesToCluster(nodeIds, role, null, true);
+	}
+
+	// Add existing nodes to cluster with individual roles (set clusterStatus = "AVAILABLE")
+	// Với 1 cluster duy nhất, không cần clusterId nữa
+	async function addExistingNodesToClusterWithRoles(nodeIds, serverRoles, clusterId = null) {
+		if (!nodeIds || nodeIds.length === 0) {
+			window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
+			return;
+		}
+
+		// Với 1 cluster duy nhất, không cần kiểm tra clusterId
+		const assignBtn = document.getElementById('btn-assign-selected');
+
+		try {
+			// Disable button
+			if (assignBtn) {
+				assignBtn.disabled = true;
+				assignBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang gán...';
+			}
+
+			// Gán từng server vào cluster với role riêng của nó (set clusterStatus = "AVAILABLE")
+			for (const { serverId, role } of serverRoles) {
+				const body = { clusterStatus: 'AVAILABLE', role: role || 'WORKER' };
+				await window.ApiClient.put(`/admin/servers/${serverId}`, body);
+			}
+
+			window.showAlert('success', `✓ Đã gán ${nodeIds.length} server vào cluster (clusterStatus = "AVAILABLE") với role tương ứng`);
+
+			// Refresh ngay
+			if (currentClusterId) {
+				await showClusterDetail(currentClusterId);
 			}
 			await Promise.all([loadClusterList(), loadClustersAndServers()]);
 		} catch (error) {
@@ -1285,41 +1700,22 @@
 			// Restore button state
 			if (assignBtn) {
 				assignBtn.disabled = false;
-				assignBtn.innerHTML = '📌 Gán vào Cluster';
+				assignBtn.innerHTML = '📌 Thêm vào Cluster (AVAILABLE)';
 			}
 		}
 	}
 
 	// Add existing nodes to cluster (với role chung - từ modal hoặc các trường hợp khác)
+	// Với 1 cluster duy nhất, luôn set clusterStatus = "AVAILABLE"
 	async function addExistingNodesToCluster(nodeIds, role, clusterIdParam = null, isFromModal = false) {
 		if (!nodeIds || nodeIds.length === 0) {
 			window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
 			return;
 		}
 
-		// Tìm clusterId từ modal hoặc từ select box
-		let clusterId = clusterIdParam;
-		if (!clusterId) {
-			const addNodeClusterIdInput = document.getElementById('add-node-cluster-id');
-			const k8sClusterSelect = document.getElementById('k8s-cluster-select');
-			
-			if (addNodeClusterIdInput && addNodeClusterIdInput.value) {
-				// Được gọi từ modal "Thêm Node"
-				clusterId = parseInt(addNodeClusterIdInput.value, 10);
-			} else if (k8sClusterSelect && k8sClusterSelect.value) {
-				// Được gọi từ nút "Gán vào cluster"
-				clusterId = parseInt(k8sClusterSelect.value, 10);
-			}
-		}
-
-		if (!clusterId || isNaN(clusterId)) {
-			window.showAlert('warning', 'Vui lòng chọn cluster');
-			return;
-		}
-
+		// Với 1 cluster duy nhất, không cần clusterId nữa, luôn set clusterStatus = "AVAILABLE"
 		const addExistingBtn = document.getElementById('add-existing-nodes-btn');
 		const assignBtn = document.getElementById('btn-assign-selected');
-		// isFromModal đã được truyền vào như parameter, không cần tính lại
 
 		try {
 			// Disable button nếu có
@@ -1333,11 +1729,11 @@
 			}
 
 			for (const nodeId of nodeIds) {
-				const body = { clusterId, role };
+				const body = { clusterStatus: 'AVAILABLE', role: role || 'WORKER' };
 				await window.ApiClient.put(`/admin/servers/${nodeId}`, body);
 			}
 
-			window.showAlert('success', `✓ Đã thêm ${nodeIds.length} node vào cluster`);
+			window.showAlert('success', `✓ Đã thêm ${nodeIds.length} node vào cluster (clusterStatus = "AVAILABLE")`);
 
 			// Nếu được gọi từ modal, đóng modal sau 1 giây
 			if (isFromModal) {
@@ -1358,15 +1754,15 @@
 					}
 				}
 
-					if (currentClusterId === clusterId) {
-						await showClusterDetail(clusterId);
+					if (currentClusterId) {
+						await showClusterDetail(currentClusterId);
 					}
 					await Promise.all([loadClusterList(), loadClustersAndServers()]);
 				}, 1000);
 			} else {
 				// Nếu được gọi từ nút "Gán vào cluster", refresh ngay
-				if (currentClusterId === clusterId) {
-					await showClusterDetail(clusterId);
+				if (currentClusterId) {
+					await showClusterDetail(currentClusterId);
 				}
 				await Promise.all([loadClusterList(), loadClustersAndServers()]);
 			}
@@ -1381,25 +1777,27 @@
 			}
 			if (assignBtn) {
 				assignBtn.disabled = false;
-				assignBtn.innerHTML = 'Gán vào Cluster';
+				assignBtn.innerHTML = '📌 Thêm vào Cluster (AVAILABLE)';
 			}
 		}
 	}
 
-	// Remove node from cluster
-	async function removeNodeFromCluster(nodeId, clusterId) {
-		if (!confirm('Xóa node này khỏi cluster?')) return;
+	// Remove node from cluster (set clusterStatus = "UNAVAILABLE")
+	async function removeNodeFromCluster(nodeId, clusterId = null) {
+		if (!confirm('Xóa node này khỏi cluster (set clusterStatus = "UNAVAILABLE")?')) return;
 
 		try {
 			const servers = await window.ApiClient.get('/admin/servers').catch(() => []);
 			const server = servers.find(s => s.id === nodeId);
-			const currentRole = server ? server.role : 'WORKER';
+			const currentRole = server ? (server.role || 'WORKER') : 'WORKER';
 
-			const body = { clusterId: null, role: currentRole };
+			const body = { clusterStatus: 'UNAVAILABLE', role: currentRole };
 			await window.ApiClient.put(`/admin/servers/${nodeId}`, body);
 
-			window.showAlert('success', `Đã xóa node ${nodeId} khỏi cluster`);
-			await showClusterDetail(clusterId);
+			window.showAlert('success', `Đã xóa node ${nodeId} khỏi cluster (clusterStatus = "UNAVAILABLE")`);
+			if (currentClusterId) {
+				await showClusterDetail(currentClusterId);
+			}
 			await Promise.all([loadClusterList(), loadClustersAndServers()]);
 		} catch (err) {
 			window.showAlert('error', err.message || 'Xóa node thất bại');
@@ -1474,10 +1872,11 @@
 			// Load tất cả servers
 			const servers = await window.ApiClient.get('/admin/servers').catch(() => []);
 
-			// Lọc các server chưa thuộc cluster nào (clusterId null hoặc undefined)
-			const availableNodes = servers.filter(server =>
-				!server.clusterId || server.clusterId === null || server.clusterId === undefined
-			);
+			// Lọc các server chưa thuộc cluster nào (clusterStatus = "UNAVAILABLE" hoặc null/undefined)
+			const availableNodes = servers.filter(server => {
+				const clusterStatus = server.clusterStatus || 'UNAVAILABLE';
+				return clusterStatus !== 'AVAILABLE';
+			});
 
 			// Clear tbody
 			tbodyEl.innerHTML = '';
@@ -1685,25 +2084,33 @@
 		}
 
 		// Check if we're on the add-cluster.html page - không cần load cluster list
-		const isAddClusterPage = document.getElementById('create-cluster-form') && !document.getElementById('clusters-tbody');
+		const isAddClusterPage = document.getElementById('create-cluster-form') && !document.getElementById('cluster-summary') && !document.getElementById('clusters-tbody');
 		if (isAddClusterPage) {
 			// Trang add-cluster.html không cần load cluster list, module addCluster.js sẽ xử lý
 			return;
 		}
 
-		// Check if we're on the assign-servers.html page
-		const isAssignServersPage = document.getElementById('k8s-assign') && !document.getElementById('k8s-list');
+		// Check if we're on the assign-servers.html page (with new 2-table layout)
+		const hasAvailableServers = document.getElementById('available-servers-tbody');
+		const hasAssignedServers = document.getElementById('assigned-servers-tbody');
+		const isAssignServersPage = hasAvailableServers && hasAssignedServers && !document.getElementById('cluster-summary');
+		
+		// Check if we're on the old assign-servers page layout (for backward compatibility)
+		const hasOldAssignSection = document.getElementById('k8s-assign') && !document.getElementById('cluster-summary');
+		
+		// Check if we're on cluster.html page (which includes cluster summary and servers list)
+		const hasClusterSummary = document.getElementById('cluster-summary');
+		const hasClusterServers = document.getElementById('cluster-servers-tbody');
 		
 		// Wait for ApiClient to be ready before loading clusters
 		function waitForApiClient() {
 			if (window.ApiClient && typeof window.ApiClient.get === 'function') {
-				if (isAssignServersPage) {
-					// We're on assign-servers.html page - only load servers and cluster selection
+				if (isAssignServersPage || hasOldAssignSection) {
+					// We're on assign-servers.html page (standalone) - load servers into 2 tables
 					loadClustersAndServers();
 				} else {
-					// We're on cluster.html page - load cluster list and form
-					// Chỉ load nếu element clusters-tbody tồn tại
-					if (document.getElementById('clusters-tbody')) {
+					// We're on cluster.html page - load cluster summary (with servers list)
+					if (hasClusterSummary) {
 						loadClusterList();
 					}
 					// Bind playbook manager modal (if exists)
@@ -1716,11 +2123,7 @@
 				if (refreshBtn && !refreshBtn.dataset.bound) {
 					refreshBtn.dataset.bound = '1';
 					refreshBtn.addEventListener('click', () => {
-						if (isAssignServersPage) {
-							// On assign-servers page
-				loadClustersAndServers();
-						} else {
-							// On cluster page
+						if (hasClusterSummary) {
 							loadClusterList();
 						}
 					});

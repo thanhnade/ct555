@@ -1,11 +1,11 @@
 package com.example.AutoDeployApp.controller;
 
 import com.example.AutoDeployApp.entity.Application;
-import com.example.AutoDeployApp.entity.Cluster;
 import com.example.AutoDeployApp.entity.UserEntity;
 import com.example.AutoDeployApp.entity.UserActivity;
 import com.example.AutoDeployApp.service.ApplicationService;
 import com.example.AutoDeployApp.service.ClusterService;
+import com.example.AutoDeployApp.entity.Server;
 import com.example.AutoDeployApp.service.KubernetesService;
 import com.example.AutoDeployApp.service.UserService;
 import org.slf4j.Logger;
@@ -432,39 +432,24 @@ public class AdminController {
             }
             String dockerImage = application.getDockerImage();
 
-            Cluster cluster;
-            boolean autoSelectedCluster = requestedClusterId == null;
-            if (autoSelectedCluster) {
-                // Tự động chọn cluster HEALTHY đầu tiên (có MASTER online)
-                cluster = clusterService.getFirstHealthyCluster()
+            // Với 1 cluster duy nhất, luôn tìm MASTER online đầu tiên trong các server AVAILABLE
+            Server master = clusterService.getFirstHealthyMaster()
                         .orElseThrow(() -> new RuntimeException(
-                                "Không tìm thấy cluster K8s nào để triển khai. Vui lòng thêm cluster và đảm bảo MASTER node đang online."));
-                if (!clusterService.hasMasterOnline(cluster.getId())) {
+                            "Không tìm thấy MASTER node online trong cluster. " +
+                                    "Vui lòng đảm bảo có ít nhất 1 MASTER node online với clusterStatus = 'AVAILABLE'."));
+            
+            if (!clusterService.hasMasterOnline()) {
                     throw new RuntimeException(
-                            "MASTER node trong cluster \"" + cluster.getName() + "\" đang offline. "
+                        "MASTER node (" + master.getHost() + ") đang offline. "
                                     + "Không thể triển khai ứng dụng. Vui lòng kiểm tra kết nối MASTER node và thử lại.");
                 }
-            } else {
-                cluster = clusterService.findById(requestedClusterId)
-                        .orElseThrow(() -> new IllegalArgumentException("Cluster được chọn không tồn tại"));
-                if (!clusterService.hasMasterOnline(cluster.getId())) {
-                    throw new IllegalArgumentException(
-                            "MASTER node trong cluster \"" + cluster.getName() + "\" đang offline. "
-                                    + "Vui lòng chọn cluster khác hoặc kiểm tra kết nối.");
-                }
-            }
-            Long clusterId = cluster.getId();
 
-            if (autoSelectedCluster) {
-                logger.info("Auto-selected cluster for deployment: {} (ID: {}), MASTER is online", cluster.getName(),
-                        clusterId);
-            } else {
-                logger.info("Admin selected cluster for deployment: {} (ID: {}), MASTER is online", cluster.getName(),
-                        clusterId);
-            }
+            Long clusterId = null; // Với 1 cluster duy nhất, không cần clusterId nữa, nhưng giữ lại để tương thích với Application entity
 
-            // Lưu clusterId ngay sau khi chọn cluster (trước khi tạo tài nguyên)
-            // Để có thể dọn dẹp nếu deployment gặp lỗi
+            logger.info("Using MASTER node for deployment: {} (Host: {}), MASTER is online", 
+                    master.getId(), master.getHost());
+
+            // Lưu clusterId = null (vì chỉ có 1 cluster duy nhất, không cần lưu ID)
             application.setClusterId(clusterId);
             applicationService.updateApplication(application);
 
@@ -490,14 +475,9 @@ public class AdminController {
             }
 
             try {
-                // 1. Tự động chọn cluster HEALTHY đầu tiên
-                if (autoSelectedCluster) {
-                    appendLog.accept("✅ Đã tự động chọn cluster: " + cluster.getName() + " (ID: " + clusterId + ")");
-                } else {
-                    appendLog.accept("✅ Đã sử dụng cluster do admin chọn: " + cluster.getName() + " (ID: " + clusterId
-                            + ")");
-                }
-                appendLog.accept("💾 Đã lưu cluster ID vào database để theo dõi");
+                // 1. Sử dụng MASTER node online đầu tiên trong cluster
+                appendLog.accept("✅ Đã chọn MASTER node: " + master.getHost() + " (ID: " + master.getId() + ")");
+                appendLog.accept("💾 Đã lưu thông tin deployment vào database");
 
                 // 2. Lấy kubeconfig từ master node
                 appendLog.accept("📥 Đang lấy kubeconfig từ master node...");

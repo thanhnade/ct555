@@ -92,7 +92,7 @@
 
 				const uploadedDate = req.createdAt ? new Date(req.createdAt).toLocaleDateString('vi-VN') : 'N/A';
 				const dockerImage = escapeHtml(req.dockerImage || 'N/A');
-				
+
 				tr.innerHTML = `
 					<td>${escapeHtml(req.appName || `#${req.id}`)}</td>
 					<td>${escapeHtml(req.username || 'Unknown')}</td>
@@ -288,42 +288,14 @@
 				window.ApiClient.get('/admin/clusters').catch(() => [])
 			]);
 
+			// Với 1 cluster duy nhất, không cần chọn cluster nữa
 			const clusters = Array.isArray(clusterResponse) ? clusterResponse : [];
-			const existingClusterId = detail.clusterId != null ? Number(detail.clusterId) : null;
-			const formatClusterName = (cluster) => escapeHtml(cluster && cluster.name ? cluster.name : `Cluster #${cluster.id}`);
-			const formatClusterStatus = (cluster) =>
-				cluster && cluster.status ? ` [${escapeHtml(String(cluster.status))}]` : '';
+			const cluster = clusters.length > 0 ? clusters[0] : null;
+			const clusterName = cluster ? (cluster.name || 'Default Cluster') : 'Default Cluster';
+			const clusterStatus = cluster ? (cluster.status || 'UNKNOWN') : 'UNKNOWN';
 
-			let hasSelectedClusterOption = false;
-			const clusterOptionHtmlPieces = clusters.map(cluster => {
-				const cid = Number(cluster.id);
-				const selected = existingClusterId != null && cid === existingClusterId;
-				if (selected) {
-					hasSelectedClusterOption = true;
-				}
-				return `<option value="${cid}" ${selected ? 'selected' : ''}>${formatClusterName(cluster)}${formatClusterStatus(cluster)}</option>`;
-			});
-
-			const clusterOptionsHtml = (existingClusterId != null && !hasSelectedClusterOption
-				? `<option value="${existingClusterId}" selected>Cluster #${existingClusterId} (đã lưu)</option>`
-				: '') + clusterOptionHtmlPieces.join('');
-
-			const clusterHelpText = clusters.length > 0
-				? 'Để trống để hệ thống tự chọn cluster HEALTHY.'
-				: 'Chưa có cluster khả dụng. Nếu để trống hệ thống sẽ cố gắng chọn tự động.';
-
-			const currentClusterLabel = existingClusterId != null
-				? (() => {
-					const matched = clusters.find(c => Number(c.id) === existingClusterId);
-					if (matched) {
-						const displayName = matched.name != null && matched.name !== ''
-							? matched.name
-							: `Cluster #${existingClusterId}`;
-						return `${displayName} (ID: ${existingClusterId})`;
-					}
-					return `Cluster #${existingClusterId}`;
-				})()
-				: 'Chưa gán';
+			const clusterHelpText = 'Hệ thống sẽ tự động sử dụng cluster duy nhất (servers có clusterStatus = "AVAILABLE")';
+			const currentClusterLabel = cluster ? `${clusterName} (${clusterStatus})` : 'Chưa có cluster';
 
 			const modalId = 'deploymentDetailModal';
 			const existing = document.getElementById(modalId);
@@ -412,10 +384,9 @@
 
                   <div class="mb-3">
                     <label class="form-label">Cluster triển khai</label>
-                    <select id="dd-cluster" class="form-select">
-                      <option value="">-- Tự động chọn cluster HEALTHY --</option>
-                      ${clusterOptionsHtml}
-                    </select>
+                    <div class="form-control" style="background: #E8F5E9; border: 1px solid #4CAF50; color: #2E7D32; padding: 8px 12px;">
+                      🧩 <strong>${escapeHtml(currentClusterLabel)}</strong>
+                    </div>
                     <small class="form-text text-muted">${escapeHtml(clusterHelpText)}</small>
                   </div>
 
@@ -650,10 +621,9 @@
 						}
 					}
 
-					const clusterSelect = document.getElementById('dd-cluster');
-					if (clusterSelect && clusterSelect.value) {
-						processBody.clusterId = clusterSelect.value;
-					}
+				// Với 1 cluster duy nhất, không cần gửi clusterId nữa
+				// Backend sẽ tự động sử dụng servers có clusterStatus = "AVAILABLE"
+				// processBody.clusterId = null; // hoặc không gửi field này
 
 					// Process deployment with parameters
 					await processDeploymentRequestWithParams(id, processBody);

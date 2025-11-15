@@ -14,10 +14,10 @@ public interface ServerRepository extends JpaRepository<Server, Long> {
     // Global check for duplicate server (across all users)
     boolean existsByHostAndPortAndUsername(String host, Integer port, String username);
 
-    @Query("select s from Server s left join fetch s.cluster")
+    @Query("select s from Server s left join fetch s.sshKey")
     List<Server> findAllWithCluster();
 
-    List<Server> findByCluster_Id(Long clusterId);
+    List<Server> findByClusterStatus(String clusterStatus);
 
     @Query("select s from Server s left join fetch s.sshKey where s.id = :id")
     Optional<Server> findByIdWithSshKey(@Param("id") Long id);

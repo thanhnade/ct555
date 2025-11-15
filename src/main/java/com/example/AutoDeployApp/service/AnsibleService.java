@@ -35,7 +35,8 @@ public class AnsibleService {
      * Lấy danh sách servers trong cluster
      */
     public List<Server> getClusterServers(Long clusterId) {
-        return serverService.findByClusterId(clusterId);
+        // Với 1 cluster duy nhất, luôn trả về servers có clusterStatus = "AVAILABLE"
+        return serverService.findByClusterStatus("AVAILABLE");
     }
 
     /**
@@ -51,7 +52,7 @@ public class AnsibleService {
 
             // Lấy master server
             var master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .filter(s -> "MASTER".equals(s.getRole()))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
 
@@ -79,7 +80,7 @@ public class AnsibleService {
         try {
             var servers = getClusterServers(clusterId);
             var master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .filter(s -> "MASTER".equals(s.getRole()))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
 
@@ -107,7 +108,7 @@ public class AnsibleService {
         try {
             var servers = getClusterServers(clusterId);
             var master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .filter(s -> "MASTER".equals(s.getRole()))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
 
@@ -143,7 +144,7 @@ public class AnsibleService {
         try {
             var servers = getClusterServers(clusterId);
             var master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .filter(s -> "MASTER".equals(s.getRole()))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
 
@@ -167,7 +168,7 @@ public class AnsibleService {
         try {
             var servers = getClusterServers(clusterId);
             var master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .filter(s -> "MASTER".equals(s.getRole()))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
 
@@ -365,7 +366,7 @@ public class AnsibleService {
         try {
             var servers = getClusterServers(clusterId);
             var master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
+                    .filter(s -> "MASTER".equals(s.getRole()))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
 

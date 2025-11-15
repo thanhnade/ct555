@@ -2,8 +2,6 @@ package com.example.AutoDeployApp.service;
 
 import com.example.AutoDeployApp.entity.Server;
 import com.example.AutoDeployApp.repository.ServerRepository;
-import com.example.AutoDeployApp.repository.ClusterRepository;
-import com.example.AutoDeployApp.entity.Cluster;
 import com.example.AutoDeployApp.entity.SshKey;
 import com.example.AutoDeployApp.repository.SshKeyRepository;
 import com.jcraft.jsch.JSch;
@@ -31,13 +29,10 @@ public class ServerService {
 
     private final ServerRepository serverRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    private final ClusterRepository clusterRepository;
     private final SshKeyRepository sshKeyRepository;
 
-    public ServerService(ServerRepository serverRepository, ClusterRepository clusterRepository,
-            SshKeyRepository sshKeyRepository) {
+    public ServerService(ServerRepository serverRepository, SshKeyRepository sshKeyRepository) {
         this.serverRepository = serverRepository;
-        this.clusterRepository = clusterRepository;
         this.sshKeyRepository = sshKeyRepository;
     }
 
@@ -50,10 +45,14 @@ public class ServerService {
         return serverRepository.findAllWithCluster();
     }
 
-    public List<Server> findByClusterId(Long clusterId) {
-        if (clusterId == null)
+    public List<Server> findByClusterStatus(String clusterStatus) {
+        if (clusterStatus == null || clusterStatus.isBlank())
             return List.of();
-        return serverRepository.findByCluster_Id(clusterId);
+        return serverRepository.findByClusterStatus(clusterStatus);
+    }
+
+    public List<Server> findAvailableClusterServers() {
+        return serverRepository.findByClusterStatus("AVAILABLE");
     }
 
     public Server findById(Long id) {
@@ -82,8 +81,8 @@ public class ServerService {
     }
 
     @Transactional
-    public Server create(String host, Integer port, String username, String rawPassword, Server.ServerRole role,
-            Long addedBy, Long clusterId, Server.AuthType authType, Long sshKeyId) {
+    public Server create(String host, Integer port, String username, String rawPassword, String role,
+            Long addedBy, String clusterStatus, Server.AuthType authType, Long sshKeyId) {
         int resolvedPort = (port != null ? port : 22);
         boolean canSsh = false;
         if (authType == null || authType == Server.AuthType.PASSWORD) {
@@ -112,16 +111,15 @@ public class ServerService {
             SshKey key = sshKeyRepository.findById(sshKeyId).orElse(null);
             s.setSshKey(key);
         }
-        if (role != null)
+        if (role != null && !role.isBlank()) {
             s.setRole(role);
-        if (clusterId != null) {
-            Cluster c = clusterRepository.findById(clusterId).orElse(null);
-            // Nếu không tìm thấy cluster, để null (bỏ qua)
-            if (c != null) {
-                s.setCluster(c);
             } else {
-                s.setCluster(null);
+            s.setRole("WORKER"); // Default role
             }
+        if (clusterStatus != null && !clusterStatus.isBlank()) {
+            s.setClusterStatus(clusterStatus);
+        } else {
+            s.setClusterStatus("UNAVAILABLE");
         }
         if (authType == Server.AuthType.PASSWORD) {
             s.setStatus(Server.ServerStatus.ONLINE);
@@ -150,7 +148,7 @@ public class ServerService {
 
     @Transactional
     public Server update(Long id, String host, Integer port, String username, String rawPassword,
-            Server.ServerRole role, Server.ServerStatus status, Long clusterId, Server.AuthType authType,
+            String role, Server.ServerStatus status, String clusterStatus, Server.AuthType authType,
             Long sshKeyId) {
         Server s = serverRepository.findById(id).orElseThrow();
         if (host != null && !host.isBlank() && port != null && username != null && !username.isBlank()) {
@@ -217,24 +215,11 @@ public class ServerService {
         }
         if (role != null)
             s.setRole(role);
-        // Xử lý clusterId: null để clear cluster, hoặc giá trị cụ thể để gán cluster
-        System.out.println("DEBUG: Processing clusterId=" + clusterId + " for server " + s.getId());
-        if (clusterId != null) {
-            if (clusterId >= 0) {
-                // Nếu không tìm thấy cluster, coi như null (xoá liên kết)
-                Cluster c = clusterRepository.findById(clusterId).orElse(null);
-                s.setCluster(c);
-                System.out.println(
-                        "DEBUG: Set cluster to " + (c != null ? c.getId() : "null") + " for server " + s.getId());
+        // Xử lý clusterStatus: null hoặc empty để set UNAVAILABLE, hoặc giá trị cụ thể
+        if (clusterStatus != null && !clusterStatus.isBlank()) {
+            s.setClusterStatus(clusterStatus);
             } else {
-                // Giá trị sentinel (<0) nghĩa là xóa liên kết cluster
-                s.setCluster(null);
-                System.out.println("DEBUG: Cleared cluster (sentinel) for server " + s.getId());
-            }
-        } else {
-            // clusterId = null trong request body nghĩa là xóa liên kết cluster
-            s.setCluster(null);
-            System.out.println("DEBUG: Cleared cluster (null) for server " + s.getId());
+            s.setClusterStatus("UNAVAILABLE");
         }
         // Cập nhật trạng thái: nếu vừa xác thực (do có thay đổi kết nối hoặc có mật
         // khẩu mới)
@@ -242,6 +227,21 @@ public class ServerService {
             s.setStatus(Server.ServerStatus.ONLINE);
         } else if (status != null) {
             s.setStatus(status);
+        }
+        return serverRepository.saveAndFlush(s);
+    }
+
+    @Transactional
+    public Server updateMetrics(Long id, String cpuCores, String ramTotal, String diskTotal) {
+        Server s = serverRepository.findById(id).orElseThrow();
+        if (cpuCores != null) {
+            s.setCpuCores(cpuCores.isBlank() ? null : cpuCores);
+        }
+        if (ramTotal != null) {
+            s.setRamTotal(ramTotal.isBlank() ? null : ramTotal);
+        }
+        if (diskTotal != null) {
+            s.setDiskTotal(diskTotal.isBlank() ? null : diskTotal);
         }
         return serverRepository.saveAndFlush(s);
     }
@@ -263,16 +263,15 @@ public class ServerService {
                 try {
                     Long keyId = s.getSshKey().getId();
                     s.setSshKey(null);
-                    // cắt liên kết cluster để tránh FK
-                    s.setCluster(null);
+                    s.setClusterStatus("UNAVAILABLE");
                     serverRepository.saveAndFlush(s);
                     sshKeyRepository.deleteById(keyId);
                 } catch (Exception ignored) {
                 }
             } else {
-                // đảm bảo cắt liên kết cluster để tránh FK
+                // đảm bảo set cluster status
                 try {
-                    s.setCluster(null);
+                    s.setClusterStatus("UNAVAILABLE");
                     serverRepository.saveAndFlush(s);
                 } catch (Exception ignored) {
                 }

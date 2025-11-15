@@ -3,29 +3,27 @@
     'use strict';
 
     const ClusterSetupModule = {
-        currentClusterId: null,
+        currentClusterId: 1, // Với 1 cluster duy nhất, luôn dùng ID = 1
 
         init: function() {
-            this.loadClusters();
+            this.loadClusterInfo();
             this.bindEvents();
         },
 
-        loadClusters: function() {
+        loadClusterInfo: function() {
             if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
-                setTimeout(() => this.loadClusters(), 100);
+                setTimeout(() => this.loadClusterInfo(), 100);
                 return;
             }
-
-            // Get clusterId from URL query parameter
-            const urlParams = new URLSearchParams(window.location.search);
-            const clusterIdFromUrl = urlParams.get('clusterId');
 
             window.ApiClient.get('/admin/clusters').then(clusters => {
                 const select = document.getElementById('cluster-select');
                 if (!select) return;
 
-                // Hệ thống chỉ hỗ trợ 1 cluster - nếu đã có cluster, tự động chọn và ẩn dropdown
-                if (clusters && clusters.length === 1) {
+                // Với 1 cluster duy nhất, luôn hiển thị thông tin cluster
+                if (clusters && clusters.length > 0) {
+                    const cluster = clusters[0];
+                    
                     // Ẩn dropdown và label, hiển thị thông tin cluster
                     const parent = select.closest('div');
                     if (parent) {
@@ -41,50 +39,39 @@
                             clusterInfo.style.cssText = 'padding: 8px 12px; background: #E8F5E9; border-radius: 6px; border: 1px solid #4CAF50; font-size: 13px; color: #2E7D32;';
                             parent.insertBefore(clusterInfo, select);
                         }
-                        clusterInfo.innerHTML = `🧩 <strong>${clusters[0].name || `Cluster ${clusters[0].id}`}</strong>`;
+                        clusterInfo.innerHTML = `🧩 <strong>${cluster.name || 'Default Cluster'}</strong> - Servers có clusterStatus = 'AVAILABLE'`;
                     }
                     
                     select.style.display = 'none';
                     select.innerHTML = '';
                     const opt = document.createElement('option');
-                    opt.value = clusters[0].id;
-                    opt.textContent = clusters[0].name || `Cluster ${clusters[0].id}`;
+                    opt.value = cluster.id;
+                    opt.textContent = cluster.name || 'Default Cluster';
                     opt.selected = true;
                     select.appendChild(opt);
                     
-                    this.currentClusterId = clusters[0].id;
+                    this.currentClusterId = cluster.id;
                 } else {
-                    // Hiển thị dropdown nếu chưa có cluster hoặc có nhiều cluster (trường hợp hiếm)
-                    select.innerHTML = '<option value="">-- Chọn cluster --</option>';
-                    (clusters || []).forEach(c => {
-                        const opt = document.createElement('option');
-                        opt.value = c.id;
-                        opt.textContent = c.name || `Cluster ${c.id}`;
-                        select.appendChild(opt);
-                    });
-
-                    // Auto-select cluster from URL query parameter if provided
-                    if (clusterIdFromUrl) {
-                        const clusterId = parseInt(clusterIdFromUrl, 10);
-                        const cluster = (clusters || []).find(c => Number(c.id) === clusterId);
-                        if (cluster) {
-                            select.value = clusterId;
-                            this.currentClusterId = clusterId;
+                    // Chưa có servers với clusterStatus = "AVAILABLE"
+                    const parent = select.closest('div');
+                    if (parent) {
+                        const label = parent.querySelector('label');
+                        if (label) label.style.display = 'none';
+                        
+                        let clusterInfo = parent.querySelector('.cluster-info-display');
+                        if (!clusterInfo) {
+                            clusterInfo = document.createElement('div');
+                            clusterInfo.className = 'cluster-info-display';
+                            clusterInfo.style.cssText = 'padding: 8px 12px; background: #FFF3E0; border-radius: 6px; border: 1px solid #FF9800; font-size: 13px; color: #E65100;';
+                            parent.insertBefore(clusterInfo, select);
                         }
-                    } else if (clusters && clusters.length === 1) {
-                        // Auto-select first cluster if only one exists (fallback)
-                        select.value = clusters[0].id;
-                        this.currentClusterId = clusters[0].id;
+                        clusterInfo.innerHTML = `⚠️ Chưa có servers với clusterStatus = 'AVAILABLE'. Vui lòng thêm servers và set clusterStatus = 'AVAILABLE'.`;
                     }
+                    select.style.display = 'none';
                 }
-
-                // Listen for cluster selection change
-                select.addEventListener('change', (e) => {
-                    this.currentClusterId = e.target.value ? parseInt(e.target.value, 10) : null;
-                });
             }).catch(err => {
-                console.error('Error loading clusters:', err);
-                window.showAlert('error', 'Không thể tải danh sách cluster');
+                console.error('Error loading cluster info:', err);
+                // Không hiển thị error vì có thể cluster chưa có servers
             });
         },
 
@@ -97,24 +84,10 @@
                 });
             }
 
-            // Helper function to get clusterID (tự động lấy nếu chưa có)
+            // Helper function to get clusterID (với 1 cluster duy nhất, luôn trả về 1)
             const getClusterId = async () => {
-                if (this.currentClusterId) {
-                    return this.currentClusterId;
-                }
-                // Nếu chưa có, thử lấy cluster đầu tiên (hệ thống chỉ hỗ trợ 1 cluster)
-                try {
-                    const clusters = await window.ApiClient.get('/admin/clusters').catch(() => []);
-                    if (clusters && clusters.length > 0) {
-                        this.currentClusterId = clusters[0].id;
-                        const select = document.getElementById('cluster-select');
-                        if (select) select.value = this.currentClusterId;
-                        return this.currentClusterId;
-                    }
-                } catch (err) {
-                    console.error('Error getting cluster:', err);
-                }
-                return null;
+                // Với 1 cluster duy nhất, luôn trả về ID = 1
+                return this.currentClusterId || 1;
             };
 
             // Step 1: Environment Check
@@ -122,10 +95,7 @@
             if (btnStep1) {
                 btnStep1.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     this.runEnvironmentCheck();
                 });
             }
@@ -135,10 +105,7 @@
             if (btnStep2) {
                 btnStep2.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     this.installAnsible();
                 });
             }
@@ -148,10 +115,7 @@
             if (btnStep3) {
                 btnStep3.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     this.installKubernetes();
                 });
             }
@@ -161,10 +125,7 @@
             if (btnStep4Calico) {
                 btnStep4Calico.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     this.installCalico();
                 });
             }
@@ -173,10 +134,7 @@
             if (btnStep4Ingress) {
                 btnStep4Ingress.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     this.installIngress();
                 });
             }
@@ -185,10 +143,7 @@
             if (btnStep4MetalLB) {
                 btnStep4MetalLB.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     this.installMetalLB();
                 });
             }
@@ -198,10 +153,7 @@
             if (btnStep5) {
                 btnStep5.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     this.verifyCluster();
                 });
             }
@@ -211,10 +163,7 @@
             if (checkAnsibleBtn) {
                 checkAnsibleBtn.addEventListener('click', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
                     
                     // Gọi checkAnsibleStatus với clusterId hiện tại
                     // Function này sẽ tự động kiểm tra máy master của cluster
@@ -244,15 +193,7 @@
             if (playbookModal) {
                 playbookModal.addEventListener('show.bs.modal', async () => {
                     const clusterId = await getClusterId();
-                    if (!clusterId) {
-                        window.showAlert('warning', 'Chưa có cluster nào. Vui lòng tạo cluster trước.');
-                        // Đóng modal nếu chưa có cluster
-                        const modalInstance = bootstrap.Modal.getInstance(playbookModal);
-                        if (modalInstance) {
-                            modalInstance.hide();
-                        }
-                        return;
-                    }
+                    // Với 1 cluster duy nhất, luôn có clusterId = 1
                     
                     // Set currentClusterId cho playbook manager
                     if (window.setCurrentClusterId && typeof window.setCurrentClusterId === 'function') {

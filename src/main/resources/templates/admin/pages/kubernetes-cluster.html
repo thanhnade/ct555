@@ -6,81 +6,73 @@
     <div class="page-title-row">
       <div>
         <div class="page-title">🧩 Quản lý Cluster</div>
-        <div class="page-subtitle">Danh sách các Kubernetes cluster. Admin có thể tạo, xem chi tiết, gán server vào cluster.</div>
+        <div class="page-subtitle">Xem và quản lý Kubernetes cluster duy nhất trong hệ thống (servers có clusterStatus = "AVAILABLE").</div>
       </div>
       <div style="display: flex; gap: 8px;">
         <button class="btn" id="refresh-clusters-btn">🔄 Làm mới</button>
-        <button class="btn btn-primary" onclick="if(window.toggleAccordion) window.toggleAccordion(document.getElementById('cluster-create-accordion')); else console.error('toggleAccordion not found');">+ Tạo Cluster</button>
       </div>
     </div>
 
-    <!-- Create Cluster Accordion -->
-    <div class="accordion" id="cluster-create-accordion">
-      <div class="accordion-header" onclick="if(window.toggleAccordion) window.toggleAccordion(this.parentElement); else console.error('toggleAccordion not found');">
-        <span>➕ Tạo cluster mới</span>
-        <span class="arrow">›</span>
-      </div>
-      <div class="accordion-body">
-        <form id="create-cluster-form">
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Tên Cluster <span style="color: #CC0000;">*</span></label>
-              <input type="text" name="name" id="cluster-name" placeholder="my-cluster" required 
-                     pattern="[a-zA-Z0-9-_]+" minlength="3" maxlength="50" autocomplete="off">
-              <small class="form-hint">Tên cluster (chỉ chứa chữ, số, dấu gạch ngang và gạch dưới)</small>
-            </div>
-            <div class="form-group">
-              <label>Mô tả</label>
-              <input type="text" name="description" id="cluster-description" placeholder="Mô tả cluster (tùy chọn)" 
-                     maxlength="255" autocomplete="off">
-              <small class="form-hint">Mô tả ngắn về cluster</small>
-            </div>
-          </div>
-          <div id="create-cluster-error" class="form-error" style="display: none; margin-top: 12px;"></div>
-          <div style="margin-top: 16px; display: flex; gap: 8px;">
-            <button type="submit" class="btn btn-primary" id="create-cluster-submit-btn">
-              <span id="create-cluster-text">💾 Tạo Cluster</span>
-              <span id="create-cluster-loading" style="display: none;">⏳ Đang tạo...</span>
-            </button>
-            <button type="button" class="btn" onclick="if(window.K8sClustersModule && window.K8sClustersModule.resetClusterForm) window.K8sClustersModule.resetClusterForm(); else document.getElementById('create-cluster-form').reset();">✖️ Hủy</button>
-          </div>
-        </form>
+    <!-- Info: Single cluster model -->
+    <div class="table-card" style="margin-bottom: 20px; background: #E8F5E9; border: 1px solid #4CAF50;">
+      <div style="padding: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+          <span style="font-size: 20px;">ℹ️</span>
+          <strong style="color: #2E7D32;">Thông tin về Cluster Management</strong>
+        </div>
+        <p style="margin: 0; color: #2E7D32; line-height: 1.6;">
+          Hệ thống chỉ hỗ trợ <strong>1 cluster duy nhất</strong>. Cluster được quản lý tự động qua <code>clusterStatus</code> của servers:
+        </p>
+        <ul style="margin: 8px 0 0 20px; color: #2E7D32; line-height: 1.8;">
+          <li><strong>AVAILABLE</strong>: Server thuộc cluster (cluster duy nhất)</li>
+          <li><strong>UNAVAILABLE</strong>: Server không thuộc cluster</li>
+        </ul>
+        <p style="margin: 8px 0 0 0; color: #2E7D32; line-height: 1.6;">
+          Để thêm server vào cluster, sử dụng trang <a href="/admin/cluster/assign" style="color: #1B5E20; text-decoration: underline; font-weight: bold;">Assign Servers</a> để set <code>clusterStatus = "AVAILABLE"</code>.
+        </p>
       </div>
     </div>
 
-    <!-- Filters and Cluster List -->
+    <!-- Cluster Summary -->
+    <div class="table-card" id="cluster-summary" style="margin-bottom: 20px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">📊 Thông tin Cluster</div>
+          <div class="page-subtitle" style="font-size: 12px;">Thông tin tổng quan về cluster duy nhất trong hệ thống.</div>
+        </div>
+      </div>
+      <div id="cluster-summary-content" style="padding: 16px; background: #F9F9F9; border-radius: 8px;">
+        <div class="text-center" style="color: #666666;">Đang tải...</div>
+      </div>
+    </div>
+
+    <!-- Servers in Cluster -->
     <div class="table-card" id="k8s-list">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
-        <div style="flex: 1; min-width: 200px;">
-          <input id="cluster-search" class="form-control" placeholder="🔍 Tìm theo tên cluster..." style="max-width: 300px;">
+        <div>
+          <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">🖥 Danh sách Servers trong Cluster</div>
+          <div class="page-subtitle" style="font-size: 12px;">Các server có <code>clusterStatus = "AVAILABLE"</code> thuộc cluster duy nhất.</div>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <select id="cluster-status-filter" class="form-control" style="width: 180px;">
-              <option value="">Tất cả trạng thái</option>
-            <option value="HEALTHY">HEALTHY</option>
-            <option value="WARNING">WARNING</option>
-            <option value="ERROR">ERROR</option>
-            </select>
-          </div>
-        </div>
+      </div>
+      
       <table class="table">
-            <thead>
-            <tr>
-              <th>Cluster Name</th>
-              <th>Master Node</th>
-              <th>Số Worker</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-            </thead>
-        <tbody id="clusters-tbody">
+        <thead>
           <tr>
-            <td colspan="5" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+            <th>Host</th>
+            <th>Port</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Cluster Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="cluster-servers-tbody">
+          <tr>
+            <td colspan="7" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
           </tr>
         </tbody>
-          </table>
-        <!-- Pagination -->
-      <div id="clusters-pagination" style="margin-top: 16px;"></div>
+      </table>
     </div>
 
     <!-- Assign Servers Section -->
@@ -116,7 +108,7 @@
               <th>Host</th>
               <th>Port</th>
               <th>Username</th>
-              <th>Cluster</th>
+              <th>Cluster Status</th>
               <th>Role</th>
               <th>Status</th>
             <th>Actions</th>

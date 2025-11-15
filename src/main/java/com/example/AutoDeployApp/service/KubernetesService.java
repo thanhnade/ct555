@@ -15,7 +15,6 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Config;
-import com.example.AutoDeployApp.entity.Cluster;
 import com.example.AutoDeployApp.entity.Server;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -120,29 +119,16 @@ public class KubernetesService {
     }
 
     /**
-     * Lấy Kubernetes client dựa trên cluster ID bằng cách kéo kubeconfig từ master node qua SSH
+     * Lấy Kubernetes client bằng cách kéo kubeconfig từ MASTER node online đầu tiên (có clusterStatus = "AVAILABLE") qua SSH
+     * Với 1 cluster duy nhất, luôn tìm MASTER online đầu tiên trong các server AVAILABLE
      */
     private KubernetesClient getKubernetesClient(Long clusterId) {
         try {
-            if (clusterId == null) {
-                // Dự phòng: dùng kubeconfig từ config hoặc mặc định
-                return getKubernetesClientFromConfig();
-            }
-
-            // Lấy cluster
-            Cluster cluster = clusterService.findAll().stream()
-                    .filter(c -> c.getId().equals(clusterId))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Cluster not found: " + clusterId));
-
-            // Lấy master node
-            var servers = serverService.findByClusterId(clusterId);
-            Server master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
-                    .findFirst()
+            // Tìm MASTER online đầu tiên trong các server AVAILABLE
+            Server master = clusterService.getFirstHealthyMaster()
                     .orElseThrow(() -> new RuntimeException(
-                            "Không tìm thấy MASTER node trong cluster: " + cluster.getName() +
-                                    ". Vui lòng thêm MASTER node vào cluster trước."));
+                            "Không tìm thấy MASTER node online trong cluster. " +
+                                    "Vui lòng đảm bảo có ít nhất 1 MASTER node online với clusterStatus = 'AVAILABLE'."));
 
             // Kiểm tra master online - quan trọng vì cần SSH để lấy kubeconfig
             if (master.getStatus() != Server.ServerStatus.ONLINE) {
@@ -160,7 +146,7 @@ public class KubernetesService {
             return new KubernetesClientBuilder().withConfig(config).build();
 
         } catch (Exception e) {
-            logger.error("Failed to create Kubernetes client for cluster: {}", clusterId, e);
+            logger.error("Failed to create Kubernetes client", e);
             throw new RuntimeException("Cannot connect to Kubernetes cluster: " + e.getMessage(), e);
         }
     }
@@ -844,21 +830,8 @@ public class KubernetesService {
      */
     public NodeList getNodes(Long clusterId) {
         try {
-            // Kiểm tra nhanh xem kubelet đã loaded chưa
-            Cluster cluster = clusterService.findAll().stream()
-                    .filter(c -> c.getId().equals(clusterId))
-                    .findFirst()
-                    .orElse(null);
-            
-            if (cluster == null) {
-                return null;
-            }
-
-            var servers = serverService.findByClusterId(clusterId);
-            Server master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
-                    .findFirst()
-                    .orElse(null);
+            // Tìm MASTER online đầu tiên trong các server AVAILABLE
+            Server master = clusterService.getFirstHealthyMaster().orElse(null);
 
             if (master == null || master.getStatus() != Server.ServerStatus.ONLINE) {
                 return null;
@@ -866,7 +839,7 @@ public class KubernetesService {
 
             // Kiểm tra nhanh xem kubelet đã loaded chưa
             if (!isKubeletLoaded(master)) {
-                logger.debug("Kubelet not loaded on master node for cluster: {}", clusterId);
+                logger.debug("Kubelet not loaded on master node");
                 return null; // Kubelet chưa loaded, bỏ qua
             }
 
@@ -1003,21 +976,8 @@ public class KubernetesService {
      */
     public String getKubernetesVersion(Long clusterId) {
         try {
-            // Kiểm tra nhanh xem kubelet đã loaded chưa
-            Cluster cluster = clusterService.findAll().stream()
-                    .filter(c -> c.getId().equals(clusterId))
-                    .findFirst()
-                    .orElse(null);
-            
-            if (cluster == null) {
-                return "";
-            }
-
-            var servers = serverService.findByClusterId(clusterId);
-            Server master = servers.stream()
-                    .filter(s -> s.getRole() == Server.ServerRole.MASTER)
-                    .findFirst()
-                    .orElse(null);
+            // Tìm MASTER online đầu tiên trong các server AVAILABLE
+            Server master = clusterService.getFirstHealthyMaster().orElse(null);
 
             if (master == null || master.getStatus() != Server.ServerStatus.ONLINE) {
                 return "";
@@ -1025,7 +985,7 @@ public class KubernetesService {
 
             // Kiểm tra nhanh xem kubelet đã loaded chưa
             if (!isKubeletLoaded(master)) {
-                logger.debug("Kubelet not loaded on master node for cluster: {}", clusterId);
+                logger.debug("Kubelet not loaded on master node");
                 return ""; // Kubelet chưa loaded, bỏ qua
             }
 

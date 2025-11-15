@@ -7,33 +7,89 @@
       <div>
         <div class="page-title">🖥 Quản lý Server</div>
         <div class="page-subtitle">Danh sách các server được AutoDeployApp quản lý. Admin có thể thêm, sửa, xóa, kết nối server.</div>
-      </div>
+    </div>
       <div class="d-flex gap-2">
         <button class="btn" id="refresh-servers-btn">🔄 Làm mới</button>
         <button class="btn" id="check-status-btn">🔍 Kiểm tra trạng thái</button>
-        <button class="btn btn-primary" onclick="window.location.href='/admin/server/add'">+ Thêm Server</button>
+        <button class="btn btn-success" id="refresh-all-metrics-btn">📊 Cập nhật Metrics tất cả</button>
+        <button class="btn btn-primary" id="add-server-btn" onclick="window.ServersModule.openAddServerModal()">+ Thêm Server</button>
       </div>
     </div>
 
-    <!-- Servers List -->
-    <div class="table-card">
-      <table class="table">
-            <thead>
-            <tr>
-              <th>Host</th>
-              <th>Port</th>
-              <th>Username</th>
-            <th>Trạng thái</th>
-            <th>Actions</th>
-            </tr>
-            </thead>
-        <tbody id="servers-tbody">
-          <tr>
-            <td colspan="5" class="text-center text-muted p-4">Đang tải...</td>
-          </tr>
-        </tbody>
-          </table>
+    <!-- Servers List - Grid Layout -->
+    <div class="servers-grid-container mt-4">
+      <div id="servers-grid" class="row g-3">
+        <div class="col-12 text-center text-muted p-4">Đang tải...</div>
+      </div>
+    </div>
+
+    <!-- Add Server Modal -->
+    <div class="modal fade" id="addServerModal" tabindex="-1" aria-labelledby="addServerModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="addServerModalLabel">➕ Thêm Server</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form id="add-server-form">
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Host/IP <span class="text-danger">*</span></label>
+                  <input type="text" id="add-server-host" name="host" placeholder="192.168.1.100" required 
+                         pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-zA-Z0-9.\-]+$" autocomplete="off" class="form-control">
+                  <small class="form-hint">Địa chỉ IP hoặc hostname</small>
+                </div>
+                <div class="form-group">
+                  <label>Port <span class="text-danger">*</span></label>
+                  <input type="number" id="add-server-port" name="port" value="22" min="1" max="65535" required class="form-control">
+                  <small class="form-hint">Port SSH (mặc định: 22)</small>
+                </div>
+                <div class="form-group">
+                  <label>Username <span class="text-danger">*</span></label>
+                  <input type="text" id="add-server-username" name="username" placeholder="root hoặc ubuntu" required 
+                         autocomplete="username" class="form-control">
+                  <small class="form-hint">Tên người dùng SSH</small>
+                </div>
+                <div class="form-group">
+                  <label>Password <span class="text-danger">*</span></label>
+                  <input type="password" id="add-server-password" name="password" placeholder="Mật khẩu SSH" required 
+                         autocomplete="new-password" class="form-control">
+                  <small class="form-hint">Mật khẩu để kết nối lần đầu và tạo SSH key</small>
+                </div>
+                <div class="form-group">
+                  <label>Role <span class="text-danger">*</span></label>
+                  <select id="add-server-role" name="role" class="form-control" required>
+                    <option value="WORKER" selected>WORKER</option>
+                    <option value="MASTER">MASTER</option>
+                    <option value="DOCKER">DOCKER</option>
+                    <option value="DATABASE">DATABASE</option>
+                    <option value="ANSIBLE">ANSIBLE</option>
+                  </select>
+                  <small class="form-hint">Vai trò của server trong hệ thống</small>
+                </div>
+                <div class="form-group">
+                  <label>Cluster Status <span class="text-danger">*</span></label>
+                  <select id="add-server-cluster-status" name="clusterStatus" class="form-control" required>
+                    <option value="UNAVAILABLE" selected>UNAVAILABLE</option>
+                    <option value="AVAILABLE">AVAILABLE</option>
+                  </select>
+                  <small class="form-hint">Set AVAILABLE để thêm server vào cluster</small>
+                </div>
+              </div>
+              <div id="add-server-error" class="form-error d-none mt-3"></div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">✖️ Hủy</button>
+            <button type="button" class="btn btn-primary" id="save-add-server-btn" onclick="window.ServersModule.saveAddServer()">
+              <span id="save-add-text">💾 Thêm Server</span>
+              <span id="save-add-loading" class="d-none">⏳ Đang thêm...</span>
+            </button>
+          </div>
         </div>
+      </div>
+    </div>
 
     <!-- Edit Server Modal -->
     <div class="modal fade" id="editServerModal" tabindex="-1" aria-labelledby="editServerModalLabel" aria-hidden="true">
@@ -69,6 +125,25 @@
                   <input type="password" id="edit-server-password" name="password" placeholder="Để trống nếu không đổi" 
                          autocomplete="new-password" class="form-control">
                   <small class="form-hint">Chỉ nhập nếu muốn đổi mật khẩu</small>
+                </div>
+                <div class="form-group">
+                  <label>Role <span class="text-danger">*</span></label>
+                  <select id="edit-server-role" name="role" class="form-control" required>
+                    <option value="WORKER">WORKER</option>
+                    <option value="MASTER">MASTER</option>
+                    <option value="DOCKER">DOCKER</option>
+                    <option value="DATABASE">DATABASE</option>
+                    <option value="ANSIBLE">ANSIBLE</option>
+                  </select>
+                  <small class="form-hint">Vai trò của server trong hệ thống</small>
+                </div>
+                <div class="form-group">
+                  <label>Cluster Status <span class="text-danger">*</span></label>
+                  <select id="edit-server-cluster-status" name="clusterStatus" class="form-control" required>
+                    <option value="UNAVAILABLE">UNAVAILABLE</option>
+                    <option value="AVAILABLE">AVAILABLE</option>
+                  </select>
+                  <small class="form-hint">Set AVAILABLE để thêm server vào cluster</small>
                 </div>
                 <div class="form-group">
                   <label>Trạng thái</label>
@@ -114,7 +189,7 @@
                 <input type="password" id="reconnect-server-password" name="password" placeholder="Nhập mật khẩu SSH" required 
                        autocomplete="current-password" class="form-control">
                 <small class="form-hint">Nhập mật khẩu để kết nối lại (SSH key không khả dụng)</small>
-              </div>
+            </div>
               <div id="reconnect-server-error" class="form-error d-none mt-3"></div>
             </form>
           </div>
@@ -153,8 +228,9 @@
                   <input id="term-user" name="username" class="form-control terminal-input" placeholder="Username" readonly autocomplete="username">
                 </div>
                 <div class="terminal-info-item">
-                  <label class="terminal-label">Password (tùy chọn)</label>
-                  <input id="term-pass" type="password" name="password" class="form-control terminal-input" placeholder="Nhập password nếu cần" autocomplete="current-password">
+                  <label class="terminal-label">Password</label>
+                  <input id="term-pass" type="password" name="password" class="form-control terminal-input" placeholder="Nhập password nếu SSH key không khả dụng" autocomplete="current-password">
+                  <small class="text-muted" style="font-size: 11px; display: block; margin-top: 4px;">Sẽ thử SSH key trước, nếu không được sẽ dùng password</small>
                 </div>
               </div>
             </form>
