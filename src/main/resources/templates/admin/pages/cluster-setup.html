@@ -10,70 +10,123 @@
           Thực hiện cài đặt Ansible, Kubernetes, CNI, Ingress, MetalLB trên các server đã gán.
         </div>
       </div>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <select class="form-control" id="cluster-select" style="min-width: 200px;">
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <select class="form-control" id="cluster-select" style="min-width: 200px; display: none;">
           <option value="">-- Chọn cluster --</option>
         </select>
+        <div id="cluster-status-display" class="cluster-info-display" style="padding: 8px 12px; background: #E3F2FD; border-radius: 6px; border: 1px solid #2196F3; font-size: 13px; color: #1565C0; display: flex; align-items: center; gap: 8px; white-space: nowrap;">
+          <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="width: 14px; height: 14px; border-width: 2px; color: #2196F3;"></span>
+          <span>Đang tải thông tin trạng thái cụm...</span>
+        </div>
         <button class="btn" id="back-to-clusters-btn">← Quay lại danh sách</button>
       </div>
     </div>
 
-    <!-- Step 1: Environment Check -->
+    <!-- Step 1: Prepare Nodes -->
     <div class="table-card">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
-        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 1 – Kiểm tra môi trường</div>
-        <button class="btn" id="btn-step-1-check">🔍 Run Check</button>
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 1 – Chuẩn bị Nodes</div>
+        <button class="btn btn-primary" id="btn-step-1-prepare">⚙️ Prepare Nodes</button>
       </div>
       <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
-        Kiểm tra SSH, swapoff, kernel modules, containerd,... trên tất cả server.
+        Chuẩn bị tất cả nodes: cập nhật hostname, system update, tắt swap (swapoff), load kernel modules (overlay, br_netfilter).
       </div>
     </div>
 
-    <!-- Step 2: Install Ansible -->
+    <!-- Step 2: Setup Controller Node -->
     <div class="table-card" style="margin-top: 16px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
-        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 2 – Cài Ansible trên master chính</div>
-        <button class="btn btn-primary" id="btn-step-2-ansible">📦 Install Ansible</button>
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 2 – Tạo Controller Node</div>
+        <button class="btn btn-primary" id="btn-step-2-controller">🖥️ Setup Controller</button>
       </div>
       <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
-        Sau khi cài xong, trạng thái cụm chuyển sang: <strong>Ansible Installed</strong>.
+        Cài đặt Python, Ansible, Git trên master node (sẽ dùng làm controller để chạy Kubespray).
       </div>
     </div>
 
-    <!-- Step 3: Install Kubernetes -->
+    <!-- Step 3: Clone Kubespray -->
     <div class="table-card" style="margin-top: 16px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
-        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 3 – Cài Kubernetes (kubeadm)</div>
-        <button class="btn btn-primary" id="btn-step-3-k8s">☸️ Install Kubernetes</button>
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 3 – Clone Kubespray</div>
+        <button class="btn btn-primary" id="btn-step-3-clone">📥 Clone Kubespray</button>
       </div>
       <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
-        Init master, join các master/worker còn lại bằng kubeadm và Ansible.
+        Clone repository Kubespray từ GitHub vào controller node (thường clone vào /opt/kubespray hoặc ~/kubespray).
       </div>
     </div>
 
-    <!-- Step 4: Install Addons (CNI, Ingress, MetalLB) -->
+    <!-- Step 4: Build Inventory -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 4 – Build Inventory</div>
+        <button class="btn btn-primary" id="btn-step-4-inventory">📋 Build Inventory</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Tạo inventory từ template của Kubespray, điền thông tin các nodes (IP, hostname, user) dựa trên servers có clusterStatus = 'AVAILABLE'.
+      </div>
+    </div>
+
+    <!-- Step 5: Configure Roles -->
     <div class="table-card" style="margin-top: 16px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0; flex-wrap: wrap; gap: 8px;">
-        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 4 – Cài CNI, Ingress, MetalLB</div>
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 5 – Chỉnh roles trong inventory</div>
+        <button class="btn btn-primary" id="btn-step-5-configure">⚙️ Configure Roles</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Chỉnh roles trong inventory của Kubespray (master/worker) dựa trên servers đã gán vào cluster.
+      </div>
+      <!-- Cluster Info Display (similar to top) -->
+      <div id="step5-cluster-info-display" class="cluster-info-display" style="margin-top: 12px; padding: 8px 12px; background: #E3F2FD; border-radius: 6px; border: 1px solid #2196F3; font-size: 13px; color: #1565C0; display: flex; align-items: center; gap: 8px;">
+        <span>ℹ️</span> <span>Đang tải thông tin cluster...</span>
+      </div>
+    </div>
+
+    <!-- Step 6: Deploy Cluster -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 6 – Deploy Cluster</div>
+        <button class="btn btn-primary" id="btn-step-6-deploy">🚀 Deploy Cluster</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Chạy <code>ansible-playbook cluster.yml</code> để triển khai Kubernetes cluster (tự động cài container runtime, kubelet/kubeadm/kubectl, init master, join workers, CNI).
+      </div>
+    </div>
+
+    <!-- Step 7: Get Kubeconfig -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 7 – Lấy Kubeconfig</div>
+        <button class="btn btn-primary" id="btn-step-7-kubeconfig">📄 Get Kubeconfig</button>
+      </div>
+      <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
+        Lấy kubeconfig từ master node (/etc/kubernetes/admin.conf) để quản lý cluster từ máy local hoặc controller.
+      </div>
+    </div>
+
+    <!-- Step 8: Install Additional Addons (Optional) -->
+    <div class="table-card" style="margin-top: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0; flex-wrap: wrap; gap: 8px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 8 – Cài Addons (Tùy chọn)</div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn" id="btn-step-4-calico">🌐 Install Calico</button>
-          <button class="btn" id="btn-step-4-ingress">🚪 Install Ingress</button>
-          <button class="btn" id="btn-step-4-metallb">⚖️ Install MetalLB</button>
+          <button class="btn" id="btn-step-8-calico">🌐 Install Calico</button>
+          <button class="btn" id="btn-step-8-ingress">🚪 Install Ingress</button>
+          <button class="btn" id="btn-step-8-metallb">⚖️ Install MetalLB</button>
+          <button class="btn" id="btn-step-8-helm">📦 Install Helm</button>
         </div>
       </div>
       <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
-        Triển khai các addon cần thiết cho cụm.
+        <strong>Lưu ý:</strong> Nếu đã bật trong Bước 5 thì các addon này đã được cài tự động. Chỉ cài thủ công nếu chưa bật hoặc muốn cài phiên bản khác.
       </div>
     </div>
 
-    <!-- Step 5: Verify Cluster -->
+    <!-- Step 9: Verify Cluster -->
     <div class="table-card" style="margin-top: 16px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E0E0E0;">
-        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 5 – Verify Cluster</div>
-        <button class="btn btn-primary" id="btn-step-5-verify">✅ Verify</button>
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Bước 9 – Verify Cluster</div>
+        <button class="btn btn-primary" id="btn-step-9-verify">✅ Verify</button>
       </div>
       <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
-        Sau khi verify thành công, chuyển sang giao diện quản lý kiểu Rancher (Kubernetes Overview).
+        Kiểm tra trạng thái nodes (Ready/NotReady), pods trong kube-system, network connectivity, và các thành phần core của cluster.
       </div>
     </div>
 
@@ -388,7 +441,7 @@
                       placeholder="---\n- name: Example\n  hosts: all\n  tasks:\n    - debug: msg=\"hello\"\n"></textarea>
                   </div>
                   <!-- Execution status -->
-                  <div id="playbook-execution-status" class="d-none-initial"></div>
+                  <div id="playbook-execution-status" class="d-none"></div>
                 </div>
               </div>
             </div>
@@ -396,13 +449,13 @@
           <div class="modal-footer">
             <div class="d-flex justify-content-between w-100">
               <div>
-                <button type="button" class="btn btn-outline-danger d-none-initial" id="delete-playbook-btn">
+                <button type="button" class="btn btn-outline-danger d-none" id="delete-playbook-btn">
                   🗑️ Xóa
                 </button>
               </div>
               <div>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                <button type="button" class="btn btn-success d-none-initial" id="execute-playbook-btn">
+                <button type="button" class="btn btn-success d-none" id="execute-playbook-btn">
                   ▶️ Thực thi
                 </button>
                 <button type="button" class="btn btn-primary" id="save-playbook-btn">

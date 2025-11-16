@@ -28,13 +28,65 @@
       <span class="arrow">›</span>
     </div>
     <div class="dropdown-content">
-      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">📊 Overview</a>
+      <div class="dropdown-subgroup"></div>
+      <a th:href="@{/admin/kubernetes/overview}" onclick="setActiveNav(this)">📊 Overview</a>
       <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🖥 Nodes</a>
-      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">📂 Namespaces</a>
-      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">📦 Workloads</a>
-      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🌐 Services</a>
-      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🚪 Ingress</a>
-      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">💾 Storage</a>
+      
+      <!-- Workloads Dropdown -->
+      <div class="dropdown-subgroup">
+        <div class="dropdown-subheader" onclick="toggleDropdown(this)">
+          📦 Workloads
+          <span class="arrow">›</span>
+        </div>
+        <div class="dropdown-subcontent">
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Deployments</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> StatefulSets</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> DaemonSets</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> CronJobs</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Jobs</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Pods</a>
+        </div>
+      </div>
+      
+      <!-- Service Discovery Dropdown -->
+      <div class="dropdown-subgroup">
+        <div class="dropdown-subheader" onclick="toggleDropdown(this)">
+          🌐 Service Discovery
+          <span class="arrow">›</span>
+        </div>
+        <div class="dropdown-subcontent">
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Services</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Ingress</a>
+        </div>
+      </div>
+      
+      <!-- Storage Dropdown -->
+      <div class="dropdown-subgroup">
+        <div class="dropdown-subheader" onclick="toggleDropdown(this)">
+          💾 Storage
+          <span class="arrow">›</span>
+        </div>
+        <div class="dropdown-subcontent">
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> PVC</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> PV</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> StorageClass</a>
+        </div>
+      </div>
+      
+      <!-- Configuration Dropdown -->
+      <div class="dropdown-subgroup">
+        <div class="dropdown-subheader" onclick="toggleDropdown(this)">
+          ⚙️ Configuration
+          <span class="arrow">›</span>
+        </div>
+        <div class="dropdown-subcontent">
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> ConfigMaps</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Secrets</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> RBAC</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Network Policies</a>
+          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Events</a>
+        </div>
+      </div>
     </div>
   </div>
 

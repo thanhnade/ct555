@@ -3,67 +3,15 @@
 <body>
 <div th:replace="admin/layout :: layout(~{::content})">
   <div th:fragment="content">
-    <!-- Cluster Detail Section -->
+    <!-- Kubernetes Resources Management Page -->
     <div class="page-title-row">
       <div>
-        <div class="page-title">☸️ Kubernetes Cluster Detail</div>
-        <div class="page-subtitle">Chi tiết cluster: quản lý nodes và các tài nguyên Kubernetes.</div>
+        <div class="page-title">☸️ Kubernetes Resources</div>
+        <div class="page-subtitle">Quản lý tài nguyên Kubernetes (Pods, Namespaces, Workloads, Services, Ingress).</div>
       </div>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn" id="cd-reload">🔄 Làm mới Cluster</button>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="refresh-k8s-resources">🔄 Làm mới</button>
         <button class="btn" id="cd-back" onclick="window.location.href='/admin/cluster'">← Quay lại danh sách</button>
-      </div>
-    </div>
-
-    <div class="table-card" id="k8s-detail">
-      <div style="margin-bottom: 16px;">
-        <div class="page-title" style="font-size: 18px; margin-bottom: 8px;">Cluster: <span id="cd-name" style="color: #003366;">-</span></div>
-        <div class="form-grid" style="margin-top: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-          <div class="form-group" style="margin-bottom: 0;">
-            <label style="font-size: 11px; color: #666666; margin-bottom: 4px;">Master Node</label>
-            <div style="padding: 8px 12px; background: #F5F5F5; border-radius: 6px; font-weight: 600; color: #333333;"><span id="cd-master">-</span></div>
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label style="font-size: 11px; color: #666666; margin-bottom: 4px;">Workers</label>
-            <div style="padding: 8px 12px; background: #F5F5F5; border-radius: 6px; font-weight: 600; color: #333333;"><span id="cd-workers">0</span></div>
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label style="font-size: 11px; color: #666666; margin-bottom: 4px;">Status</label>
-            <div style="padding: 8px 12px; background: #F5F5F5; border-radius: 6px; font-weight: 600; color: #333333;"><span id="cd-status">-</span></div>
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label style="font-size: 11px; color: #666666; margin-bottom: 4px;">K8s Version</label>
-            <div style="padding: 8px 12px; background: #F5F5F5; border-radius: 6px; font-weight: 600; color: #333333;"><span id="cd-version">-</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Nodes List -->
-      <div style="margin-top: 24px; margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-          <div class="page-title" style="font-size: 16px; margin-bottom: 0;">🖥 Danh sách Node</div>
-          <button class="btn btn-primary" id="cd-add-node" data-bs-toggle="modal" data-bs-target="#addNodeModal">+ Thêm Node</button>
-        </div>
-        <div class="table-card">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Node IP</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>CPU (Cores / Load)</th>
-                <th>RAM (Used/Total)</th>
-                <th>Disk (%)</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="cd-nodes-tbody">
-              <tr>
-                <td colspan="7" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
 
@@ -398,7 +346,7 @@
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-            <button type="button" class="btn btn-success d-none-initial" id="add-existing-nodes-btn">
+            <button type="button" class="btn btn-success d-none" id="add-existing-nodes-btn">
               📋 Thêm Node đã chọn
             </button>
             <button type="submit" form="add-node-form" class="btn btn-success" id="add-node-submit-btn">

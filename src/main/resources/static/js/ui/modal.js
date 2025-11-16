@@ -207,7 +207,7 @@
 		// Create new instance if not exists or was disposed
 		if (!window.__MODAL_INSTANCES__.has(modalId)) {
 			try {
-				window.__MODAL_INSTANCES__.set(modalId, new ModalManager(modalId, options));
+			window.__MODAL_INSTANCES__.set(modalId, new ModalManager(modalId, options));
 			} catch (err) {
 				console.error(`Failed to create ModalManager for #${modalId}:`, err);
 				return null;
@@ -223,7 +223,7 @@
 	function showModal(modalId, options = {}) {
 		const modal = getModal(modalId, options);
 		if (modal) {
-			modal.show();
+		modal.show();
 		}
 		return modal;
 	}

@@ -158,8 +158,8 @@ public class ServerAdminController {
             
             // Chỉ thêm vào CONNECTED_SERVERS nếu connection thành công
             if (canConnect) {
-                connected.add(s.getId());
-                session.setAttribute("CONNECTED_SERVERS", connected);
+            connected.add(s.getId());
+            session.setAttribute("CONNECTED_SERVERS", connected);
             } else {
                 // Nếu không kết nối được, vẫn lưu session nhưng không thêm vào CONNECTED
                 session.setAttribute("CONNECTED_SERVERS", connected);

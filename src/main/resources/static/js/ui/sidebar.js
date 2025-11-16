@@ -9,7 +9,7 @@
 	function toggleDropdown(el) {
 		if (!el) return;
 		const group = el.parentElement;
-		if (group && group.classList.contains('dropdown-group')) {
+		if (group && (group.classList.contains('dropdown-group') || group.classList.contains('dropdown-subgroup'))) {
 			group.classList.toggle('open');
 		}
 	}
@@ -27,13 +27,13 @@
 		// Add active class to clicked link
 		el.classList.add('active');
 		
-		// Auto-open parent dropdown
+		// Auto-open parent dropdown-group and dropdown-subgroup
 		let parent = el.parentElement;
-		while (parent && !parent.classList.contains('dropdown-group')) {
+		while (parent) {
+			if (parent.classList.contains('dropdown-group') || parent.classList.contains('dropdown-subgroup')) {
+				parent.classList.add('open');
+			}
 			parent = parent.parentElement;
-		}
-		if (parent && parent.classList.contains('dropdown-group')) {
-			parent.classList.add('open');
 		}
 	}
 
@@ -105,7 +105,7 @@
 		}
 		
 		// Auto-open dropdowns that contain active links
-		document.querySelectorAll('.dropdown-group').forEach(group => {
+		document.querySelectorAll('.dropdown-group, .dropdown-subgroup').forEach(group => {
 			const activeLink = group.querySelector('a.active');
 			if (activeLink) {
 				group.classList.add('open');
@@ -125,7 +125,7 @@
 	 * Setup event listeners for dropdown headers
 	 */
 	function setupDropdownListeners() {
-		document.querySelectorAll('.dropdown-header').forEach(header => {
+		document.querySelectorAll('.dropdown-header, .dropdown-subheader').forEach(header => {
 			// Remove existing onclick to prevent duplicates
 			header.removeAttribute('onclick');
 			header.addEventListener('click', function(e) {

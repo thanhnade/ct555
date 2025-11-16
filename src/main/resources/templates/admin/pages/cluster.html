@@ -6,10 +6,32 @@
     <div class="page-title-row">
       <div>
         <div class="page-title">🧩 Quản lý Cluster</div>
-        <div class="page-subtitle">Xem và quản lý Kubernetes cluster duy nhất trong hệ thống (servers có clusterStatus = "AVAILABLE").</div>
       </div>
-      <div style="display: flex; gap: 8px;">
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn btn-info" id="toggle-notes-btn" onclick="toggleClusterNotes()" title="Xem lưu ý">
+          <span id="notes-icon">📝</span> Lưu ý
+        </button>
         <button class="btn" id="refresh-clusters-btn">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Notes Section - Hidden by default -->
+    <div class="table-card" id="cluster-notes-section" style="margin-bottom: 20px; background: #F0F7FF; border-left: 4px solid #0066CC; display: none;">
+      <div style="padding: 16px;">
+        <div style="display: flex; align-items: flex-start; gap: 12px; position: relative;">
+          <button onclick="toggleClusterNotes()" style="position: absolute; top: 0; right: 0; background: transparent; border: none; font-size: 20px; cursor: pointer; color: #666; padding: 4px 8px;" title="Đóng">✕</button>
+          <span style="font-size: 20px; flex-shrink: 0;">📝</span>
+          <div style="flex: 1; padding-right: 32px;">
+            <strong style="color: #003366; font-size: 14px; display: block; margin-bottom: 8px;">Lưu ý về Cluster Management</strong>
+            <ul style="margin: 0; padding-left: 20px; color: #004080; line-height: 1.8; font-size: 13px;">
+              <li><strong>Hệ thống chỉ hỗ trợ 1 cluster duy nhất:</strong> Tất cả servers có <code>clusterStatus = "AVAILABLE"</code> sẽ thuộc cluster này</li>
+              <li><strong>Thêm server vào cluster:</strong> Sử dụng trang <a href="/admin/cluster/assign" style="color: #0066CC; text-decoration: underline; font-weight: 600;">Gán Servers</a> để set <code>clusterStatus = "AVAILABLE"</code></li>
+              <li><strong>Role của server:</strong> MASTER (control plane) hoặc WORKER (worker node) - cần ít nhất 1 MASTER để cluster hoạt động</li>
+              <li><strong>Connection Status:</strong> Đảm bảo servers đang CONNECTED hoặc ONLINE trước khi thực hiện các thao tác cluster</li>
+              <li><strong>Cài đặt Kubernetes:</strong> Sử dụng <a href="/admin/cluster/setup" style="color: #0066CC; text-decoration: underline; font-weight: 600;">Cluster Setup</a> để cài đặt và cấu hình Kubernetes trên cluster</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -18,7 +40,6 @@
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
         <div>
           <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">📊 Thông tin Cluster</div>
-          <div class="page-subtitle" style="font-size: 12px;">Thông tin tổng quan về cluster duy nhất và danh sách servers có <code>clusterStatus = "AVAILABLE"</code>.</div>
         </div>
       </div>
       <div id="cluster-summary-content" style="padding: 16px; background: #F9F9F9; border-radius: 8px; margin-bottom: 20px;">
@@ -41,5 +62,24 @@
   </div>
 </div>
 <script src="/js/modules/k8sClusters.js"></script>
+<script>
+  // Toggle cluster notes visibility
+  function toggleClusterNotes() {
+    const notesSection = document.getElementById('cluster-notes-section');
+    const notesIcon = document.getElementById('notes-icon');
+    if (notesSection) {
+      const isVisible = notesSection.style.display !== 'none';
+      if (isVisible) {
+        notesSection.style.display = 'none';
+        if (notesIcon) notesIcon.textContent = '📝';
+      } else {
+        notesSection.style.display = 'block';
+        if (notesIcon) notesIcon.textContent = '📌';
+        // Smooth scroll to notes
+        notesSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }
+</script>
 </body>
 </html>

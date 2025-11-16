@@ -119,9 +119,11 @@
 					</div>
 					
 					<div class="server-card-metrics">
-						<div><strong>CPU:</strong> ${cpuDisplay}</div>
-						<div><strong>RAM:</strong> ${ramDisplay}</div>
-						<div><strong>DISK:</strong> ${diskDisplay}</div>
+						<div class="server-card-metrics-row">
+							<span><strong>CPU:</strong> ${cpuDisplay}</span>
+							<span><strong>RAM:</strong> ${ramDisplay}</span>
+							<span><strong>DISK:</strong> ${diskDisplay}</span>
+						</div>
 						<button class="btn btn-sm" style="margin-top: 6px; padding: 4px 8px; font-size: 11px;" 
 							onclick="window.ServersModule.updateServerMetrics(${s.id})" 
 							title="Cập nhật metrics từ server"
@@ -643,9 +645,17 @@
 		const saveText = document.getElementById('save-edit-text');
 		const saveLoading = document.getElementById('save-edit-loading');
 		
-		if (saveBtn) saveBtn.disabled = true;
-		if (saveText) saveText.style.display = 'none';
-		if (saveLoading) saveLoading.style.display = 'inline';
+		if (saveBtn) {
+			saveBtn.disabled = true;
+			saveBtn.classList.add('loading');
+		}
+		if (saveText) {
+			saveText.style.display = 'none';
+		}
+		if (saveLoading) {
+			saveLoading.style.display = 'inline';
+			saveLoading.classList.remove('d-none');
+		}
 
 		try {
 			await window.ApiClient.put(`/admin/servers/${id}`, body);
@@ -661,9 +671,17 @@
 			window.showAlert('error', errorMsg);
 		} finally {
 			// Reset loading state
-			if (saveBtn) saveBtn.disabled = false;
-			if (saveText) saveText.style.display = 'inline';
-			if (saveLoading) saveLoading.style.display = 'none';
+			if (saveBtn) {
+				saveBtn.disabled = false;
+				saveBtn.classList.remove('loading');
+			}
+			if (saveText) {
+				saveText.style.display = 'inline';
+			}
+			if (saveLoading) {
+				saveLoading.style.display = 'none';
+				saveLoading.classList.add('d-none');
+			}
 		}
 	}
 
@@ -688,6 +706,23 @@
 		const form = document.getElementById('edit-server-form');
 		if (form) form.reset();
 		hideEditServerError();
+		
+		// Reset loading state
+		const saveBtn = document.getElementById('save-edit-server-btn');
+		const saveText = document.getElementById('save-edit-text');
+		const saveLoading = document.getElementById('save-edit-loading');
+		
+		if (saveBtn) {
+			saveBtn.disabled = false;
+			saveBtn.classList.remove('loading');
+		}
+		if (saveText) {
+			saveText.style.display = 'inline';
+		}
+		if (saveLoading) {
+			saveLoading.style.display = 'none';
+			saveLoading.classList.add('d-none');
+		}
 	}
 
 	// Open reconnect modal
@@ -769,9 +804,17 @@
 		const saveText = document.getElementById('save-reconnect-text');
 		const saveLoading = document.getElementById('save-reconnect-loading');
 		
-		if (saveBtn) saveBtn.disabled = true;
-		if (saveText) saveText.style.display = 'none';
-		if (saveLoading) saveLoading.style.display = 'inline';
+		if (saveBtn) {
+			saveBtn.disabled = true;
+			saveBtn.classList.add('loading');
+		}
+		if (saveText) {
+			saveText.style.display = 'none';
+		}
+		if (saveLoading) {
+			saveLoading.style.display = 'inline';
+			saveLoading.classList.remove('d-none');
+		}
 
 		try {
 			await window.ApiClient.post(`/admin/servers/${id}/reconnect`, { password: password });
@@ -787,9 +830,17 @@
 			window.showAlert('error', errorMsg);
 		} finally {
 			// Reset loading state
-			if (saveBtn) saveBtn.disabled = false;
-			if (saveText) saveText.style.display = 'inline';
-			if (saveLoading) saveLoading.style.display = 'none';
+			if (saveBtn) {
+				saveBtn.disabled = false;
+				saveBtn.classList.remove('loading');
+			}
+			if (saveText) {
+				saveText.style.display = 'inline';
+			}
+			if (saveLoading) {
+				saveLoading.style.display = 'none';
+				saveLoading.classList.add('d-none');
+			}
 		}
 	}
 
@@ -805,6 +856,23 @@
 		const form = document.getElementById('reconnect-server-form');
 		if (form) form.reset();
 		hideReconnectServerError();
+		
+		// Reset loading state
+		const saveBtn = document.getElementById('save-reconnect-btn');
+		const saveText = document.getElementById('save-reconnect-text');
+		const saveLoading = document.getElementById('save-reconnect-loading');
+		
+		if (saveBtn) {
+			saveBtn.disabled = false;
+			saveBtn.classList.remove('loading');
+		}
+		if (saveText) {
+			saveText.style.display = 'inline';
+		}
+		if (saveLoading) {
+			saveLoading.style.display = 'none';
+			saveLoading.classList.add('d-none');
+		}
 	}
 
 	// Delete server

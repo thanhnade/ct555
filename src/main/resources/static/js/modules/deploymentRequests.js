@@ -285,12 +285,11 @@
 		try {
 			const [detail, clusterResponse] = await Promise.all([
 				window.ApiClient.get(`/admin/deployment-requests/${id}`),
-				window.ApiClient.get('/admin/clusters').catch(() => [])
+				window.ApiClient.get('/admin/cluster/api').catch(() => null)
 			]);
 
 			// Với 1 cluster duy nhất, không cần chọn cluster nữa
-			const clusters = Array.isArray(clusterResponse) ? clusterResponse : [];
-			const cluster = clusters.length > 0 ? clusters[0] : null;
+			const cluster = clusterResponse || null;
 			const clusterName = cluster ? (cluster.name || 'Default Cluster') : 'Default Cluster';
 			const clusterStatus = cluster ? (cluster.status || 'UNKNOWN') : 'UNKNOWN';
 

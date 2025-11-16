@@ -46,13 +46,6 @@ public class AdminPageController {
 		return "admin/pages/cluster";
 	}
 
-	@GetMapping("/cluster/add")
-	public String addClusterPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Add Cluster");
-		model.addAttribute("username", getUsernameFromSession(request));
-		return "admin/pages/add-cluster";
-	}
-
 	@GetMapping("/cluster/assign")
 	public String assignServersPage(Model model, HttpServletRequest request) {
 		model.addAttribute("pageTitle", "Assign Servers to Cluster");
@@ -72,6 +65,13 @@ public class AdminPageController {
 		model.addAttribute("pageTitle", "Kubernetes Cluster Detail");
 		model.addAttribute("username", getUsernameFromSession(request));
 		return "admin/pages/kubernetes";
+	}
+
+	@GetMapping({"/k8s/overview", "/kubernetes/overview"})
+	public String kubernetesOverviewPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Cluster Overview");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-overview";
 	}
 
 	@GetMapping("/deployments")

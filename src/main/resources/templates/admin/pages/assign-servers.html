@@ -52,9 +52,17 @@
           <div class="page-title" style="font-size: 16px; margin-bottom: 8px;">✅ Máy chủ đã gán vào cluster</div>
           <div class="page-subtitle" style="font-size: 12px;">Danh sách servers có <code>clusterStatus = "AVAILABLE"</code>. Có thể thay đổi role hoặc bỏ khỏi cluster.</div>
         </div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-success" id="btn-update-role-selected">🔄 Cập nhật Role</button>
-          <button class="btn btn-danger" id="btn-remove-selected">🗑️ Bỏ khỏi Cluster (UNAVAILABLE)</button>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;">
+          <select class="form-control" id="bulk-role-select" style="width: 160px; font-size: 13px; padding: 6px 8px; flex-shrink: 0;">
+            <option value="">-- Chọn role --</option>
+            <option value="WORKER">WORKER</option>
+            <option value="MASTER">MASTER</option>
+            <option value="DOCKER">DOCKER</option>
+            <option value="DATABASE">DATABASE</option>
+            <option value="ANSIBLE">ANSIBLE</option>
+          </select>
+          <button class="btn btn-success" id="btn-update-role-selected" style="white-space: nowrap;">🔄 Cập nhật Role</button>
+          <button class="btn btn-danger" id="btn-remove-selected" style="white-space: nowrap;">🗑️ Bỏ khỏi Cluster (UNAVAILABLE)</button>
         </div>
       </div>
       
@@ -68,11 +76,12 @@
             <th>Role</th>
             <th>Status</th>
             <th>Cluster Status</th>
+            <th style="width: 120px;">Hành động</th>
           </tr>
         </thead>
         <tbody id="assigned-servers-tbody">
           <tr>
-            <td colspan="7" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
+            <td colspan="8" class="text-center" style="color: #666666; padding: 20px;">Đang tải...</td>
           </tr>
         </tbody>
       </table>
