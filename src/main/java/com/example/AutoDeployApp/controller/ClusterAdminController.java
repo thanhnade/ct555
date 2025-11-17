@@ -931,30 +931,20 @@ public class ClusterAdminController {
                         }
                         map.put("pods", podsCount);
                         
-                        // Calculate CPU and RAM usage from pods in this namespace
-                        // CPU: sum of cpu requests/limits (in millicores), RAM: sum of memory requests/limits
-                        double cpuUsageMillicores = 0.0;
-                        double ramUsageGi = 0.0;
                         try {
                             var pods = kubernetesService.getPods(null, namespaceName);
                             if (pods.getItems() != null) {
                                 for (var pod : pods.getItems()) {
                                     if (pod.getSpec() != null && pod.getSpec().getContainers() != null) {
                                         for (var container : pod.getSpec().getContainers()) {
-                                            if (container.getResources() != null) {
-                                                // Get CPU requests
-                                                if (container.getResources().getRequests() != null) {
-                                                    var cpuRequest = container.getResources().getRequests().get("cpu");
-                                                    if (cpuRequest != null) {
-                                                        // Parse to cores first, then convert to millicores
-                                                        double cpuCores = parseCpuCores(cpuRequest.getAmount());
-                                                        cpuUsageMillicores += cpuCores * 1000.0; // Convert to millicores
-                                                    }
-                                                    var memoryRequest = container.getResources().getRequests().get("memory");
-                                                    if (memoryRequest != null) {
-                                                        double memoryGi = parseMemoryBytes(memoryRequest.getAmount()) / (1024d * 1024d * 1024d);
-                                                        ramUsageGi += memoryGi;
-                                                    }
+                                            if (container.getResources() != null && container.getResources().getRequests() != null) {
+                                                var cpuRequest = container.getResources().getRequests().get("cpu");
+                                                if (cpuRequest != null && cpuRequest.getAmount() != null) {
+                                                    map.merge("cpu", cpuRequest.getAmount(), (oldVal, newVal) -> oldVal + "," + newVal);
+                                                }
+                                                var memoryRequest = container.getResources().getRequests().get("memory");
+                                                if (memoryRequest != null && memoryRequest.getAmount() != null) {
+                                                    map.merge("ram", memoryRequest.getAmount(), (oldVal, newVal) -> oldVal + "," + newVal);
                                                 }
                                             }
                                         }
@@ -964,8 +954,6 @@ public class ClusterAdminController {
                         } catch (Exception e) {
                             logger.debug("Không tính được CPU/RAM cho namespace " + namespaceName + ": " + e.getMessage());
                         }
-                        map.put("cpu", cpuUsageMillicores);
-                        map.put("ram", ramUsageGi);
                         
                         return map;
                     })
