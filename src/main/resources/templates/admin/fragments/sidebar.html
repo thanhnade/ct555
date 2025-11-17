@@ -27,24 +27,25 @@
       Kubernetes
       <span class="arrow">›</span>
     </div>
-    <div class="dropdown-content">
-      <div class="dropdown-subgroup"></div>
-      <a th:href="@{/admin/kubernetes/overview}" onclick="setActiveNav(this)">📊 Overview</a>
-      <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🖥 Nodes</a>
-      
-      <!-- Workloads Dropdown -->
+      <div class="dropdown-content">
+        <div class="dropdown-subgroup"></div>
+        <a th:href="@{/admin/kubernetes/overview}" onclick="setActiveNav(this)">📊 Overview</a>
+        <a th:href="@{/admin/kubernetes/nodes}" onclick="setActiveNav(this)">🖥 Nodes</a>
+        <a th:href="@{/admin/kubernetes/namespaces}" onclick="setActiveNav(this)">📁 Namespaces</a>
+        
+        <!-- Workloads Dropdown -->
       <div class="dropdown-subgroup">
         <div class="dropdown-subheader" onclick="toggleDropdown(this)">
           📦 Workloads
           <span class="arrow">›</span>
         </div>
         <div class="dropdown-subcontent">
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Deployments</a>
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> StatefulSets</a>
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> DaemonSets</a>
+          <a th:href="@{/admin/kubernetes/workloads/deployments}" onclick="setActiveNav(this)"> Deployments</a>
+          <a th:href="@{/admin/kubernetes/workloads/statefulsets}" onclick="setActiveNav(this)"> StatefulSets</a>
+          <a th:href="@{/admin/kubernetes/workloads/daemonsets}" onclick="setActiveNav(this)"> DaemonSets</a>
           <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> CronJobs</a>
           <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Jobs</a>
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Pods</a>
+          <a th:href="@{/admin/kubernetes/pods}" onclick="setActiveNav(this)"> Pods</a>
         </div>
       </div>
       
@@ -55,8 +56,8 @@
           <span class="arrow">›</span>
         </div>
         <div class="dropdown-subcontent">
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Services</a>
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)"> Ingress</a>
+          <a th:href="@{/admin/kubernetes/services}" onclick="setActiveNav(this)"> Services</a>
+          <a th:href="@{/admin/kubernetes/ingress}" onclick="setActiveNav(this)"> Ingress</a>
         </div>
       </div>
       

@@ -90,43 +90,38 @@
           <!-- SUMMARY TABLES -->
           <div class="row g-3 flex-grow-1" style="min-height: 0;">
             <div class="col-12 col-md-6 d-flex">
-              <div class="card flex-grow-1 d-flex flex-column" style="min-height: 0;">
+              <div class="card flex-grow-1 d-flex flex-column h-100">
                 <div class="card-header py-2">
                   <h6 class="mb-0 fw-semibold">Nodes Status</h6>
                 </div>
-                <div class="card-body p-0 flex-grow-1 d-flex flex-column" style="min-height: 0;">
-                  <div id="overview-nodes-list" class="flex-grow-1" style="padding: 12px; max-height: 100%;">
+                <div class="card-body p-0 d-flex flex-column flex-grow-1" style="min-height: 0;">
+                  <div id="overview-nodes-list" class="flex-grow-1 overflow-auto px-3 pt-3 pb-0 h-auto">
                     <div class="text-center text-muted py-3">Đang tải...</div>
-                  </div>
-                  <div id="overview-nodes-pagination" class="border-top px-3 py-2" style="display: none;">
-                    <div class="d-flex justify-content-between align-items-center">
-                      <small class="text-muted" id="overview-nodes-pagination-info">Trang 1 / 1</small>
-                      <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-secondary" id="overview-nodes-prev" disabled>‹ Trước</button>
-                        <button class="btn btn-sm btn-outline-secondary" id="overview-nodes-next" disabled>Sau ›</button>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
             </div>
             <div class="col-12 col-md-6 d-flex">
-              <div class="card flex-grow-1 d-flex flex-column" style="min-height: 0;">
-                <div class="card-header py-2">
+              <div class="card flex-grow-1 d-flex flex-column h-100">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
                   <h6 class="mb-0 fw-semibold">Workload Status</h6>
-                </div>
-                <div class="card-body p-0 flex-grow-1 d-flex flex-column" style="min-height: 0;">
-                  <div id="overview-workloads-list" class="flex-grow-1" style="padding: 12px; max-height: 100%;">
-                    <div class="text-center text-muted py-3">Đang tải...</div>
+                  <div class="btn-group btn-group-sm" role="group">
+                    <input type="radio" class="btn-check" name="workload-filter" id="filter-all" value="all" checked>
+                    <label class="btn btn-outline-secondary" for="filter-all">Tất cả</label>
+                    
+                    <input type="radio" class="btn-check" name="workload-filter" id="filter-deployment" value="Deployment">
+                    <label class="btn btn-outline-secondary" for="filter-deployment">Deployment</label>
+                    
+                    <input type="radio" class="btn-check" name="workload-filter" id="filter-statefulset" value="StatefulSet">
+                    <label class="btn btn-outline-secondary" for="filter-statefulset">StatefulSet</label>
+                    
+                    <input type="radio" class="btn-check" name="workload-filter" id="filter-daemonset" value="DaemonSet">
+                    <label class="btn btn-outline-secondary" for="filter-daemonset">DaemonSet</label>
                   </div>
-                  <div id="overview-workloads-pagination" class="border-top px-3 py-2" style="display: none;">
-                    <div class="d-flex justify-content-between align-items-center">
-                      <small class="text-muted" id="overview-workloads-pagination-info">Trang 1 / 1</small>
-                      <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-secondary" id="overview-workloads-prev" disabled>‹ Trước</button>
-                        <button class="btn btn-sm btn-outline-secondary" id="overview-workloads-next" disabled>Sau ›</button>
-                      </div>
-                    </div>
+                </div>
+                <div class="card-body p-0 d-flex flex-column flex-grow-1" style="min-height: 0;">
+                  <div id="overview-workloads-list" class="flex-grow-1 overflow-auto px-3 pt-3 pb-0 h-auto">
+                    <div class="text-center text-muted py-3">Đang tải...</div>
                   </div>
                 </div>
               </div>

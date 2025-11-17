@@ -878,12 +878,17 @@ public class KubernetesService {
     public List<Map<String, Object>> getKubernetesNodes(Long clusterId) {
         try {
             NodeList nodeList = getNodes(clusterId);
+            if (nodeList == null || nodeList.getItems() == null) {
+                logger.debug("NodeList is null or empty for cluster: {}", clusterId);
+                return new java.util.ArrayList<>();
+            }
             return nodeList.getItems().stream()
                     .map(this::parseNodeToMap)
                     .collect(Collectors.toList());
         } catch (Exception e) {
             logger.error("Failed to get and parse Kubernetes nodes for cluster: {}", clusterId, e);
-            throw new RuntimeException("Failed to get Kubernetes nodes: " + e.getMessage(), e);
+            // Trả về empty list thay vì throw exception để tránh 500 error
+            return new java.util.ArrayList<>();
         }
     }
 
@@ -925,16 +930,137 @@ public class KubernetesService {
             }
         }
 
-        // Trích xuất phiên bản
+        // Trích xuất phiên bản và OS info
         String kubeletVersion = "";
+        String osImage = "";
+        String containerRuntimeVersion = "";
+        String kernelVersion = "";
+        String operatingSystem = "";
         if (status != null && status.getNodeInfo() != null) {
-            kubeletVersion = status.getNodeInfo().getKubeletVersion();
+            var nodeInfo = status.getNodeInfo();
+            kubeletVersion = nodeInfo.getKubeletVersion();
+            osImage = nodeInfo.getOsImage();
+            containerRuntimeVersion = nodeInfo.getContainerRuntimeVersion();
+            kernelVersion = nodeInfo.getKernelVersion();
+            operatingSystem = nodeInfo.getOperatingSystem();
         }
 
-        // Trích xuất vai trò
+        // Trích xuất CPU và RAM từ capacity
+        String cpuCapacity = "";
+        String memoryCapacity = "";
+        String podsCapacity = "";
+        if (status != null && status.getCapacity() != null) {
+            Map<String, io.fabric8.kubernetes.api.model.Quantity> capacity = status.getCapacity();
+            if (capacity != null) {
+                io.fabric8.kubernetes.api.model.Quantity cpuQty = capacity.get("cpu");
+                io.fabric8.kubernetes.api.model.Quantity memoryQty = capacity.get("memory");
+                io.fabric8.kubernetes.api.model.Quantity podsQty = capacity.get("pods");
+                
+                if (cpuQty != null) {
+                    cpuCapacity = cpuQty.getAmount();
+                }
+                if (memoryQty != null) {
+                    // Convert bytes to human readable (MB/GB)
+                    try {
+                        String amount = memoryQty.getAmount();
+                        if (amount != null && !amount.isEmpty()) {
+                            long bytes = Long.parseLong(amount);
+                            if (bytes >= 1024L * 1024L * 1024L) {
+                                double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+                                memoryCapacity = String.format("%.2f Gi", gb);
+                            } else if (bytes >= 1024L * 1024L) {
+                                double mb = bytes / (1024.0 * 1024.0);
+                                memoryCapacity = String.format("%.2f Mi", mb);
+                            } else {
+                                memoryCapacity = amount + " B";
+                            }
+                        }
+                    } catch (NumberFormatException e) {
+                        memoryCapacity = memoryQty.getAmount();
+                    }
+                }
+                if (podsQty != null) {
+                    podsCapacity = podsQty.getAmount();
+                }
+            }
+        }
+
+        // Trích xuất allocatable (CPU, Memory, Pods)
+        String allocatableCpu = "";
+        String allocatableMemory = "";
+        String allocatablePods = "";
+        if (status != null && status.getAllocatable() != null) {
+            Map<String, io.fabric8.kubernetes.api.model.Quantity> allocatable = status.getAllocatable();
+            if (allocatable != null) {
+                io.fabric8.kubernetes.api.model.Quantity cpuQty = allocatable.get("cpu");
+                io.fabric8.kubernetes.api.model.Quantity memoryQty = allocatable.get("memory");
+                io.fabric8.kubernetes.api.model.Quantity podsQty = allocatable.get("pods");
+                
+                if (cpuQty != null) {
+                    allocatableCpu = cpuQty.getAmount();
+                }
+                if (memoryQty != null) {
+                    // Convert bytes to human readable (MB/GB)
+                    try {
+                        String amount = memoryQty.getAmount();
+                        if (amount != null && !amount.isEmpty()) {
+                            long bytes = Long.parseLong(amount);
+                            if (bytes >= 1024L * 1024L * 1024L) {
+                                double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+                                allocatableMemory = String.format("%.0fMi", gb * 1024); // Convert to Mi
+                            } else if (bytes >= 1024L * 1024L) {
+                                double mb = bytes / (1024.0 * 1024.0);
+                                allocatableMemory = String.format("%.0fMi", mb);
+                            } else {
+                                allocatableMemory = amount + "B";
+                            }
+                        }
+                    } catch (NumberFormatException e) {
+                        allocatableMemory = memoryQty.getAmount();
+                    }
+                }
+                if (podsQty != null) {
+                    allocatablePods = podsQty.getAmount();
+                }
+            }
+        }
+
+        // Trích xuất hostname từ addresses
+        String hostname = "";
+        if (status != null && status.getAddresses() != null) {
+            for (NodeAddress address : status.getAddresses()) {
+                if ("Hostname".equals(address.getType())) {
+                    hostname = address.getAddress();
+                    break;
+                }
+            }
+        }
+
+        // Trích xuất architecture từ nodeInfo
+        String architecture = "";
+        if (status != null && status.getNodeInfo() != null) {
+            architecture = status.getNodeInfo().getArchitecture();
+        }
+
+        // Trích xuất taints từ spec
+        List<Map<String, String>> taints = new ArrayList<>();
+        NodeSpec spec = node.getSpec();
+        if (spec != null && spec.getTaints() != null) {
+            for (io.fabric8.kubernetes.api.model.Taint taint : spec.getTaints()) {
+                Map<String, String> taintMap = new HashMap<>();
+                taintMap.put("key", taint.getKey() != null ? taint.getKey() : "");
+                taintMap.put("value", taint.getValue() != null ? taint.getValue() : "");
+                taintMap.put("effect", taint.getEffect() != null ? taint.getEffect() : "");
+                taints.add(taintMap);
+            }
+        }
+
+        // Trích xuất vai trò và labels
         List<String> roles = new ArrayList<>();
+        Map<String, String> allLabels = new HashMap<>();
         Map<String, String> labels = node.getMetadata().getLabels();
         if (labels != null) {
+            allLabels.putAll(labels);
             if (labels.containsKey("node-role.kubernetes.io/master") ||
                     labels.containsKey("node-role.kubernetes.io/control-plane")) {
                 roles.add("master");
@@ -958,9 +1084,23 @@ public class KubernetesService {
         result.put("k8sStatus", k8sStatus);
         result.put("k8sInternalIP", internalIP);
         result.put("k8sExternalIP", externalIP);
+        result.put("k8sHostname", hostname);
         result.put("k8sVersion", kubeletVersion);
+        result.put("k8sCpu", cpuCapacity);
+        result.put("k8sMemory", memoryCapacity);
+        result.put("k8sPodsCapacity", podsCapacity);
+        result.put("k8sAllocatableCpu", allocatableCpu);
+        result.put("k8sAllocatableMemory", allocatableMemory);
+        result.put("k8sAllocatablePods", allocatablePods);
+        result.put("k8sArchitecture", architecture);
         result.put("k8sRoles", roles);
         result.put("k8sConditions", conditions);
+        result.put("k8sLabels", allLabels);
+        result.put("k8sTaints", taints);
+        result.put("k8sOsImage", osImage);
+        result.put("k8sContainerRuntime", containerRuntimeVersion);
+        result.put("k8sKernelVersion", kernelVersion);
+        result.put("k8sOperatingSystem", operatingSystem);
         if (!reason.isEmpty()) {
             result.put("k8sStatusReason", reason);
         }

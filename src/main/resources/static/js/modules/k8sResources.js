@@ -135,7 +135,7 @@
 	// Tải danh sách namespaces
 	async function loadNamespaces(clusterId, token) {
 		try {
-			const data = await window.ApiClient.get(`/admin/clusters/${clusterId}/k8s/namespaces`);
+			const data = await window.ApiClient.get('/admin/cluster/k8s/namespaces');
 			if (token !== k8sRequestToken) return; // Bỏ qua kết quả cũ
 			k8sResourcesData.namespaces = data.namespaces || [];
 			renderNamespaces();
@@ -763,12 +763,8 @@
 	}
 
 	async function describeNamespace(name) {
-		if (!currentClusterId) {
-			window.showAlert('warning', 'Chưa chọn cluster');
-			return;
-		}
 		try {
-			const data = await window.ApiClient.get(`/admin/clusters/${currentClusterId}/k8s/namespaces/${encodeURIComponent(name)}`);
+			const data = await window.ApiClient.get(`/admin/cluster/k8s/namespaces/${encodeURIComponent(name)}`);
 			showK8sOutput(`Namespace ${name}`, data.output || '');
 		} catch (error) {
 			window.showAlert('error', error.message || 'Lỗi lấy thông tin namespace');
@@ -836,10 +832,6 @@
 	}
 
 	async function deleteNamespace(name) {
-		if (!currentClusterId) {
-			window.showAlert('warning', 'Chưa chọn cluster');
-			return;
-		}
 		if (isSystemNamespace(name)) {
 			window.showAlert('warning', 'Không cho phép xóa namespace hệ thống');
 			return;
@@ -856,7 +848,7 @@
 		window.showAlert('info', `Đang xóa namespace "${name}"... Vui lòng đợi (có thể mất vài phút nếu namespace có nhiều tài nguyên).`);
 
 		try {
-			const data = await window.ApiClient.delete(`/admin/clusters/${currentClusterId}/k8s/namespaces/${encodeURIComponent(name)}`);
+			const data = await window.ApiClient.delete(`/admin/cluster/k8s/namespaces/${encodeURIComponent(name)}`);
 			deletingNamespaces.delete(name);
 			window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `namespace "${name}" deleted`)}</pre>`);
 			await loadNamespaces(currentClusterId, k8sRequestToken);

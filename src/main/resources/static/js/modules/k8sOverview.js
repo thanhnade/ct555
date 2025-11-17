@@ -4,12 +4,10 @@
 
     let currentClusterId = null;
     
-    // Pagination state
+    // Data state
     let nodesData = [];
     let workloadsData = [];
-    let nodesCurrentPage = 1;
-    let workloadsCurrentPage = 1;
-    const itemsPerPage = 5;
+    let workloadsFilter = 'all'; // 'all', 'Deployment', 'StatefulSet', 'DaemonSet'
 
     // Helper function để hiển thị loading state
     function showLoading(element, loadingText = '...') {
@@ -62,18 +60,16 @@
                     nodesSubEl.textContent = `${masterCount} master, ${workerCount} worker`;
                 }
 
-                // Lưu nodes data để phân trang
+                // Lưu nodes data
                 if (clusterInfo.nodes && clusterInfo.nodes.length > 0) {
                     nodesData = clusterInfo.nodes.map(node => ({
                         name: node.ip || node.host || '-',
                         role: node.role || 'WORKER',
                         status: node.status || 'Unknown'
                     }));
-                    nodesCurrentPage = 1; // Reset về trang 1
                     renderNodesList();
                 } else {
                     nodesData = [];
-                    nodesCurrentPage = 1;
                     renderNodesList();
                 }
 
@@ -200,14 +196,12 @@
                 }
             }
 
-            // Update nodes list với pagination
+            // Update nodes list
             nodesData = overviewData.recentNodes || [];
-            nodesCurrentPage = 1; // Reset về trang 1 khi load lại
             renderNodesList();
 
-            // Update workloads list với pagination
+            // Update workloads list
             workloadsData = overviewData.recentWorkloads || [];
-            workloadsCurrentPage = 1; // Reset về trang 1 khi load lại
             renderWorkloadsList();
 
         } catch (error) {
@@ -258,34 +252,24 @@
         return 'bg-secondary';
     }
 
-    // Render nodes list with pagination
+    // Render nodes list
     function renderNodesList() {
         const nodesListEl = document.getElementById('overview-nodes-list');
-        const paginationEl = document.getElementById('overview-nodes-pagination');
-        const paginationInfoEl = document.getElementById('overview-nodes-pagination-info');
-        const prevBtn = document.getElementById('overview-nodes-prev');
-        const nextBtn = document.getElementById('overview-nodes-next');
 
         if (!nodesListEl) return;
 
         if (!nodesData || nodesData.length === 0) {
             nodesListEl.innerHTML = '<div class="text-center text-muted py-3">Không có nodes</div>';
-            if (paginationEl) paginationEl.style.display = 'none';
             return;
         }
 
-        // Calculate pagination
-        const totalPages = Math.ceil(nodesData.length / itemsPerPage);
-        const startIndex = (nodesCurrentPage - 1) * itemsPerPage;
-        const endIndex = startIndex + itemsPerPage;
-        const currentItems = nodesData.slice(startIndex, endIndex);
-
-        // Render items
-        nodesListEl.innerHTML = currentItems.map(node => {
+        // Render all items
+        nodesListEl.innerHTML = nodesData.map((node, index) => {
             const chipClass = getChipClass(node.status);
             const roleClass = getRoleClass(node.role);
+            const isLast = index === nodesData.length - 1;
             return `
-                <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                <div class="d-flex justify-content-between align-items-center pt-2 ${isLast ? 'pb-3' : 'pb-2 border-bottom'}">
                     <span class="fw-medium">${escapeHtml(node.name || '-')}</span>
                     <div class="d-flex gap-2 align-items-center">
                         <span class="badge ${roleClass} small">${escapeHtml(node.role || 'WORKER')}</span>
@@ -294,79 +278,47 @@
                 </div>
             `;
         }).join('');
-
-        // Update pagination controls
-        if (totalPages > 1) {
-            if (paginationEl) paginationEl.style.display = 'block';
-            if (paginationInfoEl) {
-                paginationInfoEl.textContent = `Trang ${nodesCurrentPage} / ${totalPages}`;
-            }
-            if (prevBtn) {
-                prevBtn.disabled = nodesCurrentPage === 1;
-            }
-            if (nextBtn) {
-                nextBtn.disabled = nodesCurrentPage === totalPages;
-            }
-        } else {
-            if (paginationEl) paginationEl.style.display = 'none';
-        }
     }
 
-    // Render workloads list with pagination
+    // Render workloads list
     function renderWorkloadsList() {
         const workloadsListEl = document.getElementById('overview-workloads-list');
-        const paginationEl = document.getElementById('overview-workloads-pagination');
-        const paginationInfoEl = document.getElementById('overview-workloads-pagination-info');
-        const prevBtn = document.getElementById('overview-workloads-prev');
-        const nextBtn = document.getElementById('overview-workloads-next');
 
         if (!workloadsListEl) return;
 
         if (!workloadsData || workloadsData.length === 0) {
             workloadsListEl.innerHTML = '<div class="text-center text-muted py-3">Không có workloads</div>';
-            if (paginationEl) paginationEl.style.display = 'none';
             return;
         }
 
-        // Calculate pagination
-        const totalPages = Math.ceil(workloadsData.length / itemsPerPage);
-        const startIndex = (workloadsCurrentPage - 1) * itemsPerPage;
-        const endIndex = startIndex + itemsPerPage;
-        const currentItems = workloadsData.slice(startIndex, endIndex);
+        // Filter workloads theo loại đã chọn
+        const filteredWorkloads = workloadsFilter === 'all' 
+            ? workloadsData 
+            : workloadsData.filter(wl => wl.type === workloadsFilter);
 
-        // Render items
-        workloadsListEl.innerHTML = currentItems.map(wl => {
+        if (filteredWorkloads.length === 0) {
+            workloadsListEl.innerHTML = `<div class="text-center text-muted py-3">Không có ${workloadsFilter === 'all' ? 'workloads' : workloadsFilter.toLowerCase()}</div>`;
+            return;
+        }
+
+        // Render filtered items
+        workloadsListEl.innerHTML = filteredWorkloads.map((wl, index) => {
             const chipClass = getChipClass(wl.status);
             const typeBadgeClass = getTypeBadgeClass(wl.type);
+            const isLast = index === filteredWorkloads.length - 1;
             return `
-                <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                <div class="d-flex justify-content-between align-items-center pt-2 ${isLast ? 'pb-3' : 'pb-2 border-bottom'}">
                     <div class="d-flex flex-column">
-                        <span class="fw-medium">${escapeHtml(wl.name || '-')}</span>
-                        ${wl.namespace ? `<span class="text-muted small" style="font-size: 0.75rem;">${escapeHtml(wl.namespace)}</span>` : ''}
+                        <span class="fw-medium mb-1">${escapeHtml(wl.name || '-')}</span>
+                        ${wl.namespace ? `<span class="text-muted" style="font-size: 0.75rem; line-height: 1.2;">${escapeHtml(wl.namespace)}</span>` : ''}
                     </div>
-                    <div class="d-flex gap-2 align-items-center">
+                    <div class="d-flex gap-2 align-items-center flex-shrink-0">
                         <span class="badge ${typeBadgeClass} small">${escapeHtml(wl.type || '-')}</span>
-                        <span class="badge ${chipClass}">${escapeHtml(wl.status || 'Unknown')}</span>
+                        <span class="badge ${chipClass} small">${escapeHtml(wl.status || 'Unknown')}</span>
                     </div>
                 </div>
             `;
         }).join('');
-
-        // Update pagination controls
-        if (totalPages > 1) {
-            if (paginationEl) paginationEl.style.display = 'block';
-            if (paginationInfoEl) {
-                paginationInfoEl.textContent = `Trang ${workloadsCurrentPage} / ${totalPages}`;
-            }
-            if (prevBtn) {
-                prevBtn.disabled = workloadsCurrentPage === 1;
-            }
-            if (nextBtn) {
-                nextBtn.disabled = workloadsCurrentPage === totalPages;
-            }
-        } else {
-            if (paginationEl) paginationEl.style.display = 'none';
-        }
     }
 
     // Initialize module
@@ -402,47 +354,14 @@
             });
         }
 
-        // Bind pagination buttons for nodes
-        const nodesPrevBtn = document.getElementById('overview-nodes-prev');
-        const nodesNextBtn = document.getElementById('overview-nodes-next');
-        if (nodesPrevBtn) {
-            nodesPrevBtn.addEventListener('click', () => {
-                if (nodesCurrentPage > 1) {
-                    nodesCurrentPage--;
-                    renderNodesList();
-                }
+        // Bind workload filter buttons
+        const filterInputs = document.querySelectorAll('input[name="workload-filter"]');
+        filterInputs.forEach(input => {
+            input.addEventListener('change', (e) => {
+                workloadsFilter = e.target.value;
+                renderWorkloadsList();
             });
-        }
-        if (nodesNextBtn) {
-            nodesNextBtn.addEventListener('click', () => {
-                const totalPages = Math.ceil(nodesData.length / itemsPerPage);
-                if (nodesCurrentPage < totalPages) {
-                    nodesCurrentPage++;
-                    renderNodesList();
-                }
-            });
-        }
-
-        // Bind pagination buttons for workloads
-        const workloadsPrevBtn = document.getElementById('overview-workloads-prev');
-        const workloadsNextBtn = document.getElementById('overview-workloads-next');
-        if (workloadsPrevBtn) {
-            workloadsPrevBtn.addEventListener('click', () => {
-                if (workloadsCurrentPage > 1) {
-                    workloadsCurrentPage--;
-                    renderWorkloadsList();
-                }
-            });
-        }
-        if (workloadsNextBtn) {
-            workloadsNextBtn.addEventListener('click', () => {
-                const totalPages = Math.ceil(workloadsData.length / itemsPerPage);
-                if (workloadsCurrentPage < totalPages) {
-                    workloadsCurrentPage++;
-                    renderWorkloadsList();
-                }
-            });
-        }
+        });
 
         // Initial load - Overview is the default page
         // Always load Overview first when page loads

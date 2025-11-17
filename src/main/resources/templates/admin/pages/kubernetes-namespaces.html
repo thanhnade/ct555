@@ -1,0 +1,54 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes Namespaces Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">📁 Namespaces</div>
+        <div class="page-subtitle">Danh sách namespaces trong cụm Kubernetes.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="namespaces-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Namespaces Table Section -->
+    <div class="table-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Danh sách Namespaces</div>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="namespaces-search"
+            placeholder="🔍 Tìm kiếm...">
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="namespaces-status-filter">
+            <option value="">Tất cả trạng thái</option>
+            <option value="Active">Active</option>
+            <option value="Terminating">Terminating</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Pods</th>
+              <th>CPU</th>
+              <th>RAM</th>
+              <th>Trạng thái</th>
+              <th>Age</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="namespaces-tbody">
+            <tr>
+              <td colspan="7" class="text-center text-muted py-3">
+                <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/k8sNamespaces.js"></script>
+

@@ -1,0 +1,58 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes Services Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">🌐 Services</div>
+        <div class="page-subtitle">Danh sách services trong cụm Kubernetes.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="services-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Services Table Section -->
+    <div class="table-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Danh sách Services</div>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="services-search"
+            placeholder="🔍 Tìm kiếm...">
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="services-type-filter">
+            <option value="">Tất cả loại</option>
+            <option value="ClusterIP">ClusterIP</option>
+            <option value="NodePort">NodePort</option>
+            <option value="LoadBalancer">LoadBalancer</option>
+            <option value="ExternalName">ExternalName</option>
+          </select>
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="services-namespace-filter">
+            <option value="">Tất cả namespace</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Namespace</th>
+              <th>Tên</th>
+              <th>Type</th>
+              <th>Cluster IP</th>
+              <th>External IP</th>
+              <th>Port(s)</th>
+              <th>Age</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="services-tbody">
+            <tr>
+              <td colspan="8" class="text-center text-muted py-3">Đang tải...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/k8sServices.js"></script>
+

@@ -164,7 +164,7 @@ public class ClusterAdminController {
      * Trả về: nodes count, workloads count, pods count, namespaces count, resource usage
      */
     @GetMapping("/overview")
-    public ResponseEntity<?> getClusterOverviewWithoutId(HttpServletRequest request) {
+    public ResponseEntity<?> getClusterOverview(HttpServletRequest request) {
         // Với hệ thống chỉ có 1 cluster duy nhất, lấy ID của cluster đầu tiên
         Long id = 1L;
         try {
@@ -187,86 +187,273 @@ public class ClusterAdminController {
         return getClusterOverviewById(id, request);
     }
 
+    // ===================== Helper Methods for Common Operations =====================
+
+    /**
+     * Lấy nodes từ Kubernetes API, fallback về database nếu không kết nối được
+     */
+    private java.util.List<java.util.Map<String, Object>> getNodesWithFallback(Long id) {
+        try {
+            return kubernetesService.getKubernetesNodes(id);
+        } catch (Exception e) {
+            // Nếu không kết nối được K8s API, lấy từ database
+            var servers = serverService.findByClusterStatus("AVAILABLE");
+            if (servers == null || servers.isEmpty()) {
+                return java.util.List.of();
+            }
+            return servers.stream()
+                    .map(s -> {
+                        var node = new java.util.HashMap<String, Object>();
+                        node.put("name", s.getHost());
+                        node.put("ip", s.getHost());
+                        node.put("role", s.getRole() != null ? s.getRole() : "WORKER");
+                        node.put("status", s.getStatus() != null ? s.getStatus().name() : "UNKNOWN");
+                        node.put("k8sStatus", "Unknown");
+                        return (java.util.Map<String, Object>) node;
+                    })
+                    .collect(java.util.stream.Collectors.toList());
+        }
+    }
+
+    /**
+     * Đếm master và worker nodes từ danh sách nodes
+     * @return Map với keys: "masterCount", "workerCount"
+     */
+    private Map<String, Long> countMasterAndWorkerNodes(java.util.List<java.util.Map<String, Object>> nodes) {
+        long masterCount = nodes.stream()
+                .filter(n -> {
+                    Object k8sRolesObj = n.get("k8sRoles");
+                    if (k8sRolesObj instanceof java.util.List<?> k8sRoles) {
+                        return k8sRoles.stream().anyMatch(r -> 
+                            "master".equalsIgnoreCase(String.valueOf(r)) || 
+                            "control-plane".equalsIgnoreCase(String.valueOf(r)));
+                    }
+                    String role = (String) n.get("role");
+                    return "MASTER".equalsIgnoreCase(role);
+                })
+                .count();
+
+        long workerCount = nodes.stream()
+                .filter(n -> {
+                    Object k8sRolesObj = n.get("k8sRoles");
+                    if (k8sRolesObj instanceof java.util.List<?> k8sRoles) {
+                        boolean isMaster = k8sRoles.stream().anyMatch(r -> 
+                            "master".equalsIgnoreCase(String.valueOf(r)) || 
+                            "control-plane".equalsIgnoreCase(String.valueOf(r)));
+                        if (isMaster) {
+                            return false;
+                        }
+                        boolean hasWorker = k8sRoles.stream().anyMatch(r -> 
+                            "worker".equalsIgnoreCase(String.valueOf(r)));
+                        return k8sRoles.isEmpty() || hasWorker;
+                    }
+                    String role = (String) n.get("role");
+                    if ("MASTER".equalsIgnoreCase(role)) {
+                        return false;
+                    }
+                    return true;
+                })
+                .count();
+
+        return Map.of("masterCount", masterCount, "workerCount", workerCount);
+    }
+
+    /**
+     * Lấy danh sách connected server IDs từ session
+     */
+    private java.util.Set<Long> getConnectedServerIds(jakarta.servlet.http.HttpSession session) {
+        java.util.Set<Long> connectedIds = new java.util.HashSet<>();
+        if (session != null) {
+            Object connectedAttr = session.getAttribute("CONNECTED_SERVERS");
+            if (connectedAttr instanceof java.util.Set<?> set) {
+                for (Object o : set) {
+                    if (o instanceof Number n) {
+                        connectedIds.add(n.longValue());
+                    } else if (o instanceof String str) {
+                        try {
+                            connectedIds.add(Long.parseLong(str));
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+        }
+        return connectedIds;
+    }
+
+    /**
+     * Tạo danh sách ServerData từ servers, chỉ lấy các server online và connected
+     */
+    private java.util.List<ServerData> createServerDataList(
+            java.util.List<com.example.AutoDeployApp.entity.Server> servers,
+            java.util.Set<Long> connectedIds,
+            int limit) {
+        return servers.stream()
+                .filter(s -> connectedIds.contains(s.getId()) && 
+                        s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE)
+                .map(s -> new ServerData(
+                        s.getId(),
+                        s.getHost(),
+                        s.getPort() != null ? s.getPort() : 22,
+                        s.getUsername(),
+                        s.getRole(),
+                        s.getStatus(),
+                        s.getSshKey() != null && s.getSshKey().getEncryptedPrivateKey() != null
+                                ? s.getSshKey().getEncryptedPrivateKey()
+                                : null,
+                        true))
+                .limit(limit)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /**
+     * Parse CPU usage percentage từ string "4 cores / 1.2 load"
+     * @return percentage (0-100) hoặc null nếu không parse được
+     */
+    private Double parseCpuUsagePercentage(String cpuStr) {
+        if (cpuStr == null || cpuStr.equals("-")) {
+            return null;
+        }
+        try {
+            String[] parts = cpuStr.split(" / ");
+            if (parts.length == 2) {
+                String coresStr = parts[0].replace(" cores", "").trim();
+                String loadStr = parts[1].replace(" load", "").trim();
+                double cores = Double.parseDouble(coresStr);
+                double load = Double.parseDouble(loadStr);
+                if (cores > 0) {
+                    return Math.min(100, (load / cores) * 100);
+                }
+            }
+        } catch (Exception e) {
+            // Ignore parsing errors
+        }
+        return null;
+    }
+
+    /**
+     * Parse Disk usage percentage từ string "65%"
+     * @return percentage (0-100) hoặc null nếu không parse được
+     */
+    private Double parseDiskUsagePercentage(String diskStr) {
+        if (diskStr == null || diskStr.equals("-")) {
+            return null;
+        }
+        try {
+            String diskClean = diskStr.trim();
+            if (diskClean.endsWith("%")) {
+                return Double.parseDouble(diskClean.replace("%", "").trim());
+            }
+        } catch (Exception e) {
+            // Ignore parsing errors
+        }
+        return null;
+    }
+
+    /**
+     * Thêm usage metrics vào node từ metrics Map
+     */
+    private void addUsageMetricsToNode(java.util.Map<String, Object> node, Map<String, Object> metrics) {
+        // CPU usage
+        String cpuStr = (String) metrics.get("cpu");
+        if (cpuStr != null && !cpuStr.equals("-")) {
+            node.put("cpuUsage", cpuStr);
+            Double cpuPct = parseCpuUsagePercentage(cpuStr);
+            if (cpuPct != null) {
+                node.put("cpuUsagePercent", cpuPct);
+            }
+        }
+
+        // RAM usage
+        String ramStr = (String) metrics.get("ram");
+        Object ramPctObj = metrics.get("ramPercentage");
+        if (ramStr != null && !ramStr.equals("-")) {
+            node.put("ramUsage", ramStr);
+        }
+        if (ramPctObj instanceof Integer ramPct && ramPct >= 0) {
+            node.put("ramUsagePercent", ramPct);
+        } else if (ramPctObj instanceof Number ramPctNum) {
+            node.put("ramUsagePercent", ramPctNum.intValue());
+        }
+
+        // Disk usage
+        String diskStr = (String) metrics.get("disk");
+        if (diskStr != null && !diskStr.equals("-")) {
+            node.put("diskUsage", diskStr);
+            Double diskPct = parseDiskUsagePercentage(diskStr);
+            if (diskPct != null) {
+                node.put("diskUsagePercent", diskPct);
+            }
+        }
+    }
+
+    /**
+     * Tính resource usage trung bình từ danh sách metrics
+     * @return Map với keys: "cpu", "ram", "disk" (percentages)
+     */
+    private Map<String, Double> calculateAverageResourceUsage(
+            java.util.List<Map<String, Object>> metricsList) {
+        double totalCpuUsage = 0;
+        double totalRamUsage = 0;
+        double totalDiskUsage = 0;
+        int cpuNodeCount = 0;
+        int ramNodeCount = 0;
+        int diskNodeCount = 0;
+
+        for (Map<String, Object> metrics : metricsList) {
+            // Parse CPU
+            String cpuStr = (String) metrics.get("cpu");
+            if (cpuStr != null && !cpuStr.equals("-")) {
+                Double cpuPct = parseCpuUsagePercentage(cpuStr);
+                if (cpuPct != null) {
+                    totalCpuUsage += cpuPct;
+                    cpuNodeCount++;
+                }
+            }
+
+            // Parse RAM
+            Object ramPctObj = metrics.get("ramPercentage");
+            if (ramPctObj instanceof Integer ramPct && ramPct >= 0) {
+                totalRamUsage += ramPct;
+                ramNodeCount++;
+            } else if (ramPctObj instanceof Number ramPctNum) {
+                totalRamUsage += ramPctNum.doubleValue();
+                ramNodeCount++;
+            }
+
+            // Parse Disk
+            String diskStr = (String) metrics.get("disk");
+            if (diskStr != null && !diskStr.equals("-")) {
+                Double diskPct = parseDiskUsagePercentage(diskStr);
+                if (diskPct != null) {
+                    totalDiskUsage += diskPct;
+                    diskNodeCount++;
+                }
+            }
+        }
+
+        double cpuUsagePercent = cpuNodeCount > 0 ? totalCpuUsage / cpuNodeCount : 0;
+        double ramUsagePercent = ramNodeCount > 0 ? totalRamUsage / ramNodeCount : 0;
+        double diskUsagePercent = diskNodeCount > 0 ? totalDiskUsage / diskNodeCount : 0;
+
+        return Map.of("cpu", cpuUsagePercent, "ram", ramUsagePercent, "disk", diskUsagePercent);
+    }
+
+    // ===================== End Helper Methods =====================
+
     /**
      * Internal method để lấy overview data
      */
     private ResponseEntity<?> getClusterOverviewById(Long id, HttpServletRequest request) {
         try {
-            // Lấy nodes từ Kubernetes API
-            java.util.List<java.util.Map<String, Object>> k8sNodes;
-            try {
-                k8sNodes = kubernetesService.getKubernetesNodes(id);
-            } catch (Exception e) {
-                // Nếu không kết nối được K8s API, lấy từ database
-                // Với hệ thống chỉ có 1 cluster, tất cả servers có clusterStatus = "AVAILABLE" đều thuộc cluster
-                var servers = serverService.findByClusterStatus("AVAILABLE");
-                if (servers == null || servers.isEmpty()) {
-                    k8sNodes = java.util.List.of();
-                } else {
-                    k8sNodes = servers.stream()
-                            .map(s -> {
-                                var node = new java.util.HashMap<String, Object>();
-                                node.put("name", s.getHost());
-                                node.put("ip", s.getHost());
-                                node.put("role", s.getRole() != null ? s.getRole() : "WORKER");
-                                node.put("status", s.getStatus() != null ? s.getStatus().name() : "UNKNOWN");
-                                node.put("k8sStatus", "Unknown");
-                                return (java.util.Map<String, Object>) node;
-                            })
-                            .collect(java.util.stream.Collectors.toList());
-                }
-            }
+            // Lấy nodes từ Kubernetes API (với fallback về database)
+            java.util.List<java.util.Map<String, Object>> k8sNodes = getNodesWithFallback(id);
 
             int nodesCount = k8sNodes.size();
             // Đếm master và worker nodes
-            // Từ Kubernetes API: roles nằm trong k8sRoles (List<String>)
-            // Từ database fallback: role nằm trong role (String)
-            long masterCount = k8sNodes.stream()
-                    .filter(n -> {
-                        // Kiểm tra k8sRoles từ Kubernetes API
-                        Object k8sRolesObj = n.get("k8sRoles");
-                        if (k8sRolesObj instanceof java.util.List<?> k8sRoles) {
-                            return k8sRoles.stream().anyMatch(r -> 
-                                "master".equalsIgnoreCase(String.valueOf(r)) || 
-                                "control-plane".equalsIgnoreCase(String.valueOf(r)));
-                        }
-                        // Kiểm tra role từ database fallback
-                        String role = (String) n.get("role");
-                        return "MASTER".equalsIgnoreCase(role);
-                    })
-                    .count();
-            // Worker count: nodes không phải master/control-plane
-            // Trong Kubernetes, node không có control-plane role mặc định là worker
-            long workerCount = k8sNodes.stream()
-                    .filter(n -> {
-                        // Kiểm tra k8sRoles từ Kubernetes API
-                        Object k8sRolesObj = n.get("k8sRoles");
-                        if (k8sRolesObj instanceof java.util.List<?> k8sRoles) {
-                            // Kiểm tra nếu là master/control-plane → không phải worker
-                            boolean isMaster = k8sRoles.stream().anyMatch(r -> 
-                                "master".equalsIgnoreCase(String.valueOf(r)) || 
-                                "control-plane".equalsIgnoreCase(String.valueOf(r)));
-                            // Nếu là master → không phải worker
-                            if (isMaster) {
-                                return false;
-                            }
-                            // Nếu có "worker" trong roles → worker
-                            boolean hasWorker = k8sRoles.stream().anyMatch(r -> 
-                                "worker".equalsIgnoreCase(String.valueOf(r)));
-                            // Nếu list rỗng hoặc không có role nào → mặc định là worker (trong Kubernetes)
-                            // Hoặc nếu có "worker" trong roles → worker
-                            return k8sRoles.isEmpty() || hasWorker;
-                        }
-                        // Kiểm tra role từ database fallback
-                        String role = (String) n.get("role");
-                        // Nếu là MASTER → không phải worker
-                        if ("MASTER".equalsIgnoreCase(role)) {
-                            return false;
-                        }
-                        // Còn lại (WORKER, null, rỗng, hoặc role khác) → coi là worker
-                        return true;
-                    })
-                    .count();
+            Map<String, Long> roleCounts = countMasterAndWorkerNodes(k8sNodes);
+            long masterCount = roleCounts.get("masterCount");
+            long workerCount = roleCounts.get("workerCount");
 
             // Lấy workloads count
             int workloadsCount = 0;
@@ -300,52 +487,14 @@ public class ClusterAdminController {
             }
 
             // Tính resource usage từ nodes (lấy metrics real-time từ servers)
-            double cpuUsagePercent = 0;
-            double ramUsagePercent = 0;
-            double diskUsagePercent = 0;
+            Map<String, Double> resourceUsage = Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
             try {
-                // Với hệ thống chỉ có 1 cluster, tất cả servers có clusterStatus = "AVAILABLE" đều thuộc cluster
                 var servers = serverService.findByClusterStatus("AVAILABLE");
                 if (servers != null && !servers.isEmpty()) {
-                    // Lấy password cache từ session
                     var session = request.getSession(false);
                     java.util.Map<Long, String> pwCache = getPasswordCache(session);
-                    
-                    // Lấy danh sách connected servers từ session
-                    java.util.Set<Long> connectedIds = new java.util.HashSet<>();
-                    if (session != null) {
-                        Object connectedAttr = session.getAttribute("CONNECTED_SERVERS");
-                        if (connectedAttr instanceof java.util.Set<?> set) {
-                            for (Object o : set) {
-                                if (o instanceof Number n) {
-                                    connectedIds.add(n.longValue());
-                                } else if (o instanceof String str) {
-                                    try {
-                                        connectedIds.add(Long.parseLong(str));
-                                    } catch (Exception ignored) {
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Tạo ServerData list cho các servers online và connected
-                    var serverDataList = servers.stream()
-                            .filter(s -> connectedIds.contains(s.getId()) && 
-                                    s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE)
-                            .map(s -> new ServerData(
-                                    s.getId(),
-                                    s.getHost(),
-                                    s.getPort() != null ? s.getPort() : 22,
-                                    s.getUsername(),
-                                    s.getRole(),
-                                    s.getStatus(),
-                                    s.getSshKey() != null && s.getSshKey().getEncryptedPrivateKey() != null
-                                            ? s.getSshKey().getEncryptedPrivateKey()
-                                            : null,
-                                    true))
-                            .limit(5) // Giới hạn 5 servers để tránh chậm
-                            .collect(java.util.stream.Collectors.toList());
+                    java.util.Set<Long> connectedIds = getConnectedServerIds(session);
+                    java.util.List<ServerData> serverDataList = createServerDataList(servers, connectedIds, 5);
                     
                     if (!serverDataList.isEmpty()) {
                         // Lấy metrics song song cho các servers
@@ -353,89 +502,32 @@ public class ClusterAdminController {
                                 .map(serverData -> getServerMetricsAsync(serverData, pwCache))
                                 .collect(java.util.stream.Collectors.toList());
                         
-                        int cpuNodeCount = 0;
-                        int ramNodeCount = 0;
-                        int diskNodeCount = 0;
-                        double totalCpuUsage = 0;
-                        double totalRamUsage = 0;
-                        double totalDiskUsage = 0;
-                        
                         // Thu thập kết quả với timeout ngắn (5 giây)
+                        java.util.List<Map<String, Object>> metricsList = new java.util.ArrayList<>();
                         for (var future : metricsFutures) {
                             try {
                                 Map<String, Object> metrics = future.get(5, TimeUnit.SECONDS);
-                                
-                                // Parse CPU usage từ string "4 cores / 1.2 load"
-                                // Tính CPU usage = (load / cores) * 100, nhưng giới hạn tối đa 100%
-                                String cpuStr = (String) metrics.get("cpu");
-                                if (cpuStr != null && !cpuStr.equals("-")) {
-                                    try {
-                                        // Parse "4 cores / 1.2 load"
-                                        String[] parts = cpuStr.split(" / ");
-                                        if (parts.length == 2) {
-                                            String coresStr = parts[0].replace(" cores", "").trim();
-                                            String loadStr = parts[1].replace(" load", "").trim();
-                                            double cores = Double.parseDouble(coresStr);
-                                            double load = Double.parseDouble(loadStr);
-                                            if (cores > 0) {
-                                                double cpuPct = Math.min(100, (load / cores) * 100);
-                                                totalCpuUsage += cpuPct;
-                                                cpuNodeCount++;
-                                            }
-                                        }
-                                    } catch (Exception e) {
-                                        // Ignore parsing errors
-                                    }
-                                }
-                                
-                                // Lấy RAM percentage trực tiếp
-                                Object ramPctObj = metrics.get("ramPercentage");
-                                if (ramPctObj instanceof Integer ramPct && ramPct >= 0) {
-                                    totalRamUsage += ramPct;
-                                    ramNodeCount++;
-                                } else if (ramPctObj instanceof Number ramPctNum) {
-                                    totalRamUsage += ramPctNum.doubleValue();
-                                    ramNodeCount++;
-                                }
-                                
-                                // Parse Disk percentage từ string "45%"
-                                String diskStr = (String) metrics.get("disk");
-                                if (diskStr != null && !diskStr.equals("-")) {
-                                    try {
-                                        String diskClean = diskStr.trim();
-                                        if (diskClean.endsWith("%")) {
-                                            double diskPct = Double.parseDouble(diskClean.replace("%", "").trim());
-                                            totalDiskUsage += diskPct;
-                                            diskNodeCount++;
-                                        }
-                                    } catch (Exception e) {
-                                        // Ignore parsing errors
-                                    }
-                                }
+                                metricsList.add(metrics);
                             } catch (java.util.concurrent.TimeoutException e) {
-                                // Bỏ qua server timeout
                                 logger.debug("Timeout lấy metrics cho overview: " + e.getMessage());
                             } catch (Exception e) {
-                                // Bỏ qua lỗi
                                 logger.debug("Lỗi lấy metrics cho overview: " + e.getMessage());
                             }
                         }
                         
-                        // Tính trung bình cho từng loại resource
-                        if (cpuNodeCount > 0) {
-                            cpuUsagePercent = totalCpuUsage / cpuNodeCount;
-                        }
-                        if (ramNodeCount > 0) {
-                            ramUsagePercent = totalRamUsage / ramNodeCount;
-                        }
-                        if (diskNodeCount > 0) {
-                            diskUsagePercent = totalDiskUsage / diskNodeCount;
+                        // Tính trung bình resource usage
+                        if (!metricsList.isEmpty()) {
+                            resourceUsage = calculateAverageResourceUsage(metricsList);
                         }
                     }
                 }
             } catch (Exception e) {
                 logger.debug("Không tính được resource usage: " + e.getMessage());
             }
+            
+            double cpuUsagePercent = resourceUsage.get("cpu");
+            double ramUsagePercent = resourceUsage.get("ram");
+            double diskUsagePercent = resourceUsage.get("disk");
 
             // Lấy một số nodes gần đây để hiển thị
             var recentNodes = k8sNodes.stream()
@@ -618,14 +710,90 @@ public class ClusterAdminController {
     }
 
     /**
+     * Lấy danh sách node từ Kubernetes API cho cluster duy nhất (không cần ID)
+     */
+    @GetMapping("/k8s/nodes")
+    public ResponseEntity<?> getKubernetesNodes(HttpServletRequest request) {
+        // Với hệ thống chỉ có 1 cluster duy nhất, lấy ID của cluster đầu tiên
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return getKubernetesNodesById(id, request);
+    }
+
+    /**
      * Lấy danh sách node từ Kubernetes API (sử dụng Fabric8 client)
-     * Ready/NotReady, IP nội bộ, version
+     * Ready/NotReady, IP nội bộ, version, và usage metrics từ SSH
      */
     @GetMapping("/{id}/k8s/nodes")
-    public ResponseEntity<?> getKubernetesNodes(@PathVariable Long id, HttpServletRequest request) {
+    public ResponseEntity<?> getKubernetesNodesById(@PathVariable Long id, HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
             java.util.List<java.util.Map<String, Object>> nodes = kubernetesService.getKubernetesNodes(id);
+            
+            // Thêm usage metrics từ SSH cho mỗi node
+            try {
+                // Lấy servers từ database
+                var servers = serverService.findByClusterStatus("AVAILABLE");
+                if (servers != null && !servers.isEmpty()) {
+                    // Lấy password cache từ session
+                    var session = request.getSession(false);
+                    java.util.Map<Long, String> pwCache = getPasswordCache(session);
+                    
+                    // Tạo map để match node theo IP
+                    Map<String, com.example.AutoDeployApp.entity.Server> serverByIP = new java.util.HashMap<>();
+                    for (var server : servers) {
+                        if (server.getHost() != null && !server.getHost().isBlank()) {
+                            serverByIP.put(server.getHost(), server);
+                        }
+                    }
+                    
+                    // Match nodes với servers và lấy metrics
+                    for (var node : nodes) {
+                        String nodeIP = (String) node.get("k8sInternalIP");
+                        if (nodeIP != null && !nodeIP.isBlank()) {
+                            com.example.AutoDeployApp.entity.Server server = serverByIP.get(nodeIP);
+                            if (server != null && server.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE) {
+                                // Lấy metrics từ SSH
+                                ServerData serverData = new ServerData(
+                                    server.getId(),
+                                    server.getHost(),
+                                    server.getPort() != null ? server.getPort() : 22,
+                                    server.getUsername(),
+                                    server.getRole(),
+                                    server.getStatus(),
+                                    server.getSshKey() != null && server.getSshKey().getEncryptedPrivateKey() != null
+                                            ? server.getSshKey().getEncryptedPrivateKey()
+                                            : null,
+                                    true
+                                );
+                                
+                                try {
+                                    Map<String, Object> metrics = getServerMetricsAsync(serverData, pwCache)
+                                        .get(5, TimeUnit.SECONDS);
+                                    
+                                    // Thêm usage metrics vào node
+                                    addUsageMetricsToNode(node, metrics);
+                                } catch (Exception e) {
+                                    // Timeout hoặc lỗi khi lấy metrics, bỏ qua
+                                    logger.debug("Không lấy được metrics cho node " + nodeIP + ": " + e.getMessage());
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // Nếu không lấy được metrics, vẫn trả về nodes (chỉ không có usage)
+                logger.debug("Không lấy được usage metrics: " + e.getMessage());
+            }
+            
             return ResponseEntity.ok(Map.of("nodes", nodes));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
             // Handle specific Kubernetes API errors
@@ -634,25 +802,171 @@ public class ClusterAdminController {
                         "error", "Kubernetes API server unavailable - Master may be NOTREADY",
                         "nodes", java.util.List.of()));
             }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to get nodes: " + e.getMessage()));
+            logger.error("KubernetesClientException when getting nodes: {}", e.getMessage(), e);
+            // Trả về empty list thay vì 500 error
+            return ResponseEntity.ok(Map.of("nodes", java.util.List.of()));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Lỗi lấy danh sách node: " + e.getMessage()));
+            logger.error("Exception when getting nodes: {}", e.getMessage(), e);
+            // Trả về empty list thay vì 500 error để frontend vẫn hoạt động
+            return ResponseEntity.ok(Map.of("nodes", java.util.List.of()));
         }
     }
 
     /**
-     * Liệt kê namespaces (sử dụng Fabric8 client)
+     * Lấy chi tiết node theo tên (có thể trả về YAML nếu có format=yaml)
      */
-    @GetMapping("/{id}/k8s/namespaces")
-    public ResponseEntity<?> listNamespaces(@PathVariable Long id, HttpServletRequest request) {
+    @GetMapping("/{id}/k8s/nodes/{name}")
+    public ResponseEntity<?> describeNodeById(@PathVariable Long id,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        try {
+            var node = kubernetesService.getNode(id, name);
+            if (node == null) {
+                return ResponseEntity.status(404)
+                        .body(Map.of("error", "Node not found: " + name));
+            }
+            String formatParam = request.getParameter("format");
+            if (formatParam != null && formatParam.equalsIgnoreCase("yaml")) {
+                String yamlOutput = convertToYaml(node);
+                return ResponseEntity.ok(Map.of("output", yamlOutput, "format", "yaml"));
+            }
+            // Parse node thành Map format (giống như getKubernetesNodes)
+            java.util.Map<String, Object> nodeMap = kubernetesService.getKubernetesNodes(id).stream()
+                    .filter(n -> name.equals(n.get("name")))
+                    .findFirst()
+                    .orElse(null);
+            if (nodeMap == null) {
+                // Nếu không tìm thấy trong list, parse trực tiếp từ Node object
+                var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+                return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
+            }
+            return ResponseEntity.ok(Map.of("node", nodeMap));
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return ResponseEntity.status(404).body(Map.of("error", "Node not found: " + name));
+            }
+            if (e.getCode() == 503 || e.getCode() == 0) {
+                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe node: " + e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Lấy chi tiết node theo tên (không cần ID - cho cluster duy nhất)
+     */
+    @GetMapping("/k8s/nodes/{name}")
+    public ResponseEntity<?> describeNode(@PathVariable String name,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return describeNodeById(id, name, request);
+    }
+
+    /**
+     * Lấy pods trên node cụ thể (không cần ID - cho cluster duy nhất)
+     */
+    @GetMapping("/k8s/pods")
+    public ResponseEntity<?> listPods(
+            @RequestParam(required = false) String namespace,
+            @RequestParam(required = false) String node,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return listPodsById(id, namespace, node, request);
+    }
+
+    /**
+     * Liệt kê namespaces cho cluster duy nhất (không cần ID)
+     */
+	@GetMapping("/k8s/namespaces")
+	public ResponseEntity<?> listNamespaces(HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var namespaceList = kubernetesService.getNamespaces(id);
-            java.util.List<java.util.Map<String, Object>> result = namespaceList.getItems().stream()
+            var namespaceList = kubernetesService.getNamespaces(null);
+            var namespaceItems = namespaceList != null && namespaceList.getItems() != null
+                    ? namespaceList.getItems()
+                    : java.util.Collections.<io.fabric8.kubernetes.api.model.Namespace>emptyList();
+
+            java.util.List<java.util.Map<String, Object>> result = namespaceItems.stream()
                     .map(ns -> {
+                        String namespaceName = ns.getMetadata() != null ? ns.getMetadata().getName() : "";
                         java.util.Map<String, Object> map = new java.util.HashMap<>();
-                        map.put("name", ns.getMetadata().getName());
+                        map.put("name", namespaceName);
                         map.put("status", ns.getStatus() != null ? ns.getStatus().getPhase() : "Unknown");
+                        
+                        // Age calculation
+                        String age = "";
+                        if (ns.getMetadata() != null && ns.getMetadata().getCreationTimestamp() != null) {
+                            age = calculateAge(ns.getMetadata().getCreationTimestamp().toString());
+                        }
+                        map.put("age", age);
+                        
+                        // Get pods count for this namespace
+                        int podsCount = 0;
+                        try {
+                            var pods = kubernetesService.getPods(null, namespaceName);
+                            podsCount = pods.getItems() != null ? pods.getItems().size() : 0;
+                        } catch (Exception e) {
+                            logger.debug("Không lấy được pods cho namespace " + namespaceName + ": " + e.getMessage());
+                        }
+                        map.put("pods", podsCount);
+                        
+                        // Calculate CPU and RAM usage from pods in this namespace
+                        // CPU: sum of cpu requests/limits (in millicores), RAM: sum of memory requests/limits
+                        double cpuUsageMillicores = 0.0;
+                        double ramUsageGi = 0.0;
+                        try {
+                            var pods = kubernetesService.getPods(null, namespaceName);
+                            if (pods.getItems() != null) {
+                                for (var pod : pods.getItems()) {
+                                    if (pod.getSpec() != null && pod.getSpec().getContainers() != null) {
+                                        for (var container : pod.getSpec().getContainers()) {
+                                            if (container.getResources() != null) {
+                                                // Get CPU requests
+                                                if (container.getResources().getRequests() != null) {
+                                                    var cpuRequest = container.getResources().getRequests().get("cpu");
+                                                    if (cpuRequest != null) {
+                                                        // Parse to cores first, then convert to millicores
+                                                        double cpuCores = parseCpuCores(cpuRequest.getAmount());
+                                                        cpuUsageMillicores += cpuCores * 1000.0; // Convert to millicores
+                                                    }
+                                                    var memoryRequest = container.getResources().getRequests().get("memory");
+                                                    if (memoryRequest != null) {
+                                                        double memoryGi = parseMemoryBytes(memoryRequest.getAmount()) / (1024d * 1024d * 1024d);
+                                                        ramUsageGi += memoryGi;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            logger.debug("Không tính được CPU/RAM cho namespace " + namespaceName + ": " + e.getMessage());
+                        }
+                        map.put("cpu", cpuUsageMillicores);
+                        map.put("ram", ramUsageGi);
+                        
                         return map;
                     })
                     .collect(java.util.stream.Collectors.toList());
@@ -668,16 +982,98 @@ public class ClusterAdminController {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
+    
+    /**
+     * Helper: parse CPU quantity string to cores (supports n, u, m, plain)
+     */
+    private double parseCpuCores(String quantityStr) {
+        if (quantityStr == null || quantityStr.isEmpty()) {
+            return 0.0;
+        }
+        try {
+            quantityStr = quantityStr.trim();
+            if (quantityStr.endsWith("n")) {
+                String value = quantityStr.substring(0, quantityStr.length() - 1);
+                return Double.parseDouble(value) / 1_000_000_000d;
+            }
+            if (quantityStr.endsWith("u") || quantityStr.endsWith("µ")) {
+                String value = quantityStr.substring(0, quantityStr.length() - 1);
+                return Double.parseDouble(value) / 1_000_000d;
+            }
+            if (quantityStr.endsWith("m")) {
+                String value = quantityStr.substring(0, quantityStr.length() - 1);
+                return Double.parseDouble(value) / 1000.0;
+            }
+            // Plain number means cores
+            return Double.parseDouble(quantityStr);
+        } catch (Exception e) {
+            logger.debug("Error parsing CPU quantity: " + quantityStr + " - " + e.getMessage());
+            return 0.0;
+        }
+    }
+
+    /**
+     * Helper: parse memory quantity string to bytes (supports Ki, Mi, Gi, etc.)
+     */
+    private double parseMemoryBytes(String quantityStr) {
+        if (quantityStr == null || quantityStr.isEmpty()) {
+            return 0.0;
+        }
+        try {
+            String normalized = quantityStr.trim();
+            String upper = normalized.toUpperCase();
+
+            if (upper.endsWith("KI")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d;
+            }
+            if (upper.endsWith("K")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d;
+            }
+            if (upper.endsWith("MI")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d * 1024d;
+            }
+            if (upper.endsWith("M")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d * 1000d;
+            }
+            if (upper.endsWith("GI")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d * 1024d * 1024d;
+            }
+            if (upper.endsWith("G")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d * 1000d * 1000d;
+            }
+            if (upper.endsWith("TI")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d * 1024d * 1024d * 1024d;
+            }
+            if (upper.endsWith("T")) {
+                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d * 1000d * 1000d * 1000d;
+            }
+            // Plain number -> bytes
+            return Double.parseDouble(upper);
+        } catch (Exception e) {
+            logger.debug("Error parsing memory quantity: " + quantityStr + " - " + e.getMessage());
+            return 0.0;
+        }
+    }
+
+    @GetMapping("/k8s/namespaces/{name}")
+    public ResponseEntity<?> describeNamespace(HttpServletRequest request,
+            @PathVariable String name) {
+        return describeNamespaceInternal(name);
+    }
 
     /**
      * Describe Namespace (sử dụng Fabric8 client)
      */
     @GetMapping("/{id}/k8s/namespaces/{name}")
-    public ResponseEntity<?> describeNamespace(@PathVariable Long id,
+    public ResponseEntity<?> describeNamespaceById(@PathVariable Long id,
             @PathVariable String name,
             HttpServletRequest request) {
+        return describeNamespaceInternal(name);
+    }
+
+    private ResponseEntity<?> describeNamespaceInternal(String name) {
         try {
-            var namespace = kubernetesService.getNamespace(id, name);
+            var namespace = kubernetesService.getNamespace(null, name);
             if (namespace == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Namespace not found: " + name));
@@ -703,10 +1099,20 @@ public class ClusterAdminController {
     /**
      * Delete Namespace (sử dụng Fabric8 client, cấm namespace hệ thống)
      */
+    @DeleteMapping("/k8s/namespaces/{name}")
+    public ResponseEntity<?> deleteNamespace(HttpServletRequest request,
+            @PathVariable String name) {
+        return deleteNamespaceInternal(name);
+    }
+
     @DeleteMapping("/{id}/k8s/namespaces/{name}")
-    public ResponseEntity<?> deleteNamespace(@PathVariable Long id,
+    public ResponseEntity<?> deleteNamespaceById(@PathVariable Long id,
             @PathVariable String name,
             HttpServletRequest request) {
+        return deleteNamespaceInternal(name);
+    }
+
+    private ResponseEntity<?> deleteNamespaceInternal(String name) {
         try {
             // Chặn xóa namespace hệ thống
             String nsLower = name == null ? "" : name.toLowerCase();
@@ -717,7 +1123,7 @@ public class ClusterAdminController {
             }
 
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            kubernetesService.deleteNamespace(name, id);
+            kubernetesService.deleteNamespace(name, null);
             String output = String.format("namespace \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (IllegalArgumentException e) {
@@ -741,14 +1147,23 @@ public class ClusterAdminController {
      * Supports optional namespace query parameter to filter pods
      */
     @GetMapping("/{id}/k8s/pods")
-    public ResponseEntity<?> listPods(@PathVariable Long id,
+    public ResponseEntity<?> listPodsById(@PathVariable Long id,
             @RequestParam(required = false) String namespace,
+            @RequestParam(required = false) String node,
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
             var podList = kubernetesService.getPods(id, namespace);
             java.util.List<java.util.Map<String, Object>> result = podList.getItems().stream()
                     .map(pod -> parsePodToMap(pod))
+                    .filter(pod -> {
+                        // Filter theo node nếu có tham số node
+                        if (node != null && !node.isBlank()) {
+                            String podNode = (String) pod.get("node");
+                            return node.equals(podNode);
+                        }
+                        return true;
+                    })
                     .collect(java.util.stream.Collectors.toList());
             return ResponseEntity.ok(Map.of("pods", result));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
@@ -764,12 +1179,32 @@ public class ClusterAdminController {
     }
 
     /**
+     * Liệt kê workloads cho cluster duy nhất (không cần ID)
+     */
+    @GetMapping("/k8s/workloads")
+    public ResponseEntity<?> listWorkloads(
+            @RequestParam(required = false) String namespace,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return listWorkloadsById(id, namespace, request);
+    }
+
+    /**
      * Liệt kê workloads: Deployments/StatefulSets/DaemonSets (sử dụng Fabric8
      * client)
      * Supports optional namespace query parameter to filter workloads
      */
     @GetMapping("/{id}/k8s/workloads")
-    public ResponseEntity<?> listWorkloads(@PathVariable Long id,
+    public ResponseEntity<?> listWorkloadsById(@PathVariable Long id,
             @RequestParam(required = false) String namespace,
             HttpServletRequest request) {
         try {
@@ -799,16 +1234,47 @@ public class ClusterAdminController {
                     "daemonSets", daemonSetList));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
             if (e.getCode() == 503 || e.getCode() == 0) {
+                // Trả về danh sách rỗng cho cả 3 loại khi API unavailable
                 return ResponseEntity.status(503).body(Map.of(
                         "error", "Kubernetes API server unavailable",
                         "deployments", new java.util.ArrayList<>(),
                         "statefulSets", new java.util.ArrayList<>(),
                         "daemonSets", new java.util.ArrayList<>()));
             }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to get workloads: " + e.getMessage()));
+            // Trả về danh sách rỗng cho cả 3 loại khi có lỗi khác
+            return ResponseEntity.status(500).body(Map.of(
+                    "error", "Failed to get workloads: " + e.getMessage(),
+                    "deployments", new java.util.ArrayList<>(),
+                    "statefulSets", new java.util.ArrayList<>(),
+                    "daemonSets", new java.util.ArrayList<>()));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            // Trả về danh sách rỗng cho cả 3 loại khi có exception
+            return ResponseEntity.status(500).body(Map.of(
+                    "error", e.getMessage(),
+                    "deployments", new java.util.ArrayList<>(),
+                    "statefulSets", new java.util.ArrayList<>(),
+                    "daemonSets", new java.util.ArrayList<>()));
         }
+    }
+
+    /**
+     * Liệt kê services cho cluster duy nhất (không cần ID)
+     */
+    @GetMapping("/k8s/services")
+    public ResponseEntity<?> listServices(
+            @RequestParam(required = false) String namespace,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return listServicesById(id, namespace, request);
     }
 
     /**
@@ -816,7 +1282,7 @@ public class ClusterAdminController {
      * Supports optional namespace query parameter to filter services
      */
     @GetMapping("/{id}/k8s/services")
-    public ResponseEntity<?> listServices(@PathVariable Long id,
+    public ResponseEntity<?> listServicesById(@PathVariable Long id,
             @RequestParam(required = false) String namespace,
             HttpServletRequest request) {
         try {
@@ -839,11 +1305,31 @@ public class ClusterAdminController {
     }
 
     /**
+     * Liệt kê ingress cho cluster duy nhất (không cần ID)
+     */
+    @GetMapping("/k8s/ingress")
+    public ResponseEntity<?> listIngress(
+            @RequestParam(required = false) String namespace,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return listIngressById(id, namespace, request);
+    }
+
+    /**
      * Liệt kê ingress (sử dụng Fabric8 client)
      * Supports optional namespace query parameter to filter ingress
      */
     @GetMapping("/{id}/k8s/ingress")
-    public ResponseEntity<?> listIngress(@PathVariable Long id,
+    public ResponseEntity<?> listIngressById(@PathVariable Long id,
             @RequestParam(required = false) String namespace,
             HttpServletRequest request) {
         try {
@@ -1615,22 +2101,38 @@ public class ClusterAdminController {
      */
     private Map<String, Object> parsePodToMap(Pod pod) {
         java.util.Map<String, Object> map = new java.util.HashMap<>();
-        map.put("namespace", pod.getMetadata().getNamespace());
-        map.put("name", pod.getMetadata().getName());
+        map.put("namespace", pod.getMetadata() != null ? pod.getMetadata().getNamespace() : "");
+        map.put("name", pod.getMetadata() != null ? pod.getMetadata().getName() : "");
         map.put("node",
                 pod.getSpec() != null && pod.getSpec().getNodeName() != null
                         ? pod.getSpec().getNodeName()
                         : "");
         map.put("status", pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown");
 
+        // Age calculation
+        String age = "";
+        if (pod.getMetadata() != null && pod.getMetadata().getCreationTimestamp() != null) {
+            age = calculateAge(pod.getMetadata().getCreationTimestamp().toString());
+        }
+        map.put("age", age);
+
+        // Tính ready containers (ready/total)
+        int readyCount = 0;
+        int totalContainers = 0;
+        
         // Thêm container statuses nếu có
         if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
             java.util.List<Map<String, Object>> containerStatuses = new java.util.ArrayList<>();
             for (ContainerStatus cs : pod.getStatus().getContainerStatuses()) {
+                totalContainers++;
+                if (cs.getReady() != null && cs.getReady()) {
+                    readyCount++;
+                }
+                
                 java.util.Map<String, Object> csMap = new java.util.HashMap<>();
                 csMap.put("name", cs.getName());
                 csMap.put("ready", cs.getReady());
-                csMap.put("restartCount", cs.getRestartCount());
+                csMap.put("restartCount", cs.getRestartCount() != null ? cs.getRestartCount() : 0);
 
                 // Trích xuất trạng thái container
                 String state = extractContainerState(cs);
@@ -1639,6 +2141,9 @@ public class ClusterAdminController {
             }
             map.put("containerStatuses", containerStatuses);
         }
+        
+        // Set ready string format: "ready/total"
+        map.put("ready", totalContainers > 0 ? readyCount + "/" + totalContainers : "0/0");
 
         return map;
     }
@@ -1990,37 +2495,6 @@ public class ClusterAdminController {
         return ResponseEntity.ok(result);
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<?> detail(@PathVariable Long id) {
-        // Với hệ thống chỉ có 1 cluster, luôn trả về cluster đầu tiên bất kể ID
-        var summaries = clusterService.listSummaries();
-        var sum = summaries.stream().findFirst().orElse(null);
-        if (sum == null)
-            return ResponseEntity.notFound().build();
-
-        // Get servers for this cluster (các server có clusterStatus = "AVAILABLE")
-        var clusterServers = serverService.findByClusterStatus("AVAILABLE");
-        var nodes = new java.util.ArrayList<java.util.Map<String, Object>>();
-
-        for (var s : clusterServers) {
-            nodes.add(java.util.Map.of(
-                    "id", s.getId(),
-                    "ip", s.getHost(),
-                    "port", s.getPort() != null ? s.getPort() : 22,
-                    "username", s.getUsername(),
-                    "role", s.getRole() != null && !s.getRole().isBlank() ? s.getRole() : "WORKER",
-                    "status", s.getStatus().name()));
-        }
-
-        return ResponseEntity.ok(java.util.Map.of(
-                "id", sum.id(),
-                "name", sum.name(),
-                "masterNode", sum.masterNode(),
-                "workerCount", sum.workerCount(),
-                "status", sum.status(),
-                "nodes", nodes));
-    }
-
     @GetMapping("/{id}/detail")
     public ResponseEntity<?> detailWithMetrics(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
         var summaries = clusterService.listSummaries();
@@ -2204,7 +2678,7 @@ public class ClusterAdminController {
      * @return version string hoặc empty string nếu chưa cài
      */
     @GetMapping("/k8s-version")
-    public ResponseEntity<?> getKubernetesVersionWithoutId() {
+    public ResponseEntity<?> getKubernetesVersion() {
         // Với hệ thống chỉ có 1 cluster, lấy ID của cluster đầu tiên
         Long id = 1L;
         try {
@@ -2426,45 +2900,95 @@ public class ClusterAdminController {
      */
     private Map<String, Object> parseWorkloadToMap(Object workload) {
         java.util.Map<String, Object> map = new java.util.HashMap<>();
+        
+        // Common fields
+        String namespace = "";
+        String name = "";
+        String creationTimestamp = "";
+        
         if (workload instanceof Deployment dep) {
-            map.put("namespace", dep.getMetadata().getNamespace());
-            map.put("name", dep.getMetadata().getName());
+            namespace = dep.getMetadata() != null ? dep.getMetadata().getNamespace() : "";
+            name = dep.getMetadata() != null ? dep.getMetadata().getName() : "";
+            if (dep.getMetadata() != null && dep.getMetadata().getCreationTimestamp() != null) {
+                creationTimestamp = dep.getMetadata().getCreationTimestamp().toString();
+            }
+            
             int ready = dep.getStatus() != null && dep.getStatus().getReadyReplicas() != null
                     ? dep.getStatus().getReadyReplicas()
                     : 0;
             int replicas = dep.getSpec() != null && dep.getSpec().getReplicas() != null
                     ? dep.getSpec().getReplicas()
                     : 0;
+            int updated = dep.getStatus() != null && dep.getStatus().getUpdatedReplicas() != null
+                    ? dep.getStatus().getUpdatedReplicas()
+                    : 0;
+            int available = dep.getStatus() != null && dep.getStatus().getAvailableReplicas() != null
+                    ? dep.getStatus().getAvailableReplicas()
+                    : 0;
+            
+            map.put("namespace", namespace);
+            map.put("name", name);
             map.put("ready", ready);
             map.put("desired", replicas);
             map.put("replicas", replicas);
+            map.put("updated", updated);
+            map.put("available", available);
+            map.put("age", calculateAge(creationTimestamp));
             return map;
         }
         if (workload instanceof StatefulSet sts) {
-            map.put("namespace", sts.getMetadata().getNamespace());
-            map.put("name", sts.getMetadata().getName());
+            namespace = sts.getMetadata() != null ? sts.getMetadata().getNamespace() : "";
+            name = sts.getMetadata() != null ? sts.getMetadata().getName() : "";
+            if (sts.getMetadata() != null && sts.getMetadata().getCreationTimestamp() != null) {
+                creationTimestamp = sts.getMetadata().getCreationTimestamp().toString();
+            }
+            
             int ready = sts.getStatus() != null && sts.getStatus().getReadyReplicas() != null
                     ? sts.getStatus().getReadyReplicas()
                     : 0;
             int replicas = sts.getSpec() != null && sts.getSpec().getReplicas() != null
                     ? sts.getSpec().getReplicas()
                     : 0;
+            
+            map.put("namespace", namespace);
+            map.put("name", name);
             map.put("ready", ready);
             map.put("desired", replicas);
             map.put("replicas", replicas);
+            map.put("age", calculateAge(creationTimestamp));
             return map;
         }
         if (workload instanceof DaemonSet ds) {
-            map.put("namespace", ds.getMetadata().getNamespace());
-            map.put("name", ds.getMetadata().getName());
+            namespace = ds.getMetadata() != null ? ds.getMetadata().getNamespace() : "";
+            name = ds.getMetadata() != null ? ds.getMetadata().getName() : "";
+            if (ds.getMetadata() != null && ds.getMetadata().getCreationTimestamp() != null) {
+                creationTimestamp = ds.getMetadata().getCreationTimestamp().toString();
+            }
+            
             int ready = ds.getStatus() != null && ds.getStatus().getNumberReady() != null
                     ? ds.getStatus().getNumberReady()
                     : 0;
             int desired = ds.getStatus() != null && ds.getStatus().getDesiredNumberScheduled() != null
                     ? ds.getStatus().getDesiredNumberScheduled()
                     : 0;
+            int current = ds.getStatus() != null && ds.getStatus().getCurrentNumberScheduled() != null
+                    ? ds.getStatus().getCurrentNumberScheduled()
+                    : 0;
+            int updated = ds.getStatus() != null && ds.getStatus().getUpdatedNumberScheduled() != null
+                    ? ds.getStatus().getUpdatedNumberScheduled()
+                    : 0;
+            int available = ds.getStatus() != null && ds.getStatus().getNumberAvailable() != null
+                    ? ds.getStatus().getNumberAvailable()
+                    : 0;
+            
+            map.put("namespace", namespace);
+            map.put("name", name);
             map.put("ready", ready);
             map.put("desired", desired);
+            map.put("current", current);
+            map.put("updated", updated);
+            map.put("available", available);
+            map.put("age", calculateAge(creationTimestamp));
             return map;
         }
         throw new IllegalArgumentException(

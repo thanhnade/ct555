@@ -1,0 +1,141 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes Nodes Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">🖥 Nodes</div>
+        <div class="page-subtitle">Danh sách node trong cụm Kubernetes.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="nodes-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Nodes Table Section -->
+    <div class="table-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Danh sách Nodes</div>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="nodes-search"
+            placeholder="🔍 Tìm kiếm node...">
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="nodes-role-filter">
+            <option value="">Tất cả role</option>
+            <option value="master">Master</option>
+            <option value="worker">Worker</option>
+          </select>
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="nodes-status-filter">
+            <option value="">Tất cả trạng thái</option>
+            <option value="Ready">Ready</option>
+            <option value="NotReady">NotReady</option>
+            <option value="Unknown">Unknown</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Tên Node</th>
+              <th>Role</th>
+              <th>CPU</th>
+              <th>RAM</th>
+              <th>Disk</th>
+              <th>Trạng thái</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="nodes-tbody">
+            <tr>
+              <td colspan="7" class="text-center text-muted py-3">Đang tải...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Node Detail Modal -->
+    <div class="modal fade" id="nodeDetailModal" tabindex="-1" aria-labelledby="nodeDetailModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="nodeDetailModalLabel">Chi tiết Node: <span id="node-detail-name"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <!-- Tabs Navigation -->
+            <ul class="nav nav-tabs mb-3" id="nodeDetailTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="node-info-tab" data-bs-toggle="tab" data-bs-target="#node-info" type="button" role="tab" aria-controls="node-info" aria-selected="true">
+                  ℹ️ Info
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="node-resources-tab" data-bs-toggle="tab" data-bs-target="#node-resources" type="button" role="tab" aria-controls="node-resources" aria-selected="false">
+                  📊 Resources
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="node-pods-tab" data-bs-toggle="tab" data-bs-target="#node-pods" type="button" role="tab" aria-controls="node-pods" aria-selected="false">
+                  🚀 Pods
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="node-labels-tab" data-bs-toggle="tab" data-bs-target="#node-labels" type="button" role="tab" aria-controls="node-labels" aria-selected="false">
+                  🏷️ Labels
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="node-yaml-tab" data-bs-toggle="tab" data-bs-target="#node-yaml" type="button" role="tab" aria-controls="node-yaml" aria-selected="false">
+                  📄 YAML
+                </button>
+              </li>
+            </ul>
+
+            <!-- Tab Content -->
+            <div class="tab-content" id="nodeDetailTabContent">
+              <!-- Info Tab -->
+              <div class="tab-pane fade show active" id="node-info" role="tabpanel" aria-labelledby="node-info-tab">
+                <div id="node-info-content">
+                  <p class="text-muted">Đang tải...</p>
+                </div>
+              </div>
+
+              <!-- Resources Tab -->
+              <div class="tab-pane fade" id="node-resources" role="tabpanel" aria-labelledby="node-resources-tab">
+                <div id="node-resources-content">
+                  <p class="text-muted">Đang tải...</p>
+                </div>
+              </div>
+
+              <!-- Pods Tab -->
+              <div class="tab-pane fade" id="node-pods" role="tabpanel" aria-labelledby="node-pods-tab">
+                <div id="node-pods-content">
+                  <p class="text-muted">Đang tải...</p>
+                </div>
+              </div>
+
+              <!-- Labels Tab -->
+              <div class="tab-pane fade" id="node-labels" role="tabpanel" aria-labelledby="node-labels-tab">
+                <div id="node-labels-content">
+                  <p class="text-muted">Đang tải...</p>
+                </div>
+              </div>
+
+              <!-- YAML Tab -->
+              <div class="tab-pane fade" id="node-yaml" role="tabpanel" aria-labelledby="node-yaml-tab">
+                <div id="node-yaml-content">
+                  <p class="text-muted">Đang tải...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/k8sNodes.js"></script>
+

@@ -74,6 +74,74 @@ public class AdminPageController {
 		return "admin/pages/kubernetes-overview";
 	}
 
+	@GetMapping({"/k8s/nodes", "/kubernetes/nodes"})
+	public String kubernetesNodesPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Nodes");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-nodes";
+	}
+
+	@GetMapping({"/k8s/workloads", "/kubernetes/workloads"})
+	public String kubernetesWorkloadsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Workloads");
+		model.addAttribute("username", getUsernameFromSession(request));
+		// Default tab
+		model.addAttribute("defaultTab", "deployments");
+		return "admin/pages/kubernetes-workloads";
+	}
+
+	@GetMapping({"/k8s/workloads/deployments", "/kubernetes/workloads/deployments"})
+	public String kubernetesDeploymentsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Deployments");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "deployments");
+		return "admin/pages/kubernetes-workloads";
+	}
+
+	@GetMapping({"/k8s/workloads/statefulsets", "/kubernetes/workloads/statefulsets"})
+	public String kubernetesStatefulSetsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes StatefulSets");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "statefulsets");
+		return "admin/pages/kubernetes-workloads";
+	}
+
+	@GetMapping({"/k8s/workloads/daemonsets", "/kubernetes/workloads/daemonsets"})
+	public String kubernetesDaemonSetsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes DaemonSets");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "daemonsets");
+		return "admin/pages/kubernetes-workloads";
+	}
+
+	@GetMapping({"/k8s/services", "/kubernetes/services"})
+	public String kubernetesServicesPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Services");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-services";
+	}
+
+	@GetMapping({"/k8s/ingress", "/kubernetes/ingress"})
+	public String kubernetesIngressPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Ingress");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-ingress";
+	}
+
+	@GetMapping({"/k8s/namespaces", "/kubernetes/namespaces"})
+	public String kubernetesNamespacesPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Namespaces");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-namespaces";
+	}
+
+	@GetMapping({"/k8s/pods", "/kubernetes/pods"})
+	public String kubernetesPodsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Pods");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-pods";
+	}
+
 	@GetMapping("/deployments")
 	public String deploymentsPage(Model model, HttpServletRequest request) {
 		model.addAttribute("pageTitle", "Deployment Requests");

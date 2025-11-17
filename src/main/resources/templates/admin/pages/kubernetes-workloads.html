@@ -1,0 +1,136 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes Workloads Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">📦 Workloads</div>
+        <div class="page-subtitle">Danh sách workloads (Deployments, StatefulSets, DaemonSets) trong cụm Kubernetes.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="workloads-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Filters Section -->
+    <div class="table-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Danh sách Workloads</div>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="workloads-search"
+            placeholder="🔍 Tìm kiếm...">
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="workloads-type-filter">
+            <option value="">Tất cả loại</option>
+            <option value="deployment">Deployment</option>
+            <option value="statefulset">StatefulSet</option>
+            <option value="daemonset">DaemonSet</option>
+          </select>
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="workloads-namespace-filter">
+            <option value="">Tất cả namespace</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Tabs for Workload Types -->
+      <ul class="nav nav-tabs mb-3" id="workloads-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="deployments-tab" data-bs-toggle="tab" data-bs-target="#deployments" type="button" role="tab">
+            Deployments (<span id="deployments-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="statefulsets-tab" data-bs-toggle="tab" data-bs-target="#statefulsets" type="button" role="tab">
+            StatefulSets (<span id="statefulsets-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="daemonsets-tab" data-bs-toggle="tab" data-bs-target="#daemonsets" type="button" role="tab">
+            DaemonSets (<span id="daemonsets-count">0</span>)
+          </button>
+        </li>
+      </ul>
+
+      <!-- Tab Content -->
+      <div class="tab-content" id="workloads-tab-content">
+        <!-- Deployments Tab -->
+        <div class="tab-pane fade" id="deployments" role="tabpanel">
+          <div class="table-responsive">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Tên</th>
+                  <th>Ready</th>
+                  <th>Up-to-date</th>
+                  <th>Available</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="deployments-tbody">
+                <tr>
+                  <td colspan="7" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- StatefulSets Tab -->
+        <div class="tab-pane fade" id="statefulsets" role="tabpanel">
+          <div class="table-responsive">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Tên</th>
+                  <th>Ready</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="statefulsets-tbody">
+                <tr>
+                  <td colspan="5" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- DaemonSets Tab -->
+        <div class="tab-pane fade" id="daemonsets" role="tabpanel">
+          <div class="table-responsive">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Tên</th>
+                  <th>Desired</th>
+                  <th>Current</th>
+                  <th>Ready</th>
+                  <th>Up-to-date</th>
+                  <th>Available</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="daemonsets-tbody">
+                <tr>
+                  <td colspan="9" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/k8sWorkloads.js"></script>
+
