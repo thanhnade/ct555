@@ -86,6 +86,10 @@
         return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
     }
 
+    function isAllowedSpecialWorkload(namespace, name) {
+        return window.K8sHelpers ? window.K8sHelpers.isAllowedSpecialWorkload(namespace, name) : false;
+    }
+
     function canScaleWorkloadType(type) {
         return window.K8sHelpers ? window.K8sHelpers.canScaleWorkloadType(type) : false;
     }
@@ -330,6 +334,7 @@
             const upToDate = item.updated || ready; // Up-to-date replicas
 
             const isSystem = isSystemNamespace(item.namespace);
+            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
             const canScale = canScaleWorkloadType('deployment');
             const namespace = item.namespace || '';
             const name = item.name || '';
@@ -349,7 +354,7 @@
                         ${canScale && !isSystem ? `<button class="btn btn-sm btn-outline-warning" onclick="window.K8sWorkloadsModule.scaleWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Scale">
                             <i class="bi bi-arrows-angle-expand"></i>
                         </button>` : ''}
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -374,6 +379,7 @@
             const statusClass = getStatusClass(ready, desired);
 
             const isSystem = isSystemNamespace(item.namespace);
+            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
             const canScale = canScaleWorkloadType('statefulset');
             const namespace = item.namespace || '';
             const name = item.name || '';
@@ -391,7 +397,7 @@
                         ${canScale && !isSystem ? `<button class="btn btn-sm btn-outline-warning" onclick="window.K8sWorkloadsModule.scaleWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Scale">
                             <i class="bi bi-arrows-angle-expand"></i>
                         </button>` : ''}
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -419,6 +425,7 @@
             const statusClass = getStatusClass(ready, desired);
 
             const isSystem = isSystemNamespace(item.namespace);
+            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
             const namespace = item.namespace || '';
             const name = item.name || '';
 
@@ -436,7 +443,7 @@
                         <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
                             <i class="bi bi-eye"></i>
                         </button>
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -543,7 +550,9 @@
 
     // Delete workload
     async function deleteWorkload(type, namespace, name) {
-        if (isSystemNamespace(namespace)) {
+        // Cho phép xóa các workloads đặc biệt ngay cả khi nằm trong namespace hệ thống
+        const isSpecial = isAllowedSpecialWorkload(namespace, name);
+        if (isSystemNamespace(namespace) && !isSpecial) {
             if (window.showAlert) {
                 window.showAlert('warning', 'Không cho phép xóa trong namespace hệ thống');
             } else {

@@ -18,6 +18,16 @@
                nsLower === 'kube-node-lease' || nsLower === 'default';
     }
 
+    // Hàm hỗ trợ: Kiểm tra workload có phải là workload đặc biệt được phép xóa không
+    function isAllowedSpecialWorkload(namespace, name) {
+        if (!namespace || !name) return false;
+        const nsLower = namespace.toLowerCase();
+        const nameLower = name.toLowerCase();
+        return (nsLower === 'kube-system' && nameLower === 'metrics-server') ||
+               (nsLower === 'nfs-provisioner' && nameLower === 'nfs-client-provisioner') ||
+               (nsLower === 'default' && nameLower === 'nfs-client-provisioner');
+    }
+
     // Hàm hỗ trợ: Kiểm tra workload type có thể scale không
     function canScaleWorkloadType(type) {
         const t = (type || '').toLowerCase();
@@ -130,6 +140,7 @@
     window.K8sHelpers = {
         escapeHtml,
         isSystemNamespace,
+        isAllowedSpecialWorkload,
         canScaleWorkloadType,
         getPodStatusBadgeClass,
         getNamespaceStatusBadgeClass,

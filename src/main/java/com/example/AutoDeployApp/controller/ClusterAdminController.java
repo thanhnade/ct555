@@ -1763,7 +1763,17 @@ public class ClusterAdminController {
             }
 
             String nsLower = namespace == null ? "" : namespace.toLowerCase();
-            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
+            String nameLower = name == null ? "" : name.toLowerCase();
+            
+            // Cho phép xóa một số workloads đặc biệt ngay cả khi nằm trong namespace hệ thống
+            boolean isAllowedSpecialWorkload = 
+                (nsLower.equals("kube-system") && nameLower.equals("metrics-server")) ||
+                (nsLower.equals("nfs-provisioner") && nameLower.equals("nfs-client-provisioner")) ||
+                (nsLower.equals("default") && nameLower.equals("nfs-client-provisioner"));
+            
+            // Chặn xóa trong namespace hệ thống trừ các workloads đặc biệt được phép
+            if ((nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) 
+                    && !isAllowedSpecialWorkload) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Không cho phép xóa trong namespace hệ thống"));
             }
 
