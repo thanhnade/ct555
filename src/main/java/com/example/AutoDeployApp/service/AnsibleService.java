@@ -32,36 +32,62 @@ public class AnsibleService {
     }
 
     /**
-     * Lấy danh sách servers trong cluster
+     * Lấy danh sách servers trong cluster duy nhất
      */
-    public List<Server> getClusterServers(Long clusterId) {
+    public List<Server> getClusterServers() {
         // Với 1 cluster duy nhất, luôn trả về servers có clusterStatus = "AVAILABLE"
         return serverService.findByClusterStatus("AVAILABLE");
+    }
+
+    /**
+     * Tìm Ansible controller server (ưu tiên ANSIBLE role, fallback về MASTER)
+     * Lưu ý: Máy ANSIBLE không nằm trong cụm K8s nên phải tìm trong tất cả servers
+     * (không chỉ những máy có clusterStatus=AVAILABLE)
+     */
+    private Server getAnsibleController() {
+        // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
+        var allServers = serverService.findAll();
+        var ansibleServer = allServers.stream()
+                .filter(s -> "ANSIBLE".equals(s.getRole()))
+                .findFirst();
+
+        if (ansibleServer.isPresent()) {
+            return ansibleServer.get();
+        }
+
+        // Bước 2: Nếu không có ANSIBLE, fallback về MASTER trong AVAILABLE servers
+        var availableServers = getClusterServers();
+        var masterServer = availableServers.stream()
+                .filter(s -> "MASTER".equals(s.getRole()))
+                .findFirst();
+
+        if (masterServer.isPresent()) {
+            return masterServer.get();
+        }
+
+        throw new RuntimeException("No ANSIBLE or MASTER server found");
     }
 
     /**
      * 📄 Liệt kê tất cả playbook trong thư mục /etc/ansible/playbooks
      */
     @Transactional(readOnly = true)
-    public List<String> listPlaybooks(Long clusterId) {
+    public List<String> listPlaybooks() {
         try {
-            var servers = getClusterServers(clusterId);
+            var servers = getClusterServers();
             if (servers.isEmpty()) {
                 throw new RuntimeException("Cluster không có servers nào");
             }
 
-            // Lấy master server
-            var master = servers.stream()
-                    .filter(s -> "MASTER".equals(s.getRole()))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
+            // Lấy Ansible controller server (ưu tiên ANSIBLE, fallback MASTER)
+            var controller = getAnsibleController();
 
             // Tạo thư mục playbooks nếu chưa có
-            sshExec(master, "sudo mkdir -p /etc/ansible/playbooks");
+            sshExec(controller, "sudo mkdir -p /etc/ansible/playbooks");
 
             // Liệt kê các file .yml trong thư mục playbooks
             String cmd = "sudo ls /etc/ansible/playbooks/*.yml /etc/ansible/playbooks/*.yaml 2>/dev/null || true";
-            String output = sshExec(master, cmd);
+            String output = sshExec(controller, cmd);
 
             return Arrays.stream(output.split("\\s+"))
                     .filter(s -> !s.isBlank())
@@ -76,16 +102,12 @@ public class AnsibleService {
      * 📂 Đọc nội dung 1 playbook
      */
     @Transactional(readOnly = true)
-    public Map<String, String> readPlaybook(Long clusterId, String filename) {
+    public Map<String, String> readPlaybook(String filename) {
         try {
-            var servers = getClusterServers(clusterId);
-            var master = servers.stream()
-                    .filter(s -> "MASTER".equals(s.getRole()))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
+            var controller = getAnsibleController();
 
             String filePath = "/etc/ansible/playbooks/" + filename;
-            String content = sshExec(master, "sudo cat " + filePath);
+            String content = sshExec(controller, "sudo cat " + filePath);
 
             if (content == null) {
                 throw new RuntimeException("Không thể đọc file playbook");
@@ -104,16 +126,12 @@ public class AnsibleService {
      * 💾 Lưu (tạo/sửa) playbook
      */
     @Transactional
-    public Map<String, Object> savePlaybook(Long clusterId, String filename, String content, String sudoPassword) {
+    public Map<String, Object> savePlaybook(String filename, String content, String sudoPassword) {
         try {
-            var servers = getClusterServers(clusterId);
-            var master = servers.stream()
-                    .filter(s -> "MASTER".equals(s.getRole()))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
+            var controller = getAnsibleController();
 
             // Tạo thư mục playbooks nếu chưa có
-            sshExec(master, "sudo mkdir -p /etc/ansible/playbooks");
+            sshExec(controller, "sudo mkdir -p /etc/ansible/playbooks");
 
             // Đảm bảo filename có extension .yml hoặc .yaml
             String finalFilename = filename;
@@ -124,7 +142,7 @@ public class AnsibleService {
             // Lưu nội dung vào file
             String filePath = "/etc/ansible/playbooks/" + finalFilename;
             String saveCmd = "sudo tee " + filePath + " > /dev/null << 'EOF'\n" + content + "\nEOF";
-            sshExec(master, saveCmd);
+            sshExec(controller, saveCmd);
 
             return Map.of(
                     "success", true,
@@ -140,16 +158,12 @@ public class AnsibleService {
      * 🗑️ Xóa playbook
      */
     @Transactional
-    public Map<String, Object> deletePlaybook(Long clusterId, String filename) {
+    public Map<String, Object> deletePlaybook(String filename) {
         try {
-            var servers = getClusterServers(clusterId);
-            var master = servers.stream()
-                    .filter(s -> "MASTER".equals(s.getRole()))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
+            var controller = getAnsibleController();
 
             String filePath = "/etc/ansible/playbooks/" + filename;
-            sshExec(master, "sudo rm -f " + filePath);
+            sshExec(controller, "sudo rm -f " + filePath);
 
             return Map.of(
                     "success", true,
@@ -164,15 +178,11 @@ public class AnsibleService {
      * 🚀 Thực thi playbook
      */
     @Transactional
-    public Map<String, Object> executePlaybook(Long clusterId, String filename, String extraVars, String sudoPassword) {
+    public Map<String, Object> executePlaybook(String filename, String extraVars, String sudoPassword) {
         try {
-            var servers = getClusterServers(clusterId);
-            var master = servers.stream()
-                    .filter(s -> "MASTER".equals(s.getRole()))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
+            var controller = getAnsibleController();
 
-            String taskId = "playbook-" + clusterId + "-" + System.currentTimeMillis();
+            String taskId = "playbook-" + System.currentTimeMillis();
 
             // Khởi tạo trạng thái thực thi
             executionStatusCache.put(taskId, Map.of(
@@ -198,7 +208,7 @@ public class AnsibleService {
                             "message", "Đang thực thi playbook...",
                             "startTime", executionStatusCache.get(taskId).get("startTime")));
 
-                    String result = sshExecWithOutput(master, cmd, taskId);
+                    String result = sshExecWithOutput(controller, cmd, taskId);
 
                     // Cập nhật kết quả
                     executionStatusCache.put(taskId, Map.of(
@@ -232,7 +242,7 @@ public class AnsibleService {
     /**
      * 📊 Lấy trạng thái thực thi playbook
      */
-    public Map<String, Object> getExecutionStatus(Long clusterId, String taskId) {
+    public Map<String, Object> getExecutionStatus(String taskId) {
         Map<String, Object> status = executionStatusCache.get(taskId);
         if (status == null) {
             return Map.of(
@@ -362,13 +372,9 @@ public class AnsibleService {
      * 📤 Tải lên file playbook từ máy local
      */
     @Transactional
-    public Map<String, Object> uploadPlaybook(Long clusterId, MultipartFile file) {
+    public Map<String, Object> uploadPlaybook(MultipartFile file) {
         try {
-            var servers = getClusterServers(clusterId);
-            var master = servers.stream()
-                    .filter(s -> "MASTER".equals(s.getRole()))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy MASTER server"));
+            var controller = getAnsibleController();
 
             // Validate file
             if (file.isEmpty()) {
@@ -387,13 +393,13 @@ public class AnsibleService {
             }
 
             // Tạo thư mục playbooks nếu chưa có
-            sshExec(master, "sudo mkdir -p /etc/ansible/playbooks");
+            sshExec(controller, "sudo mkdir -p /etc/ansible/playbooks");
 
-            // Lưu file lên server MASTER
+            // Lưu file lên Ansible controller server
             String filePath = "/etc/ansible/playbooks/" + finalFilename;
             String content = new String(file.getBytes(), "UTF-8");
             String saveCmd = "sudo tee " + filePath + " > /dev/null << 'EOF'\n" + content + "\nEOF";
-            sshExec(master, saveCmd);
+            sshExec(controller, saveCmd);
 
             return Map.of(
                     "success", true,

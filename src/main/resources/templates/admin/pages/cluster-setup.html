@@ -40,7 +40,7 @@
         <button class="btn btn-primary" id="btn-step-2-controller">🖥️ Setup Controller</button>
       </div>
       <div class="page-subtitle" style="font-size: 13px; color: #666666; margin-top: 8px;">
-        Cài đặt Python, Ansible, Git trên master node (sẽ dùng làm controller để chạy Kubespray).
+        Cài đặt Python, Ansible, Git trên controller node (máy với role=ANSIBLE hoặc role=MASTER sẽ được dùng làm controller để chạy Ansible playbooks).
       </div>
     </div>
 
@@ -142,17 +142,25 @@
       <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; padding: 12px; background: #F8F9FA; border-radius: 6px;">
         <span class="chip" id="ansible-summary-install" style="background: #E0E0E0; color: #666666;">Chưa kiểm tra</span>
         <span class="chip" id="ansible-summary-version" style="background: #E0E0E0; color: #666666;">Phiên bản: -</span>
-        <span class="chip" id="ansible-summary-master" style="background: #E0E0E0; color: #666666;">MASTER: -</span>
+        <span class="chip" id="ansible-summary-master" style="background: #E0E0E0; color: #666666;">Controller: -</span>
         <div style="margin-left: auto;" id="ansible-summary-actions"></div>
       </div>
       <div style="padding: 12px; background: #F0F7FF; border-left: 3px solid #003366; border-radius: 6px; margin-bottom: 16px;">
         <div style="font-weight: 600; margin-bottom: 8px; color: #003366;">📋 Hướng dẫn nhanh</div>
         <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #333333;">
-          <li><strong>Khởi tạo</strong>: tạo cấu trúc, ghi cấu hình mặc định, đảm bảo SSH key và ping nodes.</li>
-          <li><strong>Cấu hình</strong>: xem/sửa ansible.cfg, hosts, group_vars/all.yml.</li>
-          <li><strong>Playbook</strong>: quản lý file, chạy playbook, theo dõi output.</li>
+          <li><strong>Controller</strong>: Hệ thống tự động chọn controller (ưu tiên role=ANSIBLE, nếu không có thì dùng role=MASTER). Controller là máy chạy Ansible commands và quản lý cụm K8s.</li>
+          <li><strong>Khởi tạo</strong>: tạo cấu trúc, ghi cấu hình mặc định, phân phối SSH key từ controller đến các máy trong cụm, và ping nodes.</li>
+          <li><strong>Cấu hình</strong>: xem/sửa ansible.cfg, hosts (chỉ chứa MASTER và WORKER, không có ANSIBLE), group_vars/all.yml trên controller.</li>
+          <li><strong>Playbook</strong>: quản lý file, chạy playbook trên controller, theo dõi output real-time.</li>
         </ul>
-        <div style="margin-top: 8px; font-size: 12px; color: #666666;">Lưu ý: Sau khi thêm node mới, cần cập nhật cấu hình Ansible trước khi chạy playbook.</div>
+        <div style="margin-top: 8px; padding: 8px; background: #E8F4F8; border-radius: 4px; font-size: 12px; color: #0066CC;">
+          <strong>💡 Về SSH Key Distribution:</strong>
+          <ul style="margin: 4px 0 0 0; padding-left: 20px; font-size: 11px;">
+            <li>Nếu controller là <strong>ANSIBLE</strong>: phân phối key đến tất cả MASTER và WORKER (clusterStatus=AVAILABLE)</li>
+            <li>Nếu controller là <strong>MASTER</strong>: chỉ phân phối key đến WORKER nodes</li>
+          </ul>
+        </div>
+        <div style="margin-top: 8px; font-size: 12px; color: #666666;">Lưu ý: Sau khi thêm node mới, cần cập nhật cấu hình Ansible (inventory) trước khi chạy playbook.</div>
       </div>
       <div id="ansible-status-display" style="margin-bottom: 16px;"></div>
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -197,11 +205,15 @@
                   </li>
                   <li class="mb-1">
                     <strong>Ghi cấu hình</strong>: tạo/ghi đè ansible.cfg và hosts dựa trên cluster
-                    (nhóm master/workers và all:vars), sau đó kiểm tra hợp lệ (ansible-inventory).
+                    (nhóm master/workers và all:vars). Inventory chỉ chứa các máy K8s nodes (MASTER và WORKER), không bao gồm máy ANSIBLE controller.
+                    Sau đó kiểm tra hợp lệ (ansible-inventory).
                   </li>
                   <li class="mb-1">
-                    <strong>SSH key</strong>: đảm bảo MASTER có id_rsa/id_rsa.pub và tự ủy quyền
-                    vào authorized_keys (đăng nhập không mật khẩu).
+                    <strong>SSH key</strong>: đảm bảo controller (ANSIBLE hoặc MASTER) có id_rsa/id_rsa.pub và phân phối key đến các máy trong cụm.
+                    <ul class="mt-1 mb-0 ps-3" style="font-size: 11px;">
+                      <li>Nếu controller là <strong>ANSIBLE</strong>: phân phối key đến tất cả MASTER và WORKER (clusterStatus=AVAILABLE)</li>
+                      <li>Nếu controller là <strong>MASTER</strong>: chỉ phân phối key đến WORKER nodes</li>
+                    </ul>
                   </li>
                   <li class="mb-1">
                     <strong>Ping nodes</strong>: kiểm tra kết nối tất cả hosts bằng inventory vừa tạo.
@@ -227,7 +239,7 @@
                 <button type="button" class="btn btn-outline-primary btn-sm" id="init-config-btn" title="Ghi ansible.cfg và hosts mặc định">
                   📝 Config mặc định
                 </button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="init-sshkey-btn" title="Tạo SSH key cho MASTER">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="init-sshkey-btn" title="Tạo và phân phối SSH key từ controller đến các máy trong cụm">
                   🔑 SSH key
                 </button>
                 <button type="button" class="btn btn-outline-info btn-sm" id="init-ping-btn" title="Kiểm tra kết nối các node">
@@ -256,7 +268,7 @@
                 <strong>Cluster:</strong> <span id="current-cluster-name" class="text-primary">Đang tải...</span>
               </div>
               <div class="text-muted small">
-                ℹ️ Cấu hình sẽ được áp dụng cho server MASTER
+                ℹ️ Cấu hình sẽ được áp dụng cho controller (ưu tiên role=ANSIBLE, nếu không có thì dùng role=MASTER)
               </div>
             </div>
           </div>
@@ -405,11 +417,12 @@
                   </optgroup>
                   <optgroup label="III. Kiểm tra & Tùy chọn mở rộng">
                     <option value="verify-cluster">08 🧩 Xác minh trạng thái cụm</option>
-                    <option value="install-ingress">09 🌍 Cài đặt Nginx Ingress</option>
-                    <option value="install-metallb">10 ⚖️ Cài đặt MetalLB LoadBalancer</option>
-                    <option value="install-helm">11 📦 Cài đặt Helm 3</option>
-                    <option value="setup-storage">12 💾 Thiết lập Storage</option>
-                    <option value="prepare-and-join-worker">13 🔗 Chuẩn bị & Join Worker (02→03→04→07)</option>
+                    <option value="install-helm">09 📦 Cài đặt Helm 3</option>
+                    <option value="install-metrics-server">10 📊 Cài đặt Metrics Server</option>
+                    <option value="install-ingress">11 🌍 Cài đặt Nginx Ingress</option>
+                    <option value="install-metallb">12 ⚖️ Cài đặt MetalLB LoadBalancer</option>
+                    <option value="setup-storage">13 💾 Thiết lập Storage</option>
+                    <option value="prepare-and-join-worker">14 🔗 Chuẩn bị & Join Worker (02→03→04→07)</option>
                   </optgroup>
                   <optgroup label="IV. Triển khai toàn bộ">
                     <option value="deploy-full-cluster">🚀 Triển khai toàn bộ cluster (0-8, Calico)</option>

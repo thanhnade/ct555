@@ -197,14 +197,12 @@ public class ApplicationController {
             // Cố gắng dọn dẹp tài nguyên K8s cho ứng dụng nhưng KHÔNG xóa namespace
             try {
                 String namespace = deletedApp.getK8sNamespace();
-                Long clusterId = deletedApp.getClusterId();
-                if (clusterId != null && namespace != null && !namespace.isBlank()) {
+                if (namespace != null && !namespace.isBlank()) {
                     kubernetesService.deleteApplicationResources(
                             namespace,
                             deletedApp.getK8sDeploymentName(),
                             deletedApp.getK8sServiceName(),
-                            deletedApp.getK8sIngressName(),
-                            clusterId);
+                            deletedApp.getK8sIngressName());
                 }
             } catch (Exception cleanupEx) {
                 // Chỉ ghi log; vẫn trả về thành công cho thao tác đánh dấu xóa

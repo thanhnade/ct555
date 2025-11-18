@@ -17,8 +17,8 @@ public class AnsibleConfigController {
     @Autowired
     private ServerService serverService;
 
-    @GetMapping("/read/{clusterId}")
-    public ResponseEntity<Map<String, Object>> readConfig(@PathVariable Long clusterId,
+    @GetMapping("/read")
+    public ResponseEntity<Map<String, Object>> readConfig(
             @RequestParam(required = false) String host) {
         try {
             // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -96,8 +96,8 @@ public class AnsibleConfigController {
         }
     }
 
-    @PostMapping("/save/{clusterId}")
-    public ResponseEntity<Map<String, Object>> saveConfig(@PathVariable Long clusterId,
+    @PostMapping("/save")
+    public ResponseEntity<Map<String, Object>> saveConfig(
             @RequestParam(required = false) String host,
             @RequestParam String sudoPassword,
             @RequestParam String cfg,
@@ -397,6 +397,7 @@ public class AnsibleConfigController {
     }
 
     private Server pickTarget(List<Server> servers, String host, boolean preferMaster) {
+        // Lưu ý: Máy ANSIBLE có thể có clusterStatus=NOAVAILABLE vì không phải K8s node
         if (servers == null || servers.isEmpty())
             return null;
 
@@ -408,10 +409,40 @@ public class AnsibleConfigController {
         }
 
         if (preferMaster) {
-            return servers.stream()
+            // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
+            try {
+                var allServers = serverService.findAll();
+                var ansibleServerAll = allServers.stream()
+                        .filter(s -> "ANSIBLE".equals(s.getRole()))
+                        .findFirst();
+                
+                if (ansibleServerAll.isPresent()) {
+                    return ansibleServerAll.get();
+                }
+            } catch (Exception e) {
+                // Nếu không lấy được tất cả servers, tiếp tục với fallback
+            }
+            
+            // Bước 2: Nếu không có ANSIBLE, tìm trong danh sách hiện tại (AVAILABLE)
+            var ansibleServer = servers.stream()
+                    .filter(s -> "ANSIBLE".equals(s.getRole()))
+                    .findFirst();
+            
+            if (ansibleServer.isPresent()) {
+                return ansibleServer.get();
+            }
+            
+            // Bước 3: Fallback về MASTER trong danh sách hiện tại (AVAILABLE)
+            var masterServer = servers.stream()
                     .filter(s -> "MASTER".equals(s.getRole()))
-                    .findFirst()
-                    .orElse(servers.get(0));
+                    .findFirst();
+            
+            if (masterServer.isPresent()) {
+                return masterServer.get();
+            }
+            
+            // Fallback về server đầu tiên nếu không có cả ANSIBLE và MASTER
+            return servers.get(0);
         }
 
         return servers.get(0);
@@ -439,8 +470,8 @@ public class AnsibleConfigController {
         return null;
     }
 
-    @PostMapping("/verify/{clusterId}")
-    public ResponseEntity<Map<String, Object>> verifyAnsible(@PathVariable Long clusterId,
+    @PostMapping("/verify")
+    public ResponseEntity<Map<String, Object>> verifyAnsible(
             @RequestParam(required = false) String host) {
         try {
             // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -490,8 +521,8 @@ public class AnsibleConfigController {
         }
     }
 
-    @GetMapping("/check-sudo/{clusterId}")
-    public ResponseEntity<Map<String, Object>> checkSudoNopasswd(@PathVariable Long clusterId,
+    @GetMapping("/check-sudo")
+    public ResponseEntity<Map<String, Object>> checkSudoNopasswd(
             @RequestParam(required = false) String host) {
         try {
             // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -536,8 +567,8 @@ public class AnsibleConfigController {
         }
     }
 
-    @PostMapping("/rollback/{clusterId}")
-    public ResponseEntity<Map<String, Object>> rollbackConfig(@PathVariable Long clusterId,
+    @PostMapping("/rollback")
+    public ResponseEntity<Map<String, Object>> rollbackConfig(
             @RequestParam(required = false) String host,
             @RequestParam(required = false) String sudoPassword) {
         try {
@@ -706,13 +737,13 @@ public class AnsibleConfigController {
 
             if (success) {
                 // Log successful rollback
-                System.out.println("Rollback completed successfully for cluster: " + clusterId);
+                System.out.println("Rollback completed successfully");
                 return ResponseEntity.ok(Map.of(
                         "success", true,
                         "message", "Đã rollback cấu hình thành công từ file backup"));
             } else {
                 // Log failed rollback
-                System.out.println("Rollback failed for cluster: " + clusterId);
+                System.out.println("Rollback failed");
                 return ResponseEntity.badRequest().body(Map.of(
                         "success", false,
                         "message", "Không thể rollback cấu hình"));

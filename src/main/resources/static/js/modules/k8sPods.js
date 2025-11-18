@@ -5,12 +5,21 @@
     let podsData = [];
     let filteredData = [];
 
-    // Helper function để escape HTML
+    // Helper functions từ k8sHelpers
     function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
+    }
+
+    function isSystemNamespace(name) {
+        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
+    }
+
+    function showK8sOutput(title, output) {
+        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
+            window.K8sHelpers.showK8sOutput(title, output);
+        } else {
+            alert(`${title}\n\n${output}`);
+        }
     }
 
     // Helper function để lấy status badge class
@@ -102,27 +111,71 @@
             const ready = item.ready || '0/0';
             const node = item.node || '-';
 
+            const canDelete = !isSystemNamespace(item.namespace);
+            const namespace = item.namespace || '';
+            const name = item.name || '';
+
             return `<tr>
-                <td>${escapeHtml(item.namespace || '-')}</td>
-                <td><span class="fw-medium">${escapeHtml(item.name || '-')}</span></td>
+                <td><code>${escapeHtml(namespace)}</code></td>
+                <td><span class="fw-medium">${escapeHtml(name)}</span></td>
                 <td>${escapeHtml(ready)}</td>
                 <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
                 <td class="text-muted small">${escapeHtml(node)}</td>
                 <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="window.K8sPodsModule.showDetail('${escapeHtml(item.namespace || '')}', '${escapeHtml(item.name || '')}')">
-                        Chi tiết
-                    </button>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sPodsModule.describePod('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        ${canDelete ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sPodsModule.deletePod('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                            <i class="bi bi-trash"></i>
+                        </button>` : ''}
+                    </div>
                 </td>
             </tr>`;
         }).join('');
     }
 
-    // Show detail (placeholder)
-    function showDetail(namespace, name) {
-        console.log('Show detail:', namespace, name);
-        // TODO: Implement detail modal
-        alert(`Chi tiết Pod: ${name} trong namespace ${namespace}`);
+    // Describe pod
+    async function describePod(namespace, name, format = 'json') {
+        try {
+            const formatParam = format === 'yaml' ? '?format=yaml' : '';
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}${formatParam}`);
+            showK8sOutput(`Pod ${namespace}/${name} (${data.format || 'json'})`, data.output || '');
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi lấy thông tin pod');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi lấy thông tin pod'));
+            }
+        }
+    }
+
+    // Delete pod
+    async function deletePod(namespace, name) {
+        if (isSystemNamespace(namespace)) {
+            if (window.showAlert) {
+                window.showAlert('warning', 'Không cho phép xóa pod trong namespace hệ thống');
+            } else {
+                alert('Không cho phép xóa pod trong namespace hệ thống');
+            }
+            return;
+        }
+        if (!confirm(`Xóa pod ${namespace}/${name}?`)) return;
+
+        try {
+            const data = await window.ApiClient.delete(`/admin/cluster/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            if (window.showAlert) {
+                window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `pod "${name}" deleted`)}</pre>`);
+            }
+            await loadPods();
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi xóa pod');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi xóa pod'));
+            }
+        }
     }
 
     // Initialize module
@@ -167,7 +220,8 @@
 
     window.K8sPodsModule = {
         loadPods,
-        showDetail
+        describePod,
+        deletePod
     };
 })();
 

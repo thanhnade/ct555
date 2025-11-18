@@ -1046,17 +1046,9 @@
 			return;
 		}
 
-		try {
-			await window.ApiClient.delete(`/admin/clusters/${id}`);
-			window.showAlert('success', `Đã xóa cluster "${name}" thành công. Bây giờ bạn có thể tạo cluster mới.`);
-			await Promise.all([loadClusterList(), loadClustersAndServers()]);
-			if (currentClusterId === id) {
-				resetClusterData();
-				showClusterList();
-			}
-		} catch (err) {
-			window.showAlert('error', err.message || 'Xóa cluster thất bại');
-		}
+		// Với hệ thống chỉ có 1 cluster, không cho phép xóa cluster
+		// Thay vào đó, có thể set servers về clusterStatus = "UNAVAILABLE"
+		window.showAlert('warning', 'Không thể xóa cluster. Với hệ thống chỉ có 1 cluster, vui lòng set servers về clusterStatus = "UNAVAILABLE" thay vì xóa cluster.');
 	}
 
 	// Show cluster list view
@@ -1089,9 +1081,6 @@
 		}
 
 		// Reset trong các module khác
-		if (window.K8sResourcesModule && window.K8sResourcesModule.setCurrentClusterId) {
-			window.K8sResourcesModule.setCurrentClusterId(null);
-		}
 		if (window.AnsibleConfigModule && window.AnsibleConfigModule.setCurrentClusterId) {
 			window.AnsibleConfigModule.setCurrentClusterId(null);
 		}
@@ -1196,11 +1185,6 @@
 		}
 		if (ingressNamespaceFilter) {
 			ingressNamespaceFilter.innerHTML = '<option value="">Tất cả namespaces</option>';
-		}
-
-		// Clear K8s resources data trong module (nếu có method)
-		if (window.K8sResourcesModule && typeof window.K8sResourcesModule.clearResourcesData === 'function') {
-			window.K8sResourcesModule.clearResourcesData();
 		}
 
 		// Reset Ansible summary badges bằng cách gọi setAnsibleSummaryBadges (nếu có)
@@ -1314,28 +1298,13 @@
 		if (workloadsCount) workloadsCount.textContent = '0';
 		if (servicesCount) servicesCount.textContent = '0';
 		if (ingressCount) ingressCount.textContent = '0';
-
-		// Clear K8s resources data trong module (nếu có method)
-		if (window.K8sResourcesModule && typeof window.K8sResourcesModule.clearResourcesData === 'function') {
-			window.K8sResourcesModule.clearResourcesData();
-		}
 	}
 
 	// Show cluster detail (simplified version - full implementation can be added later)
-	async function showClusterDetail(clusterId) {
-		// Validate clusterId
-		if (!clusterId || clusterId === null || clusterId === undefined) {
-			console.error('showClusterDetail: clusterId is required');
-			window.showAlert('error', 'Không có ID cluster. Vui lòng thử lại.');
-			return;
-		}
-
-		const id = typeof clusterId === 'number' ? clusterId : parseInt(clusterId, 10);
-		if (isNaN(id) || id <= 0) {
-			console.error('showClusterDetail: Invalid clusterId:', clusterId);
-			window.showAlert('error', 'ID cluster không hợp lệ: ' + clusterId);
-			return;
-		}
+	// Với hệ thống chỉ có 1 cluster, clusterId không còn bắt buộc
+	async function showClusterDetail(clusterId = null) {
+		// Với hệ thống chỉ có 1 cluster, luôn dùng id = 1
+		const id = 1;
 
 		// Clear dữ liệu cũ trước khi load cluster mới
 		clearClusterDetailUI();
@@ -1370,7 +1339,9 @@
 				setTimeout(() => reject(new Error('Request timeout: Không nhận được phản hồi từ server sau 30 giây')), 30000);
 			});
 			
-			const detailPromise = window.ApiClient.get(`/admin/clusters/${id}/detail`);
+			// Với 1 cluster duy nhất, dùng endpoint /detail không có id
+			// Endpoint này có metrics chi tiết (CPU, RAM, disk) cho từng node
+			const detailPromise = window.ApiClient.get('/admin/cluster/detail');
 			const detail = await Promise.race([detailPromise, timeoutPromise]);
 
 			// Kiểm tra detail có hợp lệ không
@@ -1416,29 +1387,14 @@
 			if (detail && (detail.nodes === null || detail.nodes === undefined)) {
 				detail.nodes = [];
 			}
-			loadClusterNodes(id, detail);
+			loadClusterNodes(detail);
 
 			// Set current cluster ID trong các module
-			if (window.K8sResourcesModule) {
-				window.K8sResourcesModule.setCurrentClusterId(id);
-			}
 			if (window.AnsibleConfigModule) {
 				window.AnsibleConfigModule.setCurrentClusterId(id);
 			}
 			if (window.AnsibleWebSocketModule) {
 				window.AnsibleWebSocketModule.setCurrentClusterId(id);
-			}
-
-			// Load K8s resources và networking resources
-			if (window.K8sResourcesModule) {
-				// Load K8s resources (pods, namespaces, workloads)
-				window.K8sResourcesModule.loadK8sResources(id).catch(err => {
-					console.error('Error loading K8s resources:', err);
-				});
-				// Load networking resources (services, ingress)
-				window.K8sResourcesModule.loadNetworkingResources(id).catch(err => {
-					console.error('Error loading networking resources:', err);
-				});
 			}
 
 			// Tự động load trạng thái Ansible
@@ -1481,8 +1437,9 @@
 					if (modal) {
 						const clusterIdInput = modal.querySelector('#add-node-cluster-id');
 						const clusterNameSpan = modal.querySelector('#add-node-cluster-name');
+						// Với hệ thống chỉ có 1 cluster, set mặc định là 1
 						if (clusterIdInput) {
-							clusterIdInput.value = id;
+							clusterIdInput.value = '1';
 						}
 						if (clusterNameSpan) {
 							const clusterName = document.getElementById('cd-name')?.textContent?.trim() || '';
@@ -1514,69 +1471,6 @@
 				});
 			}
 
-			// Bind refresh K8s resources button
-			const refreshK8sResourcesBtn = document.getElementById('refresh-k8s-resources');
-			if (refreshK8sResourcesBtn && !refreshK8sResourcesBtn.dataset.bound) {
-				refreshK8sResourcesBtn.dataset.bound = '1';
-				// Remove old onclick if exists
-				refreshK8sResourcesBtn.removeAttribute('onclick');
-				// Bind new event listener
-				refreshK8sResourcesBtn.addEventListener('click', async () => {
-					// Show loading state
-					const originalHtml = refreshK8sResourcesBtn.innerHTML;
-					refreshK8sResourcesBtn.disabled = true;
-					refreshK8sResourcesBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Đang làm mới...';
-					
-					try {
-						if (window.K8sResourcesModule && window.K8sResourcesModule.loadK8sResources) {
-							await window.K8sResourcesModule.loadK8sResources(id);
-						} else {
-							window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
-						}
-					} catch (error) {
-						console.error('Error refreshing K8s resources:', error);
-						if (window.showAlert) {
-							window.showAlert('error', 'Lỗi khi làm mới tài nguyên Kubernetes: ' + (error.message || 'Unknown error'));
-						}
-					} finally {
-						// Restore button state
-						refreshK8sResourcesBtn.disabled = false;
-						refreshK8sResourcesBtn.innerHTML = originalHtml;
-					}
-				});
-			}
-
-			// Bind refresh networking resources button
-			const refreshNetworkingBtn = document.getElementById('refresh-networking-resources');
-			if (refreshNetworkingBtn && !refreshNetworkingBtn.dataset.bound) {
-				refreshNetworkingBtn.dataset.bound = '1';
-				// Remove old onclick if exists
-				refreshNetworkingBtn.removeAttribute('onclick');
-				// Bind new event listener
-				refreshNetworkingBtn.addEventListener('click', async () => {
-					// Show loading state
-					const originalHtml = refreshNetworkingBtn.innerHTML;
-					refreshNetworkingBtn.disabled = true;
-					refreshNetworkingBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Đang làm mới...';
-					
-					try {
-						if (window.K8sResourcesModule && window.K8sResourcesModule.loadNetworkingResources) {
-							await window.K8sResourcesModule.loadNetworkingResources(id);
-						} else {
-							window.showAlert('warning', 'K8s Resources Module chưa sẵn sàng');
-						}
-					} catch (error) {
-						console.error('Error refreshing networking resources:', error);
-						if (window.showAlert) {
-							window.showAlert('error', 'Lỗi khi làm mới tài nguyên Networking: ' + (error.message || 'Unknown error'));
-						}
-					} finally {
-						// Restore button state
-						refreshNetworkingBtn.disabled = false;
-						refreshNetworkingBtn.innerHTML = originalHtml;
-					}
-				});
-			}
 
 		} catch (err) {
 			console.error('Error loading cluster detail:', err);
@@ -1626,7 +1520,8 @@
 	}
 
 	// Load cluster nodes với K8s status (Ready/NotReady/Unregistered)
-	async function loadClusterNodes(clusterId, detail) {
+	// Với hệ thống chỉ có 1 cluster, không cần clusterId parameter
+	async function loadClusterNodes(detail) {
 		const tbody = document.getElementById('cd-nodes-tbody');
 		if (!tbody) {
 			console.warn('cd-nodes-tbody element not found');
@@ -1666,7 +1561,7 @@
 		// Load K8s nodes status song song với việc render servers
 		let k8sNodeByIP = new Map();
 		let k8sNodeByName = new Map();
-		const k8sNodesPromise = window.ApiClient.get(`/admin/clusters/${clusterId}/k8s/nodes`).catch(() => null);
+		const k8sNodesPromise = window.ApiClient.get('/admin/cluster/k8s/nodes').catch(() => null);
 
 		// Tạo Map để lưu trữ row elements theo server ID để cập nhật sau
 		const serverRows = new Map();
@@ -1724,7 +1619,7 @@
 				<td class="${ramColorClass}" id="ram-${nodeId}">${ramDisplay}</td>
 				<td id="disk-${nodeId}">${diskDisplay}</td>
 				<td class="text-nowrap">
-					<button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${nodeId}" data-cluster="${clusterId}">
+					<button class="btn btn-sm btn-outline-danger cd-remove-node" data-id="${nodeId}">
 						<i class="bi bi-trash me-1"></i> Xóa
 					</button>
 				</td>
@@ -1821,9 +1716,8 @@
 			btn.parentNode.replaceChild(newBtn, btn);
 			newBtn.addEventListener('click', (e) => {
 				const nodeId = parseInt(e.target.closest('.cd-remove-node').dataset.id, 10);
-				const clusterId = parseInt(e.target.closest('.cd-remove-node').dataset.cluster, 10);
-				if (nodeId && clusterId) {
-					removeNodeFromCluster(nodeId, clusterId);
+				if (nodeId) {
+					removeNodeFromCluster(nodeId);
 				}
 			});
 		});
@@ -1971,12 +1865,12 @@
 		}
 
 		// Với 1 cluster duy nhất, không cần clusterId nữa, luôn set clusterStatus = "AVAILABLE"
-		await addExistingNodesToCluster(nodeIds, role, null, true);
+		await addExistingNodesToCluster(nodeIds, role, true);
 	}
 
 	// Add existing nodes to cluster with individual roles (set clusterStatus = "AVAILABLE")
-	// Với 1 cluster duy nhất, không cần clusterId nữa
-	async function addExistingNodesToClusterWithRoles(nodeIds, serverRoles, clusterId = null) {
+	// Với 1 cluster duy nhất, không cần clusterId parameter
+	async function addExistingNodesToClusterWithRoles(nodeIds, serverRoles) {
 		if (!nodeIds || nodeIds.length === 0) {
 			window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
 			return;
@@ -2019,7 +1913,7 @@
 
 	// Add existing nodes to cluster (với role chung - từ modal hoặc các trường hợp khác)
 	// Với 1 cluster duy nhất, luôn set clusterStatus = "AVAILABLE"
-	async function addExistingNodesToCluster(nodeIds, role, clusterIdParam = null, isFromModal = false) {
+	async function addExistingNodesToCluster(nodeIds, role, isFromModal = false) {
 		if (!nodeIds || nodeIds.length === 0) {
 			window.showAlert('warning', 'Vui lòng chọn ít nhất một server');
 			return;
@@ -2095,7 +1989,8 @@
 	}
 
 	// Remove node from cluster (set clusterStatus = "UNAVAILABLE")
-	async function removeNodeFromCluster(nodeId, clusterId = null) {
+	// Với hệ thống chỉ có 1 cluster, không cần clusterId parameter
+	async function removeNodeFromCluster(nodeId) {
 		if (!confirm('Xóa node này khỏi cluster (set clusterStatus = "UNAVAILABLE")?')) return;
 
 		try {
@@ -2359,9 +2254,9 @@
 					window.bindPlaybookManagerButtons();
 				}
 				
-				// Load playbooks
+				// Load playbooks (với hệ thống chỉ có 1 cluster, không cần clusterId)
 				if (window.loadPlaybooks && typeof window.loadPlaybooks === 'function') {
-					window.loadPlaybooks(currentClusterId);
+					window.loadPlaybooks();
 				} else if (window.refreshPlaybooks && typeof window.refreshPlaybooks === 'function') {
 					window.refreshPlaybooks();
 				}
@@ -2372,26 +2267,22 @@
 	function init() {
 		// Check if we're on the kubernetes.html page and need to auto-load cluster detail
 		const urlParams = new URLSearchParams(window.location.search);
-		const clusterIdParam = urlParams.get('clusterId');
-		if (clusterIdParam && document.getElementById('k8s-detail')) {
-			// We're on the kubernetes.html page with a clusterId parameter
-			const clusterId = parseInt(clusterIdParam, 10);
-			if (!isNaN(clusterId) && clusterId > 0) {
-				// Auto-load cluster detail
-				setTimeout(() => {
-					if (window.ApiClient && typeof window.ApiClient.get === 'function') {
-						showClusterDetail(clusterId);
-					} else {
-						// Wait for ApiClient
-						const checkApiClient = setInterval(() => {
-							if (window.ApiClient && typeof window.ApiClient.get === 'function') {
-								clearInterval(checkApiClient);
-								showClusterDetail(clusterId);
-							}
-						}, 100);
-					}
-				}, 100);
-			}
+		// Với hệ thống chỉ có 1 cluster, luôn tự động load cluster detail nếu có k8s-detail element
+		if (document.getElementById('k8s-detail')) {
+			// Auto-load cluster detail (không cần clusterId parameter)
+			setTimeout(() => {
+				if (window.ApiClient && typeof window.ApiClient.get === 'function') {
+					showClusterDetail();
+				} else {
+					// Wait for ApiClient
+					const checkApiClient = setInterval(() => {
+						if (window.ApiClient && typeof window.ApiClient.get === 'function') {
+							clearInterval(checkApiClient);
+							showClusterDetail();
+						}
+					}, 100);
+				}
+			}, 100);
 			return; // Don't load cluster list on kubernetes.html page
 		}
 
@@ -2527,16 +2418,9 @@
 					addNodeForm.addEventListener('submit', async (e) => {
 						e.preventDefault();
 						const form = e.target;
-						const clusterIdInput = document.getElementById('add-node-cluster-id');
 						const submitBtn = document.getElementById('add-node-submit-btn');
 						const msgEl = document.getElementById('add-node-msg');
 
-						if (!clusterIdInput || !clusterIdInput.value) {
-							window.showAlert('error', 'Không tìm thấy cluster ID');
-							return;
-						}
-
-						const clusterId = parseInt(clusterIdInput.value, 10);
 						const host = form.host.value.trim();
 						const port = parseInt(form.port.value || '22', 10);
 						const username = form.username.value.trim();
@@ -2552,8 +2436,8 @@
 							submitBtn.disabled = true;
 							submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang thêm...';
 
-							// Tạo server mới và gán vào cluster với role
-							const body = { host, port, username, password, clusterId, role };
+							// Tạo server mới và gán vào cluster với role (với hệ thống chỉ có 1 cluster, không cần clusterId)
+							const body = { host, port, username, password, role, clusterStatus: 'AVAILABLE' };
 							await window.ApiClient.post('/admin/servers', body);
 
 							if (msgEl) {
@@ -2581,7 +2465,7 @@
 										}
 									}
 								}
-								await showClusterDetail(clusterId);
+								await showClusterDetail();
 								await Promise.all([loadClusterList(), loadClustersAndServers()]);
 							}, 1000);
 
@@ -2629,6 +2513,6 @@
 	window.saveServerClusterAndRole = (serverId) => window.K8sClustersModule.saveServerClusterAndRole(serverId);
 	window.removeSingleServerFromCluster = (serverId) => window.K8sClustersModule.removeSingleServerFromCluster(serverId);
 	window.addExistingNodesToCluster = (nodeIds, role) => window.K8sClustersModule.addExistingNodesToCluster(nodeIds, role);
-	window.removeNodeFromCluster = (nodeId, clusterId) => window.K8sClustersModule.removeNodeFromCluster(nodeId, clusterId);
+	window.removeNodeFromCluster = (nodeId) => window.K8sClustersModule.removeNodeFromCluster(nodeId);
 })();
 

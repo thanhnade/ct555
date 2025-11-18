@@ -655,7 +655,9 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
                 String publicKeyToDistribute = masterPub.trim();
 
-                // 5) Phân phối xuống các WORKER nếu có publicKeyToDistribute
+                // 5) Phân phối SSH key từ controller đến các máy trong cụm
+                // - Nếu controller là ANSIBLE: phân phối đến tất cả MASTER và WORKER (clusterStatus=AVAILABLE)
+                // - Nếu controller là MASTER: chỉ phân phối đến WORKER (như cũ)
                 if (publicKeyToDistribute != null && !publicKeyToDistribute.isBlank()) {
                     // Tách phần key-core (trường thứ 2) để so khớp ổn định, tránh phụ thuộc comment
                     String keyCore = null;
@@ -665,28 +667,47 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                             keyCore = parts[1];
                     } catch (Exception ignored) {
                     }
-                    // Chuẩn bị danh sách kết nối WORKER và nạp sẵn privateKey PEM để tránh lazy-load
-                    java.util.List<Object[]> workerConns = new java.util.ArrayList<>();
+                    
+                    // Xác định danh sách máy cần phân phối key dựa trên role của controller
+                    java.util.List<Object[]> clusterNodes = new java.util.ArrayList<>();
+                    boolean isAnsibleController = "ANSIBLE".equals(target.getRole());
+                    
                     for (var s : servers) {
-                        if ("WORKER".equals(s.getRole())
-                                && !s.getId().equals(target.getId())) {
+                        boolean shouldInclude = false;
+                        
+                        if (isAnsibleController) {
+                            // Controller là ANSIBLE: phân phối đến tất cả MASTER và WORKER (trừ controller)
+                            shouldInclude = ("MASTER".equals(s.getRole()) || "WORKER".equals(s.getRole()))
+                                    && !s.getId().equals(target.getId());
+                        } else {
+                            // Controller là MASTER: chỉ phân phối đến WORKER (như cũ)
+                            shouldInclude = "WORKER".equals(s.getRole())
+                                    && !s.getId().equals(target.getId());
+                        }
+                        
+                        if (shouldInclude) {
                             String pem = serverService.resolveServerPrivateKeyPem(s.getId());
                             String hostW = s.getHost();
                             Integer portW = (s.getPort() != null ? s.getPort() : 22);
                             String userW = s.getUsername();
-                            workerConns.add(new Object[] { hostW, portW, userW, pem });
+                            clusterNodes.add(new Object[] { hostW, portW, userW, pem, s.getRole() });
                         }
                     }
 
+                    String distributionScope = isAnsibleController 
+                            ? "tất cả MASTER và WORKER (clusterStatus=AVAILABLE)" 
+                            : "WORKER";
                     sendMessage(session, String.format(
-                            "{\"type\":\"info\",\"message\":\"Số WORKER trong cụm: %d\"}", workerConns.size()));
+                            "{\"type\":\"info\",\"message\":\"Controller là %s. Số máy cần phân phối key (%s, trừ controller): %d\"}", 
+                            target.getRole(), distributionScope, clusterNodes.size()));
 
                     int okCount = 0, failCount = 0, skipped = 0;
-                    for (Object[] wc : workerConns) {
-                        String hostW = (String) wc[0];
-                        int portW = (Integer) wc[1];
-                        String userW = (String) wc[2];
-                        String pemW = (String) wc[3];
+                    for (Object[] node : clusterNodes) {
+                        String hostW = (String) node[0];
+                        int portW = (Integer) node[1];
+                        String userW = (String) node[2];
+                        String pemW = (String) node[3];
+                        String nodeRole = (String) node[4];
 
                         String matchToken = (keyCore != null ? escapeShellForSingleQuotes(keyCore)
                                 : escapeShellForSingleQuotes(publicKeyToDistribute));
@@ -720,8 +741,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                                 } else {
                                     skipped++;
                                     sendMessage(session, String.format(
-                                            "{\"type\":\"warning\",\"message\":\"Bỏ qua %s: WORKER không có SSH key trong CSDL và không có mật khẩu để kết nối lần đầu\"}",
-                                            hostW));
+                                            "{\"type\":\"warning\",\"message\":\"Bỏ qua %s (%s): không có SSH key trong CSDL và không có mật khẩu để kết nối lần đầu\"}",
+                                            hostW, nodeRole));
                                     continue;
                                 }
                             }
@@ -1144,6 +1165,24 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             }
         }
         if (preferMaster) {
+            // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
+            try {
+                var allServers = serverService.findAll();
+                for (var s : allServers) {
+                    if ("ANSIBLE".equals(s.getRole()))
+                        return s;
+                }
+            } catch (Exception e) {
+                // Nếu không lấy được tất cả servers, tiếp tục với fallback
+            }
+            
+            // Bước 2: Nếu không có ANSIBLE, tìm trong danh sách hiện tại (AVAILABLE)
+            for (var s : servers) {
+                if ("ANSIBLE".equals(s.getRole()))
+                    return s;
+            }
+            
+            // Bước 3: Fallback về MASTER trong danh sách hiện tại (AVAILABLE)
             for (var s : servers) {
                 if ("MASTER".equals(s.getRole()))
                     return s;

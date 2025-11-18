@@ -144,18 +144,31 @@ public class AnsibleInstallationService {
     }
 
     /**
-     * Kiểm tra Ansible đã cài đặt trên 1 máy MASTER duy nhất trong cluster
+     * Kiểm tra Ansible đã cài đặt trên controller server (ưu tiên ANSIBLE, fallback MASTER)
      */
     public Map<String, Object> checkAnsibleInstallation(Long clusterId, Map<Long, String> passwordCache) {
-        List<Server> allClusterServers = serverService.findByClusterStatus("AVAILABLE");
+        // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
+        Server controllerServer = null;
+        try {
+            var allServers = serverService.findAll();
+            controllerServer = allServers.stream()
+                    .filter(s -> "ANSIBLE".equals(s.getRole()))
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception e) {
+            // Nếu không lấy được tất cả servers, tiếp tục với fallback
+        }
 
-        // Chỉ lấy 1 MASTER server đầu tiên
-        Server masterServer = allClusterServers.stream()
-                .filter(server -> "MASTER".equals(server.getRole()))
-                .findFirst()
-                .orElse(null);
+        // Bước 2: Nếu không có ANSIBLE, tìm MASTER trong AVAILABLE servers
+        if (controllerServer == null) {
+            List<Server> allClusterServers = serverService.findByClusterStatus("AVAILABLE");
+            controllerServer = allClusterServers.stream()
+                    .filter(server -> "MASTER".equals(server.getRole()))
+                    .findFirst()
+                    .orElse(null);
+        }
 
-        if (masterServer == null) {
+        if (controllerServer == null) {
             Map<String, Object> result = new java.util.HashMap<>();
             result.put("clusterId", clusterId);
             result.put("allInstalled", false);
@@ -166,12 +179,12 @@ public class AnsibleInstallationService {
             result.put("installationPercentage", 0);
             result.put("ansibleStatus", new java.util.HashMap<>());
             result.put("roleSummary", new java.util.HashMap<>());
-            result.put("recommendation", "❌ Không tìm thấy MASTER server trong cluster");
+            result.put("recommendation", "❌ Không tìm thấy ANSIBLE hoặc MASTER server");
             return result;
         }
 
-        // Kiểm tra MASTER server có online không
-        if (masterServer.getStatus() != Server.ServerStatus.ONLINE) {
+        // Kiểm tra controller server có online không
+        if (controllerServer.getStatus() != Server.ServerStatus.ONLINE) {
             Map<String, Object> result = new java.util.HashMap<>();
             result.put("clusterId", clusterId);
             result.put("allInstalled", false);
@@ -182,26 +195,26 @@ public class AnsibleInstallationService {
             result.put("installationPercentage", 0);
             result.put("ansibleStatus", new java.util.HashMap<>());
             result.put("roleSummary", new java.util.HashMap<>());
-            result.put("recommendation", "❌ MASTER server (" + masterServer.getHost()
+            result.put("recommendation", "❌ Controller server (" + controllerServer.getHost()
                     + ") đang offline. Vui lòng kiểm tra kết nối máy chủ.");
             result.put("masterOffline", true);
-            result.put("masterHost", masterServer.getHost());
+            result.put("masterHost", controllerServer.getHost());
             return result;
         }
 
         Map<String, Object> detailedResults = new java.util.HashMap<>();
-        String serverInfo = String.format("%s (%s)", masterServer.getHost(), masterServer.getRole() != null && !masterServer.getRole().isBlank() ? masterServer.getRole() : "WORKER");
+        String serverInfo = String.format("%s (%s)", controllerServer.getHost(), controllerServer.getRole() != null && !controllerServer.getRole().isBlank() ? controllerServer.getRole() : "WORKER");
 
         try {
             String checkCmd = "ansible --version";
             String result = "";
 
             // Thử SSH key trước
-            if (masterServer.getSshKey() != null && masterServer.getSshKey().getEncryptedPrivateKey() != null) {
+            if (controllerServer.getSshKey() != null && controllerServer.getSshKey().getEncryptedPrivateKey() != null) {
                 try {
                     result = serverService.execCommandWithKey(
-                            masterServer.getHost(), masterServer.getPort(), masterServer.getUsername(),
-                            masterServer.getSshKey().getEncryptedPrivateKey(), checkCmd, 10000);
+                            controllerServer.getHost(), controllerServer.getPort(), controllerServer.getUsername(),
+                            controllerServer.getSshKey().getEncryptedPrivateKey(), checkCmd, 10000);
                 } catch (Exception e) {
                     result = null;
                 }
@@ -209,11 +222,11 @@ public class AnsibleInstallationService {
 
             // Fallback về password nếu SSH key thất bại hoặc không có
             if (result == null || result.trim().isEmpty()) {
-                String password = passwordCache.get(masterServer.getId());
+                String password = passwordCache.get(controllerServer.getId());
                 if (password != null && !password.trim().isEmpty()) {
                     try {
                         result = serverService.execCommand(
-                                masterServer.getHost(), masterServer.getPort(), masterServer.getUsername(),
+                                controllerServer.getHost(), controllerServer.getPort(), controllerServer.getUsername(),
                                 password, checkCmd, 10000);
                     } catch (Exception e) {
                         result = null;
@@ -227,7 +240,7 @@ public class AnsibleInstallationService {
 
             Map<String, Object> serverStatus = new java.util.HashMap<>();
             serverStatus.put("installed", isInstalled);
-            serverStatus.put("role", masterServer.getRole() != null && !masterServer.getRole().isBlank() ? masterServer.getRole() : "WORKER");
+            serverStatus.put("role", controllerServer.getRole() != null && !controllerServer.getRole().isBlank() ? controllerServer.getRole() : "WORKER");
             serverStatus.put("serverInfo", serverInfo);
 
             if (isInstalled) {
@@ -237,16 +250,17 @@ public class AnsibleInstallationService {
                 serverStatus.put("error", "Ansible not found or not accessible");
             }
 
-            detailedResults.put(masterServer.getHost(), serverStatus);
+            detailedResults.put(controllerServer.getHost(), serverStatus);
 
-            // Tạo role summary cho MASTER
+            // Tạo role summary cho controller (ANSIBLE hoặc MASTER)
             Map<String, Object> roleSummary = new java.util.HashMap<>();
-            Map<String, Object> masterInfo = new java.util.HashMap<>();
-            masterInfo.put("total", 1);
-            masterInfo.put("installed", isInstalled ? 1 : 0);
-            masterInfo.put("notInstalled", isInstalled ? 0 : 1);
-            masterInfo.put("percentage", isInstalled ? 100 : 0);
-            roleSummary.put("MASTER", masterInfo);
+            String controllerRole = controllerServer.getRole() != null && !controllerServer.getRole().isBlank() ? controllerServer.getRole() : "MASTER";
+            Map<String, Object> controllerInfo = new java.util.HashMap<>();
+            controllerInfo.put("total", 1);
+            controllerInfo.put("installed", isInstalled ? 1 : 0);
+            controllerInfo.put("notInstalled", isInstalled ? 0 : 1);
+            controllerInfo.put("percentage", isInstalled ? 100 : 0);
+            roleSummary.put(controllerRole, controllerInfo);
 
             Map<String, Object> finalResult = new java.util.HashMap<>();
             finalResult.put("clusterId", clusterId);
@@ -272,9 +286,9 @@ public class AnsibleInstallationService {
             Map<String, Object> serverStatus = new java.util.HashMap<>();
             serverStatus.put("installed", false);
             serverStatus.put("error", errorMessage);
-            serverStatus.put("role", masterServer.getRole() != null && !masterServer.getRole().isBlank() ? masterServer.getRole() : "WORKER");
+            serverStatus.put("role", controllerServer.getRole() != null && !controllerServer.getRole().isBlank() ? controllerServer.getRole() : "WORKER");
             serverStatus.put("serverInfo", serverInfo);
-            detailedResults.put(masterServer.getHost(), serverStatus);
+            detailedResults.put(controllerServer.getHost(), serverStatus);
 
             Map<String, Object> result = new java.util.HashMap<>();
             result.put("clusterId", clusterId);
@@ -286,7 +300,7 @@ public class AnsibleInstallationService {
             result.put("installationPercentage", 0);
             result.put("ansibleStatus", detailedResults);
             result.put("roleSummary", new java.util.HashMap<>());
-            result.put("recommendation", "❌ Lỗi kiểm tra Ansible trên MASTER: " + errorMessage);
+            result.put("recommendation", "❌ Lỗi kiểm tra Ansible trên Controller: " + errorMessage);
             return result;
         }
     }
@@ -336,7 +350,7 @@ public class AnsibleInstallationService {
     }
 
     /**
-     * Cài đặt Ansible trên 1 MASTER server duy nhất trong cluster
+     * Cài đặt Ansible trên controller server (ưu tiên ANSIBLE, fallback MASTER)
      */
     @Transactional
     public CompletableFuture<Map<String, Object>> installAnsibleOnCluster(Long clusterId,
@@ -344,39 +358,51 @@ public class AnsibleInstallationService {
             Map<Long, String> sudoPasswordCache) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // 1. Lấy danh sách servers trong cluster
-                List<Server> allClusterServers = serverService.findByClusterStatus("AVAILABLE");
-
-                if (allClusterServers.isEmpty()) {
-                    throw new RuntimeException("Cluster không có servers nào");
+                // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
+                Server controllerServer = null;
+                try {
+                    var allServers = serverService.findAll();
+                    controllerServer = allServers.stream()
+                            .filter(s -> "ANSIBLE".equals(s.getRole()))
+                            .findFirst()
+                            .orElse(null);
+                } catch (Exception e) {
+                    // Nếu không lấy được tất cả servers, tiếp tục với fallback
                 }
 
-                // 2. Chỉ lấy 1 MASTER server đầu tiên
-                Server masterServer = allClusterServers.stream()
-                        .filter(server -> "MASTER".equals(server.getRole()))
-                        .findFirst()
-                        .orElse(null);
-
-                if (masterServer == null) {
-                    throw new RuntimeException("Không tìm thấy MASTER server trong cluster");
+                // Bước 2: Nếu không có ANSIBLE, tìm MASTER trong AVAILABLE servers
+                if (controllerServer == null) {
+                    List<Server> allClusterServers = serverService.findByClusterStatus("AVAILABLE");
+                    if (allClusterServers.isEmpty()) {
+                        throw new RuntimeException("Cluster không có servers nào");
+                    }
+                    
+                    controllerServer = allClusterServers.stream()
+                            .filter(server -> "MASTER".equals(server.getRole()))
+                            .findFirst()
+                            .orElse(null);
                 }
 
-                // 3. Cài đặt Ansible trên MASTER server
+                if (controllerServer == null) {
+                    throw new RuntimeException("Không tìm thấy ANSIBLE hoặc MASTER server");
+                }
+
+                // 3. Cài đặt Ansible trên controller server
                 Map<String, Object> results = new java.util.HashMap<>();
 
                 try {
-                    String result = installAnsibleOnNodeWithSudo(masterServer,
-                            passwordCache.get(masterServer.getId()),
-                            sudoPasswordCache.get(masterServer.getId()));
+                    String result = installAnsibleOnNodeWithSudo(controllerServer,
+                            passwordCache.get(controllerServer.getId()),
+                            sudoPasswordCache.get(controllerServer.getId()));
                     Map<String, Object> serverResult = new java.util.HashMap<>();
                     serverResult.put("status", "SUCCESS");
                     serverResult.put("message", result);
-                    results.put(masterServer.getHost(), serverResult);
+                    results.put(controllerServer.getHost(), serverResult);
                 } catch (Exception e) {
                     Map<String, Object> serverResult = new java.util.HashMap<>();
                     serverResult.put("status", "FAILED");
                     serverResult.put("error", e.getMessage());
-                    results.put(masterServer.getHost(), serverResult);
+                    results.put(controllerServer.getHost(), serverResult);
                 }
 
                 Map<String, Object> finalResult = new java.util.HashMap<>();

@@ -5,6 +5,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.servlet.view.RedirectView;
 
 @Controller
 @RequestMapping("/admin")
@@ -61,10 +62,9 @@ public class AdminPageController {
 	}
 
 	@GetMapping({"/k8s", "/kubernetes"})
-	public String kubernetesPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Kubernetes Cluster Detail");
-		model.addAttribute("username", getUsernameFromSession(request));
-		return "admin/pages/kubernetes";
+	public RedirectView kubernetesPage() {
+		// Redirect to overview page
+		return new RedirectView("/admin/kubernetes/overview");
 	}
 
 	@GetMapping({"/k8s/overview", "/kubernetes/overview"})

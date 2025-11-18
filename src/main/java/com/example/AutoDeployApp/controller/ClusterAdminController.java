@@ -82,6 +82,26 @@ public class ClusterAdminController {
     }
 
     /**
+     * Khởi tạo cấu trúc /etc/ansible trên MASTER của cluster duy nhất (không cần ID)
+     * Body: { "host": optional, "sudoPassword": optional (nếu có sudo NOPASSWD) }
+     */
+    @PostMapping("/ansible/init/structure")
+    public ResponseEntity<?> initAnsibleStructure(@RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return initAnsibleStructure(id, body, request);
+    }
+
+    /**
      * Khởi tạo cấu trúc /etc/ansible trên MASTER của cluster
      * Body: { "host": optional, "sudoPassword": optional (nếu có sudo NOPASSWD) }
      */
@@ -194,7 +214,7 @@ public class ClusterAdminController {
      */
     private java.util.List<java.util.Map<String, Object>> getNodesWithFallback(Long id) {
         try {
-            return kubernetesService.getKubernetesNodes(id);
+            return kubernetesService.getKubernetesNodes();
         } catch (Exception e) {
             // Nếu không kết nối được K8s API, lấy từ database
             var servers = serverService.findByClusterStatus("AVAILABLE");
@@ -460,13 +480,13 @@ public class ClusterAdminController {
             int runningPodsCount = 0;
             int totalPodsCount = 0;
             try {
-                var deployments = kubernetesService.getDeployments(id, null);
-                var statefulSets = kubernetesService.getStatefulSets(id, null);
-                var daemonSets = kubernetesService.getDaemonSets(id, null);
+                var deployments = kubernetesService.getDeployments(null);
+                var statefulSets = kubernetesService.getStatefulSets(null);
+                var daemonSets = kubernetesService.getDaemonSets(null);
                 workloadsCount = deployments.getItems().size() + statefulSets.getItems().size() + daemonSets.getItems().size();
                 
                 // Lấy pods để tính running pods
-                var pods = kubernetesService.getPods(id, null);
+                var pods = kubernetesService.getPods(null);
                 totalPodsCount = pods.getItems().size();
                 runningPodsCount = (int) pods.getItems().stream()
                         .filter(pod -> pod.getStatus() != null && 
@@ -480,7 +500,7 @@ public class ClusterAdminController {
             // Lấy namespaces count
             int namespacesCount = 0;
             try {
-                var namespaces = kubernetesService.getNamespaces(id);
+                var namespaces = kubernetesService.getNamespaces();
                 namespacesCount = namespaces.getItems().size();
             } catch (Exception e) {
                 logger.debug("Không lấy được namespaces từ K8s API: " + e.getMessage());
@@ -566,7 +586,7 @@ public class ClusterAdminController {
                 
                 // Lấy Deployments
                 try {
-                    var deployments = kubernetesService.getDeployments(id, null);
+                    var deployments = kubernetesService.getDeployments(null);
                     deployments.getItems().stream()
                             .forEach(dep -> {
                                 var w = new java.util.HashMap<String, Object>();
@@ -588,7 +608,7 @@ public class ClusterAdminController {
                 
                 // Lấy StatefulSets
                 try {
-                    var statefulSets = kubernetesService.getStatefulSets(id, null);
+                    var statefulSets = kubernetesService.getStatefulSets(null);
                     statefulSets.getItems().stream()
                             .forEach(sts -> {
                                 var w = new java.util.HashMap<String, Object>();
@@ -610,7 +630,7 @@ public class ClusterAdminController {
                 
                 // Lấy DaemonSets
                 try {
-                    var daemonSets = kubernetesService.getDaemonSets(id, null);
+                    var daemonSets = kubernetesService.getDaemonSets(null);
                     daemonSets.getItems().stream()
                             .forEach(ds -> {
                                 var w = new java.util.HashMap<String, Object>();
@@ -736,7 +756,7 @@ public class ClusterAdminController {
     public ResponseEntity<?> getKubernetesNodesById(@PathVariable Long id, HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            java.util.List<java.util.Map<String, Object>> nodes = kubernetesService.getKubernetesNodes(id);
+            java.util.List<java.util.Map<String, Object>> nodes = kubernetesService.getKubernetesNodes();
             
             // Thêm usage metrics từ SSH cho mỗi node
             try {
@@ -820,7 +840,7 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var node = kubernetesService.getNode(id, name);
+            var node = kubernetesService.getNode(name);
             if (node == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Node not found: " + name));
@@ -831,7 +851,7 @@ public class ClusterAdminController {
                 return ResponseEntity.ok(Map.of("output", yamlOutput, "format", "yaml"));
             }
             // Parse node thành Map format (giống như getKubernetesNodes)
-            java.util.Map<String, Object> nodeMap = kubernetesService.getKubernetesNodes(id).stream()
+            java.util.Map<String, Object> nodeMap = kubernetesService.getKubernetesNodes().stream()
                     .filter(n -> name.equals(n.get("name")))
                     .findFirst()
                     .orElse(null);
@@ -902,7 +922,7 @@ public class ClusterAdminController {
 	public ResponseEntity<?> listNamespaces(HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var namespaceList = kubernetesService.getNamespaces(null);
+            var namespaceList = kubernetesService.getNamespaces();
             var namespaceItems = namespaceList != null && namespaceList.getItems() != null
                     ? namespaceList.getItems()
                     : java.util.Collections.<io.fabric8.kubernetes.api.model.Namespace>emptyList();
@@ -924,15 +944,16 @@ public class ClusterAdminController {
                         // Get pods count for this namespace
                         int podsCount = 0;
                         try {
-                            var pods = kubernetesService.getPods(null, namespaceName);
+                            var pods = kubernetesService.getPods(namespaceName);
                             podsCount = pods.getItems() != null ? pods.getItems().size() : 0;
                         } catch (Exception e) {
                             logger.debug("Không lấy được pods cho namespace " + namespaceName + ": " + e.getMessage());
                         }
                         map.put("pods", podsCount);
-                        
+                        double cpuUsage = 0.0;
+                        double ramUsage = 0.0;
                         try {
-                            var pods = kubernetesService.getPods(null, namespaceName);
+                            var pods = kubernetesService.getPods(namespaceName);
                             if (pods.getItems() != null) {
                                 for (var pod : pods.getItems()) {
                                     if (pod.getSpec() != null && pod.getSpec().getContainers() != null) {
@@ -940,11 +961,11 @@ public class ClusterAdminController {
                                             if (container.getResources() != null && container.getResources().getRequests() != null) {
                                                 var cpuRequest = container.getResources().getRequests().get("cpu");
                                                 if (cpuRequest != null && cpuRequest.getAmount() != null) {
-                                                    map.merge("cpu", cpuRequest.getAmount(), (oldVal, newVal) -> oldVal + "," + newVal);
+                                                    cpuUsage += Double.parseDouble(cpuRequest.getAmount());
                                                 }
                                                 var memoryRequest = container.getResources().getRequests().get("memory");
                                                 if (memoryRequest != null && memoryRequest.getAmount() != null) {
-                                                    map.merge("ram", memoryRequest.getAmount(), (oldVal, newVal) -> oldVal + "," + newVal);
+                                                    ramUsage += Double.parseDouble(memoryRequest.getAmount());
                                                 }
                                             }
                                         }
@@ -954,7 +975,8 @@ public class ClusterAdminController {
                         } catch (Exception e) {
                             logger.debug("Không tính được CPU/RAM cho namespace " + namespaceName + ": " + e.getMessage());
                         }
-                        
+                        map.put("cpu", cpuUsage);
+                        map.put("ram", ramUsage);
                         return map;
                     })
                     .collect(java.util.stream.Collectors.toList());
@@ -970,78 +992,30 @@ public class ClusterAdminController {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
+
     
     /**
-     * Helper: parse CPU quantity string to cores (supports n, u, m, plain)
+     * Parse giá trị CPU từ string sang double, chỉ đọc giá trị số bất kể có đơn vị hay không.
+     * Nếu không chuyển được về số thì trả về 0.0.
+     * Ví dụ:
+     *  parseCpuValue("100")      -> 100.0
+     *  parseCpuValue("1000")     -> 1000.0
+     *  parseCpuValue("2000")     -> 2000.0
+     *  parseCpuValue("100m")     -> exception -> 0.0
+     *  parseCpuValue("2 core")   -> exception -> 0.0
+     *  parseCpuValue("2 cores")  -> exception -> 0.0
+     *  parseCpuValue("1.5")      -> 1.5
      */
-    private double parseCpuCores(String quantityStr) {
-        if (quantityStr == null || quantityStr.isEmpty()) {
-            return 0.0;
-        }
+    public static double parseCpuValue(String cpuStr) {
+        if (cpuStr == null || cpuStr.isBlank()) return 0.0;
         try {
-            quantityStr = quantityStr.trim();
-            if (quantityStr.endsWith("n")) {
-                String value = quantityStr.substring(0, quantityStr.length() - 1);
-                return Double.parseDouble(value) / 1_000_000_000d;
-            }
-            if (quantityStr.endsWith("u") || quantityStr.endsWith("µ")) {
-                String value = quantityStr.substring(0, quantityStr.length() - 1);
-                return Double.parseDouble(value) / 1_000_000d;
-            }
-            if (quantityStr.endsWith("m")) {
-                String value = quantityStr.substring(0, quantityStr.length() - 1);
-                return Double.parseDouble(value) / 1000.0;
-            }
-            // Plain number means cores
-            return Double.parseDouble(quantityStr);
+            return Double.parseDouble(cpuStr.trim());
         } catch (Exception e) {
-            logger.debug("Error parsing CPU quantity: " + quantityStr + " - " + e.getMessage());
             return 0.0;
         }
     }
 
-    /**
-     * Helper: parse memory quantity string to bytes (supports Ki, Mi, Gi, etc.)
-     */
-    private double parseMemoryBytes(String quantityStr) {
-        if (quantityStr == null || quantityStr.isEmpty()) {
-            return 0.0;
-        }
-        try {
-            String normalized = quantityStr.trim();
-            String upper = normalized.toUpperCase();
 
-            if (upper.endsWith("KI")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d;
-            }
-            if (upper.endsWith("K")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d;
-            }
-            if (upper.endsWith("MI")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d * 1024d;
-            }
-            if (upper.endsWith("M")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d * 1000d;
-            }
-            if (upper.endsWith("GI")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d * 1024d * 1024d;
-            }
-            if (upper.endsWith("G")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d * 1000d * 1000d;
-            }
-            if (upper.endsWith("TI")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 2)) * 1024d * 1024d * 1024d * 1024d;
-            }
-            if (upper.endsWith("T")) {
-                return Double.parseDouble(upper.substring(0, upper.length() - 1)) * 1000d * 1000d * 1000d * 1000d;
-            }
-            // Plain number -> bytes
-            return Double.parseDouble(upper);
-        } catch (Exception e) {
-            logger.debug("Error parsing memory quantity: " + quantityStr + " - " + e.getMessage());
-            return 0.0;
-        }
-    }
 
     @GetMapping("/k8s/namespaces/{name}")
     public ResponseEntity<?> describeNamespace(HttpServletRequest request,
@@ -1061,7 +1035,7 @@ public class ClusterAdminController {
 
     private ResponseEntity<?> describeNamespaceInternal(String name) {
         try {
-            var namespace = kubernetesService.getNamespace(null, name);
+            var namespace = kubernetesService.getNamespace(name);
             if (namespace == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Namespace not found: " + name));
@@ -1111,7 +1085,7 @@ public class ClusterAdminController {
             }
 
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            kubernetesService.deleteNamespace(name, null);
+            kubernetesService.deleteNamespace(name);
             String output = String.format("namespace \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (IllegalArgumentException e) {
@@ -1141,7 +1115,7 @@ public class ClusterAdminController {
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var podList = kubernetesService.getPods(id, namespace);
+            var podList = kubernetesService.getPods(namespace);
             java.util.List<java.util.Map<String, Object>> result = podList.getItems().stream()
                     .map(pod -> parsePodToMap(pod))
                     .filter(pod -> {
@@ -1197,9 +1171,9 @@ public class ClusterAdminController {
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var deployments = kubernetesService.getDeployments(id, namespace);
-            var statefulSets = kubernetesService.getStatefulSets(id, namespace);
-            var daemonSets = kubernetesService.getDaemonSets(id, namespace);
+            var deployments = kubernetesService.getDeployments(namespace);
+            var statefulSets = kubernetesService.getStatefulSets(namespace);
+            var daemonSets = kubernetesService.getDaemonSets(namespace);
 
             // Parse Deployments
             java.util.List<java.util.Map<String, Object>> deploymentList = deployments.getItems().stream()
@@ -1275,7 +1249,7 @@ public class ClusterAdminController {
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var serviceList = kubernetesService.getServices(id, namespace);
+            var serviceList = kubernetesService.getServices(namespace);
             java.util.List<java.util.Map<String, Object>> result = serviceList.getItems().stream()
                     .map(svc -> parseServiceToMap(svc))
                     .collect(java.util.stream.Collectors.toList());
@@ -1322,7 +1296,7 @@ public class ClusterAdminController {
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var ingressList = kubernetesService.getIngress(id, namespace);
+            var ingressList = kubernetesService.getIngress(namespace);
             java.util.List<java.util.Map<String, Object>> result = ingressList.getItems().stream()
                     .map(ing -> parseIngressToMap(ing))
                     .collect(java.util.stream.Collectors.toList());
@@ -1348,7 +1322,7 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var pod = kubernetesService.getPod(id, namespace, name);
+            var pod = kubernetesService.getPod(namespace, name);
             if (pod == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Pod not found: " + name + " in namespace " + namespace));
@@ -1376,6 +1350,27 @@ public class ClusterAdminController {
     }
 
     /**
+     * Describe pod cho cluster duy nhất (không cần ID)
+     */
+    @GetMapping("/k8s/pods/{namespace}/{name}")
+    public ResponseEntity<?> describePod(
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return describePod(id, namespace, name, request);
+    }
+
+    /**
      * Describe Service
      */
     @GetMapping("/{id}/k8s/services/{namespace}/{name}")
@@ -1384,7 +1379,7 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var service = kubernetesService.getService(id, namespace, name);
+            var service = kubernetesService.getService(namespace, name);
             if (service == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
@@ -1421,7 +1416,7 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa Service trong namespace hệ thống"));
             }
 
-            kubernetesService.deleteService(id, namespace, name);
+            kubernetesService.deleteService(namespace, name);
             String output = String.format("service \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
@@ -1447,7 +1442,7 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var ingress = kubernetesService.getIngress(id, namespace, name);
+            var ingress = kubernetesService.getIngress(namespace, name);
             if (ingress == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
@@ -1484,7 +1479,7 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa Ingress trong namespace hệ thống"));
             }
 
-            kubernetesService.deleteIngress(id, namespace, name);
+            kubernetesService.deleteIngress(namespace, name);
             String output = String.format("ingress.networking.k8s.io \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
@@ -1501,6 +1496,27 @@ public class ClusterAdminController {
         }
     }
 
+    /**
+     * Delete pod cho cluster duy nhất (không cần ID)
+     */
+    @DeleteMapping("/k8s/pods/{namespace}/{name}")
+    public ResponseEntity<?> deletePod(
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return deletePod(id, namespace, name, request);
+    }
+
     @DeleteMapping("/{id}/k8s/pods/{namespace}/{name}")
     public ResponseEntity<?> deletePod(@PathVariable Long id,
             @PathVariable String namespace,
@@ -1514,7 +1530,7 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa pod trong namespace hệ thống"));
             }
 
-            kubernetesService.deletePod(id, namespace, name);
+            kubernetesService.deletePod(namespace, name);
             String output = String.format("pod \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
@@ -1529,6 +1545,28 @@ public class ClusterAdminController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
+    }
+
+    /**
+     * Describe workload cho cluster duy nhất (không cần ID)
+     */
+    @GetMapping("/k8s/{type}/{namespace}/{name}")
+    public ResponseEntity<?> describeWorkload(
+            @PathVariable String type,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return describeWorkload(id, type, namespace, name, request);
     }
 
     @GetMapping("/{id}/k8s/{type}/{namespace}/{name}")
@@ -1546,13 +1584,13 @@ public class ClusterAdminController {
             Object workload = null;
             switch (t) {
                 case "deployment":
-                    workload = kubernetesService.getDeployment(id, namespace, name);
+                    workload = kubernetesService.getDeployment(namespace, name);
                     break;
                 case "statefulset":
-                    workload = kubernetesService.getStatefulSet(id, namespace, name);
+                    workload = kubernetesService.getStatefulSet(namespace, name);
                     break;
                 case "daemonset":
-                    workload = kubernetesService.getDaemonSet(id, namespace, name);
+                    workload = kubernetesService.getDaemonSet(namespace, name);
                     break;
                 default:
                     return ResponseEntity.badRequest().body(Map.of("error", "Invalid workload type: " + type));
@@ -1590,6 +1628,30 @@ public class ClusterAdminController {
         public void setReplicas(Integer r) {
             this.replicas = r;
         }
+    }
+
+    /**
+     * Scale workload cho cluster duy nhất (không cần ID)
+     * Supports Deployment and StatefulSet only
+     */
+    @PostMapping("/k8s/{type}/{namespace}/{name}/scale")
+    public ResponseEntity<?> scaleWorkload(
+            @PathVariable String type,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            @org.springframework.web.bind.annotation.RequestBody ScaleRequest body,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return scaleWorkload(id, type, namespace, name, body, request);
     }
 
     /**
@@ -1631,10 +1693,10 @@ public class ClusterAdminController {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
             switch (t) {
                 case "deployment":
-                    kubernetesService.scaleDeployment(id, namespace, name, replicas);
+                    kubernetesService.scaleDeployment(namespace, name, replicas);
                     break;
                 case "statefulset":
-                    kubernetesService.scaleStatefulSet(id, namespace, name, replicas);
+                    kubernetesService.scaleStatefulSet(namespace, name, replicas);
                     break;
                 default:
                     return ResponseEntity.badRequest()
@@ -1665,6 +1727,28 @@ public class ClusterAdminController {
         }
     }
 
+    /**
+     * Delete workload cho cluster duy nhất (không cần ID)
+     */
+    @DeleteMapping("/k8s/{type}/{namespace}/{name}")
+    public ResponseEntity<?> deleteWorkload(
+            @PathVariable String type,
+            @PathVariable String namespace,
+            @PathVariable String name,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return deleteWorkload(id, type, namespace, name, request);
+    }
+
     @DeleteMapping("/{id}/k8s/{type}/{namespace}/{name}")
     public ResponseEntity<?> deleteWorkload(@PathVariable Long id,
             @PathVariable String type,
@@ -1686,15 +1770,15 @@ public class ClusterAdminController {
             String output;
             switch (t) {
                 case "deployment":
-                    kubernetesService.deleteDeployment(id, namespace, name);
+                    kubernetesService.deleteDeployment(namespace, name);
                     output = String.format("deployment.apps \"%s\" deleted", name);
                     break;
                 case "statefulset":
-                    kubernetesService.deleteStatefulSet(id, namespace, name);
+                    kubernetesService.deleteStatefulSet(namespace, name);
                     output = String.format("statefulset.apps \"%s\" deleted", name);
                     break;
                 case "daemonset":
-                    kubernetesService.deleteDaemonSet(id, namespace, name);
+                    kubernetesService.deleteDaemonSet(namespace, name);
                     output = String.format("daemonset.apps \"%s\" deleted", name);
                     break;
                 default:
@@ -1715,6 +1799,26 @@ public class ClusterAdminController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
+    }
+
+    /**
+     * Ghi config mặc định (ansible.cfg, hosts) lên MASTER cho cluster duy nhất (không cần ID)
+     * Body: { "host": optional, "sudoPassword": optional (nếu có sudo NOPASSWD) }
+     */
+    @PostMapping("/ansible/init/config")
+    public ResponseEntity<?> initAnsibleConfig(@RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return initAnsibleConfig(id, body, request);
     }
 
     /**
@@ -1830,6 +1934,27 @@ public class ClusterAdminController {
     }
 
     /**
+     * Tạo SSH key không mật khẩu trên MASTER nếu chưa có cho cluster duy nhất (không cần ID)
+     * Body: { "host": optional }
+     */
+    @PostMapping("/ansible/init/sshkey")
+    public ResponseEntity<?> initAnsibleSshKey(
+            @RequestBody(required = false) Map<String, Object> body,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return initAnsibleSshKey(id, body, request);
+    }
+
+    /**
      * Tạo SSH key không mật khẩu trên MASTER nếu chưa có
      * Body: { "host": optional }
      */
@@ -1879,6 +2004,27 @@ public class ClusterAdminController {
             String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             return ResponseEntity.status(500).body(Map.of("error", msg));
         }
+    }
+
+    /**
+     * Chạy ansible all -m ping trên MASTER cho cluster duy nhất (không cần ID)
+     * Body: { "host": optional }
+     */
+    @PostMapping("/ansible/init/ping")
+    public ResponseEntity<?> initAnsiblePing(
+            @RequestBody(required = false) Map<String, Object> body,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return initAnsiblePing(id, body, request);
     }
 
     /**
@@ -2421,13 +2567,6 @@ public class ClusterAdminController {
         return ResponseEntity.ok(Map.of("id", 1L, "message", "Cluster không cần tạo. Chỉ cần set clusterStatus = 'AVAILABLE' cho servers."));
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(@PathVariable Long id) {
-        // Với 1 cluster duy nhất, không cần delete cluster nữa
-        // Có thể set tất cả servers về clusterStatus = "UNAVAILABLE" nếu muốn
-        return ResponseEntity.ok(Map.of("message", "Cluster không cần xóa. Có thể set clusterStatus = 'UNAVAILABLE' cho servers nếu muốn."));
-    }
-
     /**
      * Lấy chi tiết cluster duy nhất (không cần ID)
      * Trả về object, không phải array
@@ -2483,8 +2622,37 @@ public class ClusterAdminController {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * Lấy chi tiết cluster với metrics (không cần ID - dùng cluster duy nhất)
+     */
+    @GetMapping("/detail")
+    public ResponseEntity<?> detailWithMetrics(jakarta.servlet.http.HttpServletRequest request) {
+        // Với hệ thống chỉ có 1 cluster, lấy ID của cluster đầu tiên
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return detailWithMetricsById(id, request);
+    }
+
+    /**
+     * Lấy chi tiết cluster với metrics theo ID (backward compatibility)
+     */
     @GetMapping("/{id}/detail")
     public ResponseEntity<?> detailWithMetrics(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        return detailWithMetricsById(id, request);
+    }
+
+    /**
+     * Internal method để lấy chi tiết cluster với metrics
+     */
+    private ResponseEntity<?> detailWithMetricsById(Long id, jakarta.servlet.http.HttpServletRequest request) {
         var summaries = clusterService.listSummaries();
         var sum = summaries.stream().findFirst().orElse(null);
         if (sum == null)
@@ -2578,7 +2746,7 @@ public class ClusterAdminController {
         // Lấy Kubernetes version từ cluster (sử dụng Fabric8 client)
         String version = "";
         try {
-            version = kubernetesService.getKubernetesVersion(id);
+            version = kubernetesService.getKubernetesVersion();
         } catch (Exception e) {
             System.err.println("Lỗi lấy Kubernetes version: " + e.getMessage());
             // Fallback: thử lấy từ SSH nếu API không available
@@ -2662,6 +2830,43 @@ public class ClusterAdminController {
     }
 
     /**
+     * Xóa cluster (không cần ID - dùng cluster duy nhất)
+     */
+    @DeleteMapping("/")
+    public ResponseEntity<?> deleteCluster(jakarta.servlet.http.HttpServletRequest request) {
+        // Với hệ thống chỉ có 1 cluster, lấy ID của cluster đầu tiên
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return deleteClusterById(id, request);
+    }
+
+    /**
+     * Xóa cluster theo ID (backward compatibility)
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteCluster(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        return deleteClusterById(id, request);
+    }
+
+    /**
+     * Internal method để xóa cluster
+     */
+    private ResponseEntity<?> deleteClusterById(Long id, jakarta.servlet.http.HttpServletRequest request) {
+        // Với hệ thống chỉ có 1 cluster, không cho phép xóa cluster
+        // Nếu cần xóa, có thể set tất cả servers về clusterStatus = "UNAVAILABLE"
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "Không thể xóa cluster. Với hệ thống chỉ có 1 cluster, vui lòng set servers về clusterStatus = 'UNAVAILABLE' thay vì xóa cluster."));
+    }
+
+    /**
      * Lấy Kubernetes version cho cluster duy nhất (không cần ID)
      * @return version string hoặc empty string nếu chưa cài
      */
@@ -2696,7 +2901,7 @@ public class ClusterAdminController {
      */
     private ResponseEntity<?> getKubernetesVersionById(Long id) {
         try {
-            String version = kubernetesService.getKubernetesVersion(id);
+            String version = kubernetesService.getKubernetesVersion();
             return ResponseEntity.ok(java.util.Map.of(
                     "version", version != null ? version : "",
                     "installed", version != null && !version.trim().isEmpty()
@@ -2736,6 +2941,24 @@ public class ClusterAdminController {
             }
         }
         return pwCache;
+    }
+
+    /**
+     * Kiểm tra trạng thái cài đặt Ansible cho cluster duy nhất (không cần ID)
+     */
+    @GetMapping("/ansible-status")
+    public ResponseEntity<?> getAnsibleStatus(HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return getAnsibleStatus(id, request);
     }
 
     /**
@@ -2798,6 +3021,25 @@ public class ClusterAdminController {
             return ResponseEntity.status(500)
                     .body(Map.of("error", "Lỗi kiểm tra trạng thái Ansible: " + errorMessage));
         }
+    }
+
+    /**
+     * Cài đặt Ansible cho cluster duy nhất (không cần ID) với sudo password
+     */
+    @PostMapping("/install-ansible")
+    public ResponseEntity<?> installAnsible(@RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        Long id = 1L;
+        try {
+            var summaries = clusterService.listSummaries();
+            var firstSummary = summaries.stream().findFirst().orElse(null);
+            if (firstSummary != null) {
+                id = firstSummary.id();
+            }
+        } catch (Exception e) {
+            logger.debug("Không lấy được cluster ID, sử dụng ID = 1: " + e.getMessage());
+        }
+        return installAnsible(id, body, request);
     }
 
     /**

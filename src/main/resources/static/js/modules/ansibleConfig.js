@@ -16,10 +16,7 @@
 
 	// Đọc cấu hình Ansible
 	async function readAnsibleConfig(clusterId) {
-		if (!clusterId) {
-			console.error('readAnsibleConfig: clusterId là bắt buộc');
-			return null;
-		}
+		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
@@ -30,7 +27,7 @@
 		}
 
 		try {
-			const data = await window.ApiClient.get(`/api/ansible-config/read/${clusterId}`);
+			const data = await window.ApiClient.get('/api/ansible-config/read');
 			return data;
 		} catch (error) {
 			console.error('Error reading Ansible config:', error);
@@ -40,10 +37,7 @@
 
 	// Lưu cấu hình Ansible
 	async function saveAnsibleConfig(clusterId, cfg, hosts, vars, sudoPassword = '') {
-		if (!clusterId) {
-			console.error('saveAnsibleConfig: clusterId là bắt buộc');
-			return { success: false, error: 'Cluster ID là bắt buộc' };
-		}
+		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
@@ -67,7 +61,7 @@
 			formData.append('vars', (vars || '').trim());
 
 			// ApiClient không hỗ trợ FormData trực tiếp, nên dùng fetch
-			const response = await fetch(`/api/ansible-config/save/${clusterId}`, {
+			const response = await fetch('/api/ansible-config/save', {
 				method: 'POST',
 				body: formData
 			});
@@ -82,10 +76,7 @@
 
 	// Kiểm tra (verify) cấu hình Ansible
 	async function verifyAnsibleConfig(clusterId) {
-		if (!clusterId) {
-			console.error('verifyAnsibleConfig: clusterId là bắt buộc');
-			return null;
-		}
+		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
@@ -96,7 +87,7 @@
 		}
 
 		try {
-			const data = await window.ApiClient.post(`/api/ansible-config/verify/${clusterId}`, {});
+			const data = await window.ApiClient.post('/api/ansible-config/verify', {});
 			return data;
 		} catch (error) {
 			console.error('Error verifying Ansible config:', error);
@@ -106,10 +97,7 @@
 
 	// Rollback cấu hình Ansible
 	async function rollbackAnsibleConfig(clusterId) {
-		if (!clusterId) {
-			console.error('rollbackAnsibleConfig: clusterId là bắt buộc');
-			return null;
-		}
+		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
@@ -120,7 +108,7 @@
 		}
 
 		try {
-			const data = await window.ApiClient.post(`/api/ansible-config/rollback/${clusterId}`, {});
+			const data = await window.ApiClient.post('/api/ansible-config/rollback', {});
 			return data;
 		} catch (error) {
 			console.error('Error rolling back Ansible config:', error);
@@ -130,10 +118,7 @@
 
 	// Kiểm tra sudo NOPASSWD
 	async function checkSudoNopasswd(clusterId, host = null) {
-		if (!clusterId) {
-			console.error('checkSudoNopasswd: clusterId là bắt buộc');
-			return { success: false, hasNopasswd: false };
-		}
+		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
@@ -145,8 +130,8 @@
 
 		try {
 			const url = host 
-				? `/api/ansible-config/check-sudo/${clusterId}?host=${encodeURIComponent(host)}`
-				: `/api/ansible-config/check-sudo/${clusterId}`;
+				? `/api/ansible-config/check-sudo?host=${encodeURIComponent(host)}`
+				: '/api/ansible-config/check-sudo';
 			const data = await window.ApiClient.get(url);
 			return data;
 		} catch (error) {
@@ -157,24 +142,31 @@
 
 	// Kiểm tra trạng thái Ansible
 	async function checkAnsibleStatus(clusterId) {
-		// Validate và lấy cluster ID từ nhiều nguồn
+		// Validate và lấy cluster ID từ nhiều nguồn (optional vì API không cần clusterId trong path)
 		let targetClusterId = clusterId;
 		if (!targetClusterId) {
 			targetClusterId = window.currentClusterId || currentClusterId;
 		}
 		
+		// Nếu không có clusterId, lấy từ cluster API (với hệ thống chỉ có 1 cluster)
 		if (!targetClusterId) {
-			console.error('checkAnsibleStatus: clusterId là bắt buộc');
-			window.showAlert('error', 'Cluster ID là bắt buộc. Vui lòng chọn cluster trước.');
-			return;
+			try {
+				const clusterResponse = await window.ApiClient.get('/admin/cluster/api').catch(() => null);
+				if (clusterResponse && clusterResponse.id) {
+					targetClusterId = clusterResponse.id;
+				} else {
+					targetClusterId = 1; // Default cho hệ thống chỉ có 1 cluster
+				}
+			} catch (err) {
+				targetClusterId = 1; // Fallback
+			}
 		}
 
 		// Validate cluster ID là số hợp lệ
-		const id = typeof targetClusterId === 'number' ? targetClusterId : parseInt(targetClusterId, 10);
+		let id = typeof targetClusterId === 'number' ? targetClusterId : parseInt(targetClusterId, 10);
 		if (isNaN(id) || id <= 0) {
-			console.error('checkAnsibleStatus: Invalid clusterId:', targetClusterId);
-			window.showAlert('error', 'Cluster ID không hợp lệ: ' + targetClusterId);
-			return;
+			console.warn('checkAnsibleStatus: Invalid clusterId, using default 1:', targetClusterId);
+			id = 1;
 		}
 
 		// Tăng token để đánh dấu request mới (hủy request cũ nếu có)
@@ -212,20 +204,16 @@
 			let clusterDetail = null;
 			let masterNode = null;
 			try {
-				clusterDetail = await window.ApiClient.get(`/admin/clusters/${id}/detail`);
+				clusterDetail = await window.ApiClient.get('/admin/cluster/api');
 				if (clusterDetail) {
-					// Validate cluster ID trong response khớp với id đang kiểm tra
-					if (clusterDetail.id && clusterDetail.id !== id) {
-						throw new Error('Cluster ID không khớp. Có thể đang xem cluster khác.');
-					}
 					masterNode = clusterDetail.masterNode || null;
 				}
 			} catch (err) {
 				throw err; // Re-throw để xử lý ở catch block
 			}
 
-			// Gọi API kiểm tra trạng thái Ansible (backend sẽ tự động kiểm tra MASTER của cluster này)
-			const ansibleStatus = await window.ApiClient.get(`/admin/clusters/${id}/ansible-status`);
+			// Gọi API kiểm tra trạng thái Ansible (không cần clusterId trong path - backend tự động lấy cluster duy nhất)
+			const ansibleStatus = await window.ApiClient.get('/admin/cluster/ansible-status');
 			
 			// Kiểm tra nếu request này đã bị hủy bởi request mới hơn
 			if (requestToken !== ansibleStatusRequestToken) {
@@ -242,52 +230,66 @@
 				currentClusterId = id;
 			}
 			
-			// Xác định master node từ nhiều nguồn (ưu tiên từ clusterDetail để đảm bảo đúng cluster)
-			let masterHost = null;
+			// Xác định controller node từ nhiều nguồn (ưu tiên ANSIBLE, sau đó MASTER)
+			let controllerHost = null;
+			let controllerRole = null;
 			
-			// 1. Từ clusterDetail.masterNode (ưu tiên cao nhất - đảm bảo đúng cluster)
-			if (masterNode && masterNode !== '' && masterNode !== '-') {
-				masterHost = masterNode;
-			}
-			
-			// 2. Từ ansibleStatus.ansibleStatus map (chỉ dùng nếu không có từ clusterDetail)
-			if (!masterHost && ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
+			// 1. Từ ansibleStatus.ansibleStatus map - ưu tiên tìm ANSIBLE role trước
+			if (ansibleStatus.ansibleStatus && typeof ansibleStatus.ansibleStatus === 'object') {
 				const entries = Object.entries(ansibleStatus.ansibleStatus);
+				// Tìm ANSIBLE role trước
 				for (const [host, status] of entries) {
-					if (status && status.role === 'MASTER') {
-						// Validate rằng host này thuộc về cluster hiện tại
-						// (kiểm tra bằng cách so sánh với masterNode từ clusterDetail nếu có)
-						if (!masterNode || host === masterNode) {
-							masterHost = host;
+					if (status && status.role === 'ANSIBLE') {
+						controllerHost = host;
+						controllerRole = 'ANSIBLE';
+						break;
+					}
+				}
+				// Nếu không có ANSIBLE, tìm MASTER
+				if (!controllerHost) {
+					for (const [host, status] of entries) {
+						if (status && status.role === 'MASTER') {
+							controllerHost = host;
+							controllerRole = 'MASTER';
 							break;
 						}
 					}
 				}
 			}
 			
-			// 3. Từ ansibleStatus.masterInfo hoặc serverInfo (fallback)
-			if (!masterHost) {
-				masterHost = ansibleStatus.masterInfo || ansibleStatus.serverInfo || null;
+			// 2. Từ clusterDetail.masterNode (fallback nếu không tìm thấy từ ansibleStatus)
+			if (!controllerHost && masterNode && masterNode !== '' && masterNode !== '-') {
+				controllerHost = masterNode;
+				// Kiểm tra role từ ansibleStatus nếu có
+				if (ansibleStatus.ansibleStatus && ansibleStatus.ansibleStatus[masterNode]) {
+					const status = ansibleStatus.ansibleStatus[masterNode];
+					controllerRole = status.role || 'MASTER';
+				} else {
+					controllerRole = 'MASTER'; // Default
+				}
+			}
+			
+			// 3. Từ ansibleStatus.masterInfo hoặc serverInfo (fallback cuối cùng)
+			if (!controllerHost) {
+				controllerHost = ansibleStatus.masterInfo || ansibleStatus.serverInfo || null;
+				controllerRole = 'MASTER'; // Default
 			}
 
-			// Validate masterHost thuộc về cluster hiện tại
-			if (masterHost && masterNode && masterHost !== masterNode) {
-				// Ưu tiên sử dụng masterNode từ clusterDetail vì nó chắc chắn đúng cluster
-				masterHost = masterNode;
-			}
-
-			// Lưu masterHost và clusterId vào ansibleStatus để sử dụng sau
-			if (masterHost) {
-				ansibleStatus.masterInfo = masterHost;
-				ansibleStatus.masterHost = masterHost; // Thêm field mới để dễ truy cập
+			// Lưu controllerHost và clusterId vào ansibleStatus để sử dụng sau
+			if (controllerHost) {
+				ansibleStatus.masterInfo = controllerHost;
+				ansibleStatus.masterHost = controllerHost; // Giữ tên cũ để tương thích
+				ansibleStatus.controllerHost = controllerHost; // Tên mới
+				ansibleStatus.controllerRole = controllerRole || 'MASTER';
 				ansibleStatus.clusterId = id; // Đảm bảo clusterId được lưu
 			}
 
-			// Hiển thị thông tin đang kiểm tra master node (nếu có)
-			if (statusDisplay && masterHost) {
+			// Hiển thị thông tin đang kiểm tra controller node (nếu có)
+			if (statusDisplay && controllerHost) {
+				const roleDisplay = controllerRole === 'ANSIBLE' ? 'ANSIBLE Controller' : 'MASTER Controller';
 				statusDisplay.innerHTML = `
 					<div class="alert alert-info">
-						<i class="bi bi-info-circle"></i> Đang kiểm tra trạng thái Ansible trên MASTER: <strong>${escapeHtml(masterHost)}</strong>
+						<i class="bi bi-info-circle"></i> Đang kiểm tra trạng thái Ansible trên ${roleDisplay}: <strong>${escapeHtml(controllerHost)}</strong>
 					</div>
 				`;
 				statusDisplay.classList.remove('d-none');
@@ -325,8 +327,8 @@
 				errorMessage = 'Không có thông tin xác thực. Vui lòng kết nối lại các server trước khi kiểm tra Ansible.';
 			} else if (errorMessage.includes('Không có session') || errorMessage.includes('đăng nhập')) {
 				errorMessage = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
-			} else if (errorMessage.includes('Không tìm thấy MASTER') || errorMessage.includes('offline')) {
-				errorMessage = 'MASTER server đang offline. Vui lòng kiểm tra kết nối máy chủ trước khi kiểm tra Ansible.';
+			} else if (errorMessage.includes('Không tìm thấy') || errorMessage.includes('offline')) {
+				errorMessage = 'Controller server (ANSIBLE hoặc MASTER) đang offline. Vui lòng kiểm tra kết nối máy chủ trước khi kiểm tra Ansible.';
 				alertType = 'warning';
 				iconClass = 'bi-server';
 			}
@@ -398,23 +400,26 @@
 			currentClusterId = expectedClusterId;
 		}
 
-		// Xử lý master offline case (tương tự admin.js)
+		// Xử lý controller offline case
 		if (ansibleStatus.masterOffline === true) {
+			const controllerHost = ansibleStatus.controllerHost || ansibleStatus.masterHost || 'Controller';
+			const controllerRole = ansibleStatus.controllerRole || 'MASTER';
+			const roleDisplay = controllerRole === 'ANSIBLE' ? 'ANSIBLE Controller' : 'MASTER Controller';
 			setAnsibleSummaryBadges({
 				state: 'offline',
-				master: ansibleStatus.masterHost || 'MASTER',
-				message: 'MASTER offline'
+				master: controllerHost,
+				message: `${roleDisplay} offline`
 			});
 			if (actions) {
 				actions.innerHTML = `
 					<div class="btn-group btn-group-sm">
-						<button class="btn btn-outline-secondary" disabled title="MASTER offline">Cài đặt</button>
+						<button class="btn btn-outline-secondary" disabled title="${roleDisplay} offline">Cài đặt</button>
 					</div>
 				`;
 			}
 			if (statusDisplay) {
 				statusDisplay.innerHTML = `
-					<div class="alert alert-warning"><i class="bi bi-server"></i> MASTER (${escapeHtml(ansibleStatus.masterHost || 'MASTER')}) đang offline.</div>
+					<div class="alert alert-warning"><i class="bi bi-server"></i> ${roleDisplay} (${escapeHtml(controllerHost)}) đang offline.</div>
 				`;
 				statusDisplay.classList.remove('d-none');
 			}
@@ -432,47 +437,76 @@
 			return;
 		}
 
-		// Find master entry từ map (tương tự admin.js)
-		let masterHost = '-';
-		let masterInstalled = false;
-		let masterVersion = '-';
+		// Find controller entry từ map (ưu tiên ANSIBLE, sau đó MASTER)
+		let controllerHost = '-';
+		let controllerRole = null;
+		let controllerInstalled = false;
+		let controllerVersion = '-';
+		
+		// Tìm ANSIBLE role trước
 		for (const [host, st] of entries) {
-			if (st && st.role === 'MASTER') {
-				masterHost = host;
-				masterInstalled = !!st.installed;
-				masterVersion = st.installed ? (st.version || '-') : '-';
+			if (st && st.role === 'ANSIBLE') {
+				controllerHost = host;
+				controllerRole = 'ANSIBLE';
+				controllerInstalled = !!st.installed;
+				controllerVersion = st.installed ? (st.version || '-') : '-';
 				break;
 			}
 		}
-
-		// Ưu tiên sử dụng masterHost đã được xác định trong checkAnsibleStatus (nếu có)
-		if (ansibleStatus.masterHost && ansibleStatus.masterHost !== '-' && ansibleStatus.masterHost !== '') {
-			masterHost = ansibleStatus.masterHost;
-			// Lấy thông tin từ map nếu có
-			if (map[masterHost]) {
-				const st = map[masterHost];
-				masterInstalled = !!st.installed;
-				masterVersion = st.installed ? (st.version || '-') : '-';
+		
+		// Nếu không có ANSIBLE, tìm MASTER
+		if (!controllerHost || controllerHost === '-') {
+			for (const [host, st] of entries) {
+				if (st && st.role === 'MASTER') {
+					controllerHost = host;
+					controllerRole = 'MASTER';
+					controllerInstalled = !!st.installed;
+					controllerVersion = st.installed ? (st.version || '-') : '-';
+					break;
+				}
 			}
 		}
 
-		// Update badges sử dụng setAnsibleSummaryBadges (tương tự admin.js)
+		// Ưu tiên sử dụng controllerHost đã được xác định trong checkAnsibleStatus (nếu có)
+		if (ansibleStatus.controllerHost && ansibleStatus.controllerHost !== '-' && ansibleStatus.controllerHost !== '') {
+			controllerHost = ansibleStatus.controllerHost;
+			controllerRole = ansibleStatus.controllerRole || 'MASTER';
+			// Lấy thông tin từ map nếu có
+			if (map[controllerHost]) {
+				const st = map[controllerHost];
+				controllerInstalled = !!st.installed;
+				controllerVersion = st.installed ? (st.version || '-') : '-';
+			}
+		} else if (ansibleStatus.masterHost && ansibleStatus.masterHost !== '-' && ansibleStatus.masterHost !== '') {
+			// Fallback cho tương thích ngược
+			controllerHost = ansibleStatus.masterHost;
+			controllerRole = ansibleStatus.controllerRole || 'MASTER';
+			if (map[controllerHost]) {
+				const st = map[controllerHost];
+				controllerInstalled = !!st.installed;
+				controllerVersion = st.installed ? (st.version || '-') : '-';
+			}
+		}
+
+		// Update badges sử dụng setAnsibleSummaryBadges
 		setAnsibleSummaryBadges({
-			state: masterInstalled ? 'installed' : 'not_installed',
-			version: masterVersion,
-			master: masterHost
+			state: controllerInstalled ? 'installed' : 'not_installed',
+			version: controllerVersion,
+			master: controllerHost,
+			role: controllerRole
 		});
 
-		// Render quick actions for install/reinstall (tương tự admin.js)
+		// Render quick actions for install/reinstall
 		if (actions) {
-			if (masterHost && masterHost !== '-') {
-				if (masterInstalled) {
+			if (controllerHost && controllerHost !== '-') {
+				const roleDisplay = controllerRole === 'ANSIBLE' ? 'ANSIBLE Controller' : 'MASTER Controller';
+				if (controllerInstalled) {
 					actions.innerHTML = `
 						<div class="btn-group btn-group-sm" role="group">
-							<button class="btn btn-outline-warning" title="Cài đặt lại Ansible trên MASTER" id="btn-reinstall-ansible">
+							<button class="btn btn-outline-warning" title="Cài đặt lại Ansible trên ${roleDisplay}" id="btn-reinstall-ansible">
 								<i class="bi bi-arrow-repeat"></i> Cài đặt lại
 							</button>
-							<button class="btn btn-outline-danger" title="Gỡ Ansible khỏi MASTER" id="btn-uninstall-ansible">
+							<button class="btn btn-outline-danger" title="Gỡ Ansible khỏi ${roleDisplay}" id="btn-uninstall-ansible">
 								<i class="bi bi-trash"></i> Gỡ cài đặt
 							</button>
 						</div>
@@ -482,15 +516,15 @@
 					const reinstallBtn = document.getElementById('btn-reinstall-ansible');
 					const uninstallBtn = document.getElementById('btn-uninstall-ansible');
 					if (reinstallBtn) {
-						reinstallBtn.addEventListener('click', () => reinstallAnsibleOnServer(masterHost));
+						reinstallBtn.addEventListener('click', () => reinstallAnsibleOnServer(controllerHost));
 					}
 					if (uninstallBtn) {
-						uninstallBtn.addEventListener('click', () => uninstallAnsibleOnServer(masterHost));
+						uninstallBtn.addEventListener('click', () => uninstallAnsibleOnServer(controllerHost));
 					}
 				} else {
 					actions.innerHTML = `
 						<div class="btn-group btn-group-sm" role="group">
-							<button class="btn btn-outline-primary" title="Cài đặt Ansible trên MASTER" id="btn-install-ansible">
+							<button class="btn btn-outline-primary" title="Cài đặt Ansible trên ${roleDisplay}" id="btn-install-ansible">
 								<i class="bi bi-download"></i> Cài đặt
 							</button>
 						</div>
@@ -499,15 +533,15 @@
 					// Bind event handler
 					const installBtn = document.getElementById('btn-install-ansible');
 					if (installBtn) {
-						installBtn.addEventListener('click', () => installAnsibleOnServer(masterHost));
+						installBtn.addEventListener('click', () => installAnsibleOnServer(controllerHost));
 					}
 				}
 			}
 		}
 	}
 
-	// Set Ansible summary badges to default/unknown state (tương tự admin.js)
-	function setAnsibleSummaryBadges({ state, version, master, message } = {}) {
+	// Set Ansible summary badges to default/unknown state
+	function setAnsibleSummaryBadges({ state, version, master, role, message } = {}) {
 		const badgeInstall = document.getElementById('ansible-summary-install');
 		const badgeVersion = document.getElementById('ansible-summary-version');
 		const badgeMaster = document.getElementById('ansible-summary-master');
@@ -524,7 +558,8 @@
 				break;
 			case 'offline':
 				badgeInstall.className = 'badge bg-warning text-dark';
-				badgeInstall.innerHTML = '<i class="bi bi-wifi-off"></i> MASTER offline';
+				const offlineRole = role === 'ANSIBLE' ? 'ANSIBLE Controller' : 'MASTER Controller';
+				badgeInstall.innerHTML = `<i class="bi bi-wifi-off"></i> ${offlineRole} offline`;
 				break;
 			case 'error':
 				badgeInstall.className = 'badge bg-danger';
@@ -540,7 +575,8 @@
 		}
 
 		badgeVersion.textContent = `Phiên bản: ${escapeHtml(version || '-')}`;
-		badgeMaster.textContent = `MASTER: ${escapeHtml(master || '-')}`;
+		const roleDisplay = role === 'ANSIBLE' ? 'ANSIBLE' : (role === 'MASTER' ? 'MASTER' : 'Controller');
+		badgeMaster.textContent = `Controller: ${escapeHtml(master || '-')}${role ? ` (${roleDisplay})` : ''}`;
 	}
 
 	// Hiển thị modal cài đặt Ansible cho server
@@ -551,8 +587,8 @@
 		}
 
 		try {
-			// Lấy thông tin cluster
-			const clusterDetail = await window.ApiClient.get(`/admin/clusters/${clusterId}/detail`);
+			// Lấy thông tin cluster (với 1 cluster duy nhất, dùng endpoint không có clusterId)
+			const clusterDetail = await window.ApiClient.get('/admin/cluster/api');
 
 			// Tìm server cần cài đặt
 			const targetServer = clusterDetail.nodes?.find(node => node.ip === targetHost);
@@ -815,7 +851,7 @@
 					window.showAlert('error', 'Chưa chọn cluster');
 					return;
 				}
-				appendInitLog('🔑 Bắt đầu tạo SSH key cho MASTER...');
+				appendInitLog('🔑 Bắt đầu tạo và phân phối SSH key từ controller...');
 				if (window.AnsibleWebSocketModule) {
 					window.AnsibleWebSocketModule.runInitActionWS('init_sshkey', currentClusterId, {
 						onLog: appendInitLog,

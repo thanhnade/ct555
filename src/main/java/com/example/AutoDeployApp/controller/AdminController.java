@@ -158,15 +158,11 @@ public class AdminController {
         // Bước 1: xóa tài nguyên K8s của từng ứng dụng (không xóa namespace)
         for (Application app : userApps) {
             try {
-                Long clusterId = app.getClusterId();
-                if (clusterId != null) {
-                    kubernetesService.deleteApplicationResources(
-                            userNamespace,
-                            app.getK8sDeploymentName(),
-                            app.getK8sServiceName(),
-                            app.getK8sIngressName(),
-                            clusterId);
-                }
+                kubernetesService.deleteApplicationResources(
+                        userNamespace,
+                        app.getK8sDeploymentName(),
+                        app.getK8sServiceName(),
+                        app.getK8sIngressName());
             } catch (Exception ex) {
                 String message = "Không thể xóa tài nguyên Kubernetes cho ứng dụng #" + app.getId() + ": "
                         + ex.getMessage();
@@ -175,21 +171,14 @@ public class AdminController {
             }
         }
 
-        // Bước 2: xóa namespace trên từng cluster mà người dùng đã sử dụng
-        userApps.stream()
-                .map(Application::getClusterId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .forEach(clusterId -> {
-                    try {
-                        kubernetesService.deleteNamespace(userNamespace, clusterId);
-                    } catch (Exception ex) {
-                        String message = "Không thể xóa namespace \"" + userNamespace + "\" trên cluster #" + clusterId
-                                + ": " + ex.getMessage();
-                        cleanupErrors.add(message);
-                        logger.error(message, ex);
-                    }
-                });
+        // Bước 2: xóa namespace (chỉ có 1 cluster duy nhất)
+        try {
+            kubernetesService.deleteNamespace(userNamespace);
+        } catch (Exception ex) {
+            String message = "Không thể xóa namespace \"" + userNamespace + "\": " + ex.getMessage();
+            cleanupErrors.add(message);
+            logger.error(message, ex);
+        }
 
         if (!cleanupErrors.isEmpty()) {
             return ResponseEntity.status(500)
@@ -358,24 +347,6 @@ public class AdminController {
                         .body(Map.of("error", "Forbidden", "message", "Chỉ admin mới có quyền xử lý"));
             }
 
-            // Đọc clusterId tùy chọn từ request body (admin có thể chọn thủ công)
-            Long requestedClusterId = null;
-            if (requestBody != null && requestBody.containsKey("clusterId")) {
-                Object clusterObj = requestBody.get("clusterId");
-                if (clusterObj instanceof Number) {
-                    requestedClusterId = ((Number) clusterObj).longValue();
-                } else if (clusterObj instanceof String) {
-                    String clusterStr = ((String) clusterObj).trim();
-                    if (!clusterStr.isEmpty()) {
-                        try {
-                            requestedClusterId = Long.parseLong(clusterStr);
-                        } catch (NumberFormatException nfe) {
-                            throw new IllegalArgumentException("clusterId không hợp lệ");
-                        }
-                    }
-                }
-            }
-
             // Tải Application từ database
             Application application = applicationService.getApplicationById(id)
                     .orElseThrow(() -> new IllegalArgumentException("Application not found"));
@@ -400,8 +371,7 @@ public class AdminController {
                             application.getK8sNamespace(),
                             application.getK8sDeploymentName(),
                             application.getK8sServiceName(),
-                            application.getK8sIngressName(),
-                            application.getClusterId());
+                            application.getK8sIngressName());
                     logger.info("Old K8s resources cleaned up successfully");
                 } catch (Exception cleanupException) {
                     logger.warn("Failed to cleanup old K8s resources, will continue with new deployment",
@@ -481,7 +451,7 @@ public class AdminController {
 
                 // 2. Lấy kubeconfig từ master node
                 appendLog.accept("📥 Đang lấy kubeconfig từ master node...");
-                kubernetesService.ensureNamespace(namespace, clusterId); // Sẽ trigger getKubeconfig trong service
+                kubernetesService.ensureNamespace(namespace); // Sẽ trigger getKubeconfig trong service
                 appendLog.accept("✅ Đã lấy kubeconfig thành công");
 
                 // 3. Tạo KubernetesClient từ kubeconfig
@@ -490,7 +460,7 @@ public class AdminController {
 
                 // 4. Đảm bảo namespace tồn tại
                 appendLog.accept("📦 Đang tạo namespace: " + namespace);
-                kubernetesService.ensureNamespace(namespace, clusterId);
+                kubernetesService.ensureNamespace(namespace);
                 appendLog.accept("✅ Namespace đã được tạo/kiểm tra: " + namespace);
 
                 // 5. Sinh tên tài nguyên
@@ -615,7 +585,7 @@ public class AdminController {
                         + "/" + memoryLimit);
                 appendLog.accept("🔢 Replicas: " + replicas + ", Container Port: " + containerPort);
 
-                kubernetesService.createDeployment(namespace, deploymentName, dockerImage, containerPort, clusterId,
+                kubernetesService.createDeployment(namespace, deploymentName, dockerImage, containerPort,
                         cpuRequest, cpuLimit, memoryRequest, memoryLimit, replicas, envVars);
                 appendLog.accept("✅ Deployment đã được tạo: " + deploymentName);
                 // Lưu ngay tên deployment để có thể cleanup nếu bước sau lỗi
@@ -624,7 +594,7 @@ public class AdminController {
 
                 // 7. Tạo Service
                 appendLog.accept("🔌 Đang tạo Service: " + serviceName);
-                kubernetesService.createService(namespace, serviceName, deploymentName, 80, containerPort, clusterId);
+                kubernetesService.createService(namespace, serviceName, deploymentName, 80, containerPort);
                 appendLog.accept("✅ Service đã được tạo: " + serviceName);
                 // Lưu ngay tên service
                 application.setK8sServiceName(serviceName);
@@ -632,7 +602,7 @@ public class AdminController {
 
                 // 8. Tạo Ingress
                 appendLog.accept("🌐 Đang tạo Ingress: " + ingressName);
-                kubernetesService.createIngress(namespace, ingressName, serviceName, 80, clusterId, appName);
+                kubernetesService.createIngress(namespace, ingressName, serviceName, 80, appName);
                 appendLog.accept("✅ Ingress đã được tạo: " + ingressName);
                 // Lưu ngay tên ingress
                 application.setK8sIngressName(ingressName);
@@ -640,12 +610,12 @@ public class AdminController {
 
                 // 9. Chờ Deployment sẵn sàng (timeout 2 phút)
                 appendLog.accept("⏳ Đang chờ Deployment sẵn sàng... (timeout: 2 phút)");
-                kubernetesService.waitForDeploymentReady(namespace, deploymentName, 2, clusterId);
+                kubernetesService.waitForDeploymentReady(namespace, deploymentName, 2);
                 appendLog.accept("✅ Deployment đã sẵn sàng: " + deploymentName);
 
                 // 10. Lấy Ingress URL từ MetalLB
                 appendLog.accept("🔍 Đang lấy Ingress URL từ MetalLB...");
-                String accessUrl = kubernetesService.getIngressURL(namespace, ingressName, clusterId);
+                String accessUrl = kubernetesService.getIngressURL(namespace, ingressName);
                 appendLog.accept("✅ Đã lấy Ingress URL: " + accessUrl);
 
                 // 11. Cập nhật metadata K8s vào Application
@@ -797,18 +767,17 @@ public class AdminController {
                                 "message", "Chỉ có thể scale ứng dụng khi đang RUNNING hoặc PAUSED"));
             }
 
-            Long clusterId = application.getClusterId();
             String namespace = application.getK8sNamespace();
             String deploymentName = application.getK8sDeploymentName();
 
-            if (clusterId == null || namespace == null || namespace.isBlank()
+            if (namespace == null || namespace.isBlank()
                     || deploymentName == null || deploymentName.isBlank()) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Invalid Deployment",
                                 "message", "Ứng dụng chưa được triển khai đầy đủ để scale"));
             }
 
-            kubernetesService.scaleDeployment(clusterId, namespace, deploymentName, replicas);
+            kubernetesService.scaleDeployment(namespace, deploymentName, replicas);
 
             application.setReplicas(replicas);
             if (replicas == 0) {
@@ -874,18 +843,16 @@ public class AdminController {
             Application application = applicationService.getApplicationById(id)
                     .orElseThrow(() -> new IllegalArgumentException("Application not found"));
 
-            Long clusterId = application.getClusterId();
             String namespace = application.getK8sNamespace();
             String deploymentName = application.getK8sDeploymentName();
-            if (clusterId == null || namespace == null || namespace.isBlank()
+            if (namespace == null || namespace.isBlank()
                     || deploymentName == null || deploymentName.isBlank()) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Invalid Deployment",
                                 "message", "Ứng dụng chưa có thông tin triển khai để thu thập diagnostics"));
             }
 
-            String diagnostics = kubernetesService.collectDeploymentDiagnostics(namespace, deploymentName, clusterId,
-                    80);
+            String diagnostics = kubernetesService.collectDeploymentDiagnostics(namespace, deploymentName, 80);
             return ResponseEntity.ok(Map.of(
                     "applicationId", application.getId(),
                     "diagnostics", diagnostics));
@@ -1290,13 +1257,11 @@ public class AdminController {
             Application application = applicationService.getApplicationById(id)
                     .orElseThrow(() -> new IllegalArgumentException("Application not found"));
 
-            // Lưu thông tin namespace và clusterId trước khi xóa application record
+            // Lưu thông tin namespace trước khi xóa application record
             String namespace = application.getK8sNamespace();
-            Long clusterId = application.getClusterId();
 
             // Nếu application đã được deploy (có K8s resources), xóa K8s resources trước
-            if (clusterId != null &&
-                    application.getK8sDeploymentName() != null &&
+            if (application.getK8sDeploymentName() != null &&
                     !application.getK8sDeploymentName().isEmpty()) {
 
                 try {
@@ -1305,8 +1270,7 @@ public class AdminController {
                             namespace,
                             application.getK8sDeploymentName(),
                             application.getK8sServiceName(),
-                            application.getK8sIngressName(),
-                            clusterId);
+                            application.getK8sIngressName());
                     logger.info("Deleted K8s resources for application: {}", id);
                 } catch (Exception k8sException) {
                     // Log lỗi nhưng vẫn tiếp tục xóa namespace và DB record

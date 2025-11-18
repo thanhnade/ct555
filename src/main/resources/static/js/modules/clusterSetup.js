@@ -17,6 +17,8 @@
             this.loadClusterInfo();
             this.loadStep5ClusterInfo();
             this.bindEvents();
+            // Tự động kiểm tra trạng thái Ansible khi trang load
+            this.checkAnsibleStatusOnLoad();
         },
 
         loadClusterInfo: async function() {
@@ -283,7 +285,8 @@
                     // Load playbooks cho cluster hiện tại
                     // Trước tiên kiểm tra cluster có tồn tại và có master không
                     try {
-                        const clusterDetail = await window.ApiClient.get(`/admin/cluster/${clusterId}/detail`);
+                        // Với 1 cluster duy nhất, dùng endpoint /detail không có id
+                        const clusterDetail = await window.ApiClient.get('/admin/cluster/detail');
                         if (!clusterDetail) {
                             window.showAlert('warning', 'Không tìm thấy thông tin cluster. Vui lòng kiểm tra lại.');
                             return;
@@ -449,6 +452,49 @@
             window.showAlert('info', 'Đang verify cluster (kubectl get nodes, top nodes, pods...)...');
             // TODO: Implement cluster verification
             console.log('Verifying cluster:', this.currentClusterId);
+        },
+
+        // Tự động kiểm tra trạng thái Ansible khi trang load
+        checkAnsibleStatusOnLoad: async function() {
+            // Đợi một chút để đảm bảo các module khác đã load xong
+            setTimeout(async () => {
+                try {
+                    // Kiểm tra xem có cluster và servers không
+                    const clusterResponse = await window.ApiClient.get('/admin/cluster/api').catch(() => null);
+                    if (!clusterResponse) {
+                        // Không có cluster, không cần check Ansible
+                        return;
+                    }
+
+                    const serversResponse = await window.ApiClient.get('/admin/servers').catch(() => []);
+                    const availableServers = (serversResponse || []).filter(s => {
+                        const clusterStatus = s.clusterStatus || 'UNAVAILABLE';
+                        return clusterStatus === 'AVAILABLE';
+                    });
+
+                    if (availableServers.length === 0) {
+                        // Không có servers, không cần check Ansible
+                        return;
+                    }
+
+                    // Có cluster và servers, tự động kiểm tra trạng thái Ansible
+                    // Sử dụng clusterId từ currentClusterId hoặc từ cluster response
+                    const clusterId = this.currentClusterId || clusterResponse.id || 1;
+                    
+                    // Gọi checkAnsibleStatus nếu function đã sẵn sàng
+                    if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
+                        await window.checkAnsibleStatus(clusterId);
+                    } else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
+                        await window.AnsibleConfigModule.checkAnsibleStatus(clusterId);
+                    } else {
+                        // Nếu function chưa sẵn sàng, thử lại sau 1 giây
+                        setTimeout(() => this.checkAnsibleStatusOnLoad(), 1000);
+                    }
+                } catch (err) {
+                    console.error('Error auto-checking Ansible status:', err);
+                    // Không hiển thị alert để tránh làm phiền user khi trang mới load
+                }
+            }, 500); // Đợi 500ms để các module khác load xong
         }
     };
 

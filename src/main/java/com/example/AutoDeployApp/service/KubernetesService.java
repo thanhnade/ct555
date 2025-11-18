@@ -122,7 +122,7 @@ public class KubernetesService {
      * Lấy Kubernetes client bằng cách kéo kubeconfig từ MASTER node online đầu tiên (có clusterStatus = "AVAILABLE") qua SSH
      * Với 1 cluster duy nhất, luôn tìm MASTER online đầu tiên trong các server AVAILABLE
      */
-    private KubernetesClient getKubernetesClient(Long clusterId) {
+    private KubernetesClient getKubernetesClient() {
         try {
             // Tìm MASTER online đầu tiên trong các server AVAILABLE
             Server master = clusterService.getFirstHealthyMaster()
@@ -222,8 +222,8 @@ public class KubernetesService {
     /**
      * Đảm bảo namespace tồn tại, tạo mới nếu chưa có
      */
-    public void ensureNamespace(String namespace, Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void ensureNamespace(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             Namespace existingNamespace = client.namespaces().withName(namespace).get();
             if (existingNamespace == null) {
                 Namespace namespaceObj = new NamespaceBuilder()
@@ -246,8 +246,8 @@ public class KubernetesService {
      * Tạo Deployment trong Kubernetes với giới hạn tài nguyên có thể cấu hình
      */
     public String createDeployment(String namespace, String deploymentName, String dockerImage, int containerPort,
-            Long clusterId, String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit) {
-        return createDeployment(namespace, deploymentName, dockerImage, containerPort, clusterId,
+            String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit) {
+        return createDeployment(namespace, deploymentName, dockerImage, containerPort,
                 cpuRequest, cpuLimit, memoryRequest, memoryLimit, 1, null);
     }
 
@@ -256,9 +256,9 @@ public class KubernetesService {
      * và biến môi trường có thể cấu hình
      */
     public String createDeployment(String namespace, String deploymentName, String dockerImage, int containerPort,
-            Long clusterId, String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit,
+            String cpuRequest, String cpuLimit, String memoryRequest, String memoryLimit,
             int replicas, Map<String, String> envVars) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+        try (KubernetesClient client = getKubernetesClient()) {
             // Sử dụng giới hạn tài nguyên được cung cấp hoặc mặc định
             String finalCpuRequest = (cpuRequest != null && !cpuRequest.trim().isEmpty()) ? cpuRequest.trim() : "100m";
             String finalCpuLimit = (cpuLimit != null && !cpuLimit.trim().isEmpty()) ? cpuLimit.trim() : "500m";
@@ -340,9 +340,8 @@ public class KubernetesService {
     /**
      * Tạo Service trong Kubernetes
      */
-    public String createService(String namespace, String serviceName, String deploymentName, int port, int targetPort,
-            Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public String createService(String namespace, String serviceName, String deploymentName, int port, int targetPort) {
+        try (KubernetesClient client = getKubernetesClient()) {
             io.fabric8.kubernetes.api.model.Service service = new ServiceBuilder()
                     .withNewMetadata()
                     .withName(serviceName)
@@ -380,8 +379,8 @@ public class KubernetesService {
      * tránh xung đột
      */
     public String createIngress(String namespace, String ingressName, String serviceName, int servicePort,
-            Long clusterId, String appName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+            String appName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             Ingress ingress;
 
             if (ingressDomainBase != null && !ingressDomainBase.trim().isEmpty()) {
@@ -477,8 +476,8 @@ public class KubernetesService {
      * Chờ Deployment sẵn sàng (timeout tính bằng phút). Khi thất bại, thu thập
      * chẩn đoán chi tiết để hỗ trợ xác định nguyên nhân.
      */
-    public void waitForDeploymentReady(String namespace, String deploymentName, long timeoutMinutes, Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void waitForDeploymentReady(String namespace, String deploymentName, long timeoutMinutes) {
+        try (KubernetesClient client = getKubernetesClient()) {
             logger.info("Đang chờ Deployment {}/{} sẵn sàng...", namespace, deploymentName);
 
             client.apps().deployments()
@@ -490,7 +489,7 @@ public class KubernetesService {
         } catch (Exception e) {
             logger.error("Chờ Deployment sẵn sàng thất bại: {}/{}", namespace, deploymentName, e);
 
-            String diagnostics = collectDeploymentDiagnostics(namespace, deploymentName, clusterId, 50);
+            String diagnostics = collectDeploymentDiagnostics(namespace, deploymentName, 50);
 
             throw new RuntimeException("Deployment chưa sẵn sàng: " + deploymentName + ". " + diagnostics, e);
         }
@@ -499,8 +498,8 @@ public class KubernetesService {
     /**
      * Thu thập chẩn đoán cho deployment (pods, container state, log tail)
      */
-    public String collectDeploymentDiagnostics(String namespace, String deploymentName, Long clusterId, int logLines) {
-        try (KubernetesClient diagClient = getKubernetesClient(clusterId)) {
+    public String collectDeploymentDiagnostics(String namespace, String deploymentName, int logLines) {
+        try (KubernetesClient diagClient = getKubernetesClient()) {
             StringBuilder sb = new StringBuilder();
             sb.append("Chẩn đoán cho ")
                     .append(namespace).append("/").append(deploymentName).append(": ");
@@ -572,8 +571,8 @@ public class KubernetesService {
      * API)
      * Hỗ trợ cả định tuyến dựa trên domain và path
      */
-    public String getIngressURL(String namespace, String ingressName, Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public String getIngressURL(String namespace, String ingressName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             Ingress ingress = client.network().v1().ingresses()
                     .inNamespace(namespace)
                     .withName(ingressName)
@@ -629,8 +628,8 @@ public class KubernetesService {
      * ConfigMap, Secret)
      * Sử dụng appName làm tên cơ sở cho các tài nguyên
      */
-    public void deleteApp(String namespace, String appName, Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deleteApp(String namespace, String appName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             // Xóa Ingress (thử cả ing-{appName} và tên chính xác)
             String ingressName = "ing-" + appName;
             try {
@@ -690,8 +689,8 @@ public class KubernetesService {
      * Xóa tài nguyên deployment (sử dụng tên tài nguyên cụ thể)
      */
     public void deleteApplicationResources(String namespace, String deploymentName, String serviceName,
-            String ingressName, Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+            String ingressName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             // Xóa Ingress (sử dụng v1 API)
             if (ingressName != null && !ingressName.isEmpty()) {
                 try {
@@ -770,8 +769,8 @@ public class KubernetesService {
     /**
      * Kiểm tra xem deployment có tồn tại không
      */
-    public boolean deploymentExists(String namespace, String deploymentName, Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public boolean deploymentExists(String namespace, String deploymentName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             Deployment deployment = client.apps().deployments()
                     .inNamespace(namespace)
                     .withName(deploymentName)
@@ -786,8 +785,8 @@ public class KubernetesService {
     /**
      * Xóa namespace (an toàn - sẽ xóa tất cả tài nguyên bên trong namespace trước)
      */
-    public void deleteNamespace(String namespace, Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deleteNamespace(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             // Kiểm tra xem namespace có tồn tại không
             Namespace ns = client.namespaces().withName(namespace).get();
             if (ns == null) {
@@ -817,18 +816,17 @@ public class KubernetesService {
     /**
      * Lấy KubernetesClient cho cluster (method public để tái sử dụng)
      * 
-     * @param clusterId ID của cluster
      * @return KubernetesClient
      */
-    public KubernetesClient getKubernetesClientForCluster(Long clusterId) {
-        return getKubernetesClient(clusterId);
+    public KubernetesClient getKubernetesClientForCluster() {
+        return getKubernetesClient();
     }
 
     /**
      * Lấy tất cả các node trong cluster
      * Trả về null nếu kubelet chưa loaded hoặc không thể kết nối
      */
-    public NodeList getNodes(Long clusterId) {
+    public NodeList getNodes() {
         try {
             // Tìm MASTER online đầu tiên trong các server AVAILABLE
             Server master = clusterService.getFirstHealthyMaster().orElse(null);
@@ -843,19 +841,19 @@ public class KubernetesService {
                 return null; // Kubelet chưa loaded, bỏ qua
             }
 
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.nodes().list();
         } catch (KubernetesClientException e) {
-                logger.warn("Failed to get nodes for cluster {}: {}. Kubernetes may not be fully set up.", 
-                        clusterId, e.getMessage());
+                logger.warn("Failed to get nodes: {}. Kubernetes may not be fully set up.", 
+                        e.getMessage());
                 return null; // Trả về null thay vì throw exception
             } catch (Exception e) {
-                logger.warn("Failed to get nodes for cluster {}: {}. Kubernetes may not be running yet.", 
-                        clusterId, e.getMessage());
+                logger.warn("Failed to get nodes: {}. Kubernetes may not be running yet.", 
+                        e.getMessage());
                 return null;
             }
         } catch (Exception e) {
-            logger.debug("Error checking kubelet status for cluster {}: {}", clusterId, e.getMessage());
+            logger.debug("Error checking kubelet status: {}", e.getMessage());
             return null;
         }
     }
@@ -863,11 +861,11 @@ public class KubernetesService {
     /**
      * Lấy node cụ thể theo tên
      */
-    public Node getNode(Long clusterId, String nodeName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public Node getNode(String nodeName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.nodes().withName(nodeName).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get node {} for cluster: {}", nodeName, clusterId, e);
+            logger.error("Failed to get node {}: {}", nodeName, e.getMessage(), e);
             throw new RuntimeException("Failed to get node: " + e.getMessage(), e);
         }
     }
@@ -875,18 +873,18 @@ public class KubernetesService {
     /**
      * Get Kubernetes nodes và parse thành Map format (cho API response)
      */
-    public List<Map<String, Object>> getKubernetesNodes(Long clusterId) {
+    public List<Map<String, Object>> getKubernetesNodes() {
         try {
-            NodeList nodeList = getNodes(clusterId);
+            NodeList nodeList = getNodes();
             if (nodeList == null || nodeList.getItems() == null) {
-                logger.debug("NodeList is null or empty for cluster: {}", clusterId);
+                logger.debug("NodeList is null or empty");
                 return new java.util.ArrayList<>();
             }
             return nodeList.getItems().stream()
                     .map(this::parseNodeToMap)
                     .collect(Collectors.toList());
         } catch (Exception e) {
-            logger.error("Failed to get and parse Kubernetes nodes for cluster: {}", clusterId, e);
+            logger.error("Failed to get and parse Kubernetes nodes: {}", e.getMessage(), e);
             // Trả về empty list thay vì throw exception để tránh 500 error
             return new java.util.ArrayList<>();
         }
@@ -1114,7 +1112,7 @@ public class KubernetesService {
      * Lấy phiên bản Kubernetes từ cluster (từ master node hoặc API server)
      * Trả về chuỗi phiên bản (ví dụ: "v1.30.0") hoặc chuỗi rỗng nếu không có hoặc kubelet chưa loaded
      */
-    public String getKubernetesVersion(Long clusterId) {
+    public String getKubernetesVersion() {
         try {
             // Tìm MASTER online đầu tiên trong các server AVAILABLE
             Server master = clusterService.getFirstHealthyMaster().orElse(null);
@@ -1129,7 +1127,7 @@ public class KubernetesService {
                 return ""; // Kubelet chưa loaded, bỏ qua
             }
 
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+        try (KubernetesClient client = getKubernetesClient()) {
             // Thử lấy phiên bản từ API server trước
             try {
                 var versionInfo = client.getKubernetesVersion();
@@ -1141,7 +1139,7 @@ public class KubernetesService {
             }
 
             // Dự phòng: lấy phiên bản từ kubelet version của master node
-            NodeList nodeList = getNodes(clusterId);
+            NodeList nodeList = getNodes();
             if (nodeList == null || nodeList.getItems() == null) {
                 return "";
             }
@@ -1176,14 +1174,14 @@ public class KubernetesService {
 
             return "";
             } catch (KubernetesClientException e) {
-                logger.debug("Failed to get Kubernetes version for cluster {}: {}", clusterId, e.getMessage());
+                logger.debug("Failed to get Kubernetes version: {}", e.getMessage());
             return "";
         } catch (Exception e) {
-                logger.debug("Failed to get Kubernetes version for cluster {}: {}", clusterId, e.getMessage());
+                logger.debug("Failed to get Kubernetes version: {}", e.getMessage());
                 return "";
             }
         } catch (Exception e) {
-            logger.debug("Error getting Kubernetes version for cluster {}: {}", clusterId, e.getMessage());
+            logger.debug("Error getting Kubernetes version: {}", e.getMessage());
             return "";
         }
     }
@@ -1191,11 +1189,11 @@ public class KubernetesService {
     /**
      * Lấy tất cả các namespace
      */
-    public NamespaceList getNamespaces(Long clusterId) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public NamespaceList getNamespaces() {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.namespaces().list();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get namespaces for cluster: {}", clusterId, e);
+            logger.error("Failed to get namespaces: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to get namespaces: " + e.getMessage(), e);
         }
     }
@@ -1203,11 +1201,11 @@ public class KubernetesService {
     /**
      * Lấy namespace cụ thể theo tên
      */
-    public Namespace getNamespace(Long clusterId, String namespaceName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public Namespace getNamespace(String namespaceName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.namespaces().withName(namespaceName).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get namespace {} for cluster: {}", namespaceName, clusterId, e);
+            logger.error("Failed to get namespace {}: {}", namespaceName, e.getMessage(), e);
             throw new RuntimeException("Failed to get namespace: " + e.getMessage(), e);
         }
     }
@@ -1217,15 +1215,15 @@ public class KubernetesService {
     /**
      * Lấy pods - nếu namespace là null, trả về tất cả pods trong tất cả namespaces
      */
-    public PodList getPods(Long clusterId, String namespace) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public PodList getPods(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             if (namespace != null && !namespace.isEmpty()) {
                 return client.pods().inNamespace(namespace).list();
             } else {
                 return client.pods().inAnyNamespace().list();
             }
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get pods for cluster: {}, namespace: {}", clusterId, namespace, e);
+            logger.error("Failed to get pods for namespace: {}", namespace, e);
             throw new RuntimeException("Failed to get pods: " + e.getMessage(), e);
         }
     }
@@ -1233,11 +1231,11 @@ public class KubernetesService {
     /**
      * Lấy pod cụ thể theo tên
      */
-    public Pod getPod(Long clusterId, String namespace, String podName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public Pod getPod(String namespace, String podName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.pods().inNamespace(namespace).withName(podName).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get pod {}/{} for cluster: {}", namespace, podName, clusterId, e);
+            logger.error("Failed to get pod {}/{}: {}", namespace, podName, e.getMessage(), e);
             throw new RuntimeException("Failed to get pod: " + e.getMessage(), e);
         }
     }
@@ -1245,12 +1243,12 @@ public class KubernetesService {
     /**
      * Xóa pod
      */
-    public void deletePod(Long clusterId, String namespace, String podName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deletePod(String namespace, String podName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.pods().inNamespace(namespace).withName(podName).delete();
             logger.info("Deleted pod: {}/{}", namespace, podName);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to delete pod {}/{} for cluster: {}", namespace, podName, clusterId, e);
+            logger.error("Failed to delete pod {}/{}: {}", namespace, podName, e.getMessage(), e);
             throw new RuntimeException("Failed to delete pod: " + e.getMessage(), e);
         }
     }
@@ -1259,15 +1257,15 @@ public class KubernetesService {
      * Lấy deployments - nếu namespace là null, trả về tất cả deployments trong
      * tất cả namespaces
      */
-    public DeploymentList getDeployments(Long clusterId, String namespace) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public DeploymentList getDeployments(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             if (namespace != null && !namespace.isEmpty()) {
                 return client.apps().deployments().inNamespace(namespace).list();
             } else {
                 return client.apps().deployments().inAnyNamespace().list();
             }
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get deployments for cluster: {}, namespace: {}", clusterId, namespace, e);
+            logger.error("Failed to get deployments for namespace: {}", namespace, e);
             throw new RuntimeException("Failed to get deployments: " + e.getMessage(), e);
         }
     }
@@ -1275,11 +1273,11 @@ public class KubernetesService {
     /**
      * Lấy deployment cụ thể theo tên
      */
-    public Deployment getDeployment(Long clusterId, String namespace, String deploymentName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public Deployment getDeployment(String namespace, String deploymentName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.apps().deployments().inNamespace(namespace).withName(deploymentName).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get deployment {}/{} for cluster: {}", namespace, deploymentName, clusterId, e);
+            logger.error("Failed to get deployment {}/{}: {}", namespace, deploymentName, e.getMessage(), e);
             throw new RuntimeException("Failed to get deployment: " + e.getMessage(), e);
         }
     }
@@ -1287,12 +1285,12 @@ public class KubernetesService {
     /**
      * Scale deployment
      */
-    public void scaleDeployment(Long clusterId, String namespace, String deploymentName, int replicas) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void scaleDeployment(String namespace, String deploymentName, int replicas) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.apps().deployments().inNamespace(namespace).withName(deploymentName).scale(replicas);
             logger.info("Scaled deployment {}/{} to {} replicas", namespace, deploymentName, replicas);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to scale deployment {}/{} for cluster: {}", namespace, deploymentName, clusterId, e);
+            logger.error("Failed to scale deployment {}/{}: {}", namespace, deploymentName, e.getMessage(), e);
             throw new RuntimeException("Failed to scale deployment: " + e.getMessage(), e);
         }
     }
@@ -1300,12 +1298,12 @@ public class KubernetesService {
     /**
      * Xóa deployment
      */
-    public void deleteDeployment(Long clusterId, String namespace, String deploymentName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deleteDeployment(String namespace, String deploymentName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.apps().deployments().inNamespace(namespace).withName(deploymentName).delete();
             logger.info("Deleted deployment: {}/{}", namespace, deploymentName);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to delete deployment {}/{} for cluster: {}", namespace, deploymentName, clusterId, e);
+            logger.error("Failed to delete deployment {}/{}: {}", namespace, deploymentName, e.getMessage(), e);
             throw new RuntimeException("Failed to delete deployment: " + e.getMessage(), e);
         }
     }
@@ -1314,15 +1312,15 @@ public class KubernetesService {
      * Lấy statefulsets - nếu namespace là null, trả về tất cả statefulsets trong
      * tất cả namespaces
      */
-    public StatefulSetList getStatefulSets(Long clusterId, String namespace) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public StatefulSetList getStatefulSets(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             if (namespace != null && !namespace.isEmpty()) {
                 return client.apps().statefulSets().inNamespace(namespace).list();
             } else {
                 return client.apps().statefulSets().inAnyNamespace().list();
             }
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get statefulsets for cluster: {}, namespace: {}", clusterId, namespace, e);
+            logger.error("Failed to get statefulsets for namespace: {}", namespace, e);
             throw new RuntimeException("Failed to get statefulsets: " + e.getMessage(), e);
         }
     }
@@ -1330,11 +1328,11 @@ public class KubernetesService {
     /**
      * Lấy statefulset cụ thể theo tên
      */
-    public StatefulSet getStatefulSet(Long clusterId, String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public StatefulSet getStatefulSet(String namespace, String name) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.apps().statefulSets().inNamespace(namespace).withName(name).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get statefulset {}/{} for cluster: {}", namespace, name, clusterId, e);
+            logger.error("Failed to get statefulset {}/{}: {}", namespace, name, e.getMessage(), e);
             throw new RuntimeException("Failed to get statefulset: " + e.getMessage(), e);
         }
     }
@@ -1342,12 +1340,12 @@ public class KubernetesService {
     /**
      * Scale statefulset
      */
-    public void scaleStatefulSet(Long clusterId, String namespace, String name, int replicas) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void scaleStatefulSet(String namespace, String name, int replicas) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.apps().statefulSets().inNamespace(namespace).withName(name).scale(replicas);
             logger.info("Scaled statefulset {}/{} to {} replicas", namespace, name, replicas);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to scale statefulset {}/{} for cluster: {}", namespace, name, clusterId, e);
+            logger.error("Failed to scale statefulset {}/{}: {}", namespace, name, e.getMessage(), e);
             throw new RuntimeException("Failed to scale statefulset: " + e.getMessage(), e);
         }
     }
@@ -1355,12 +1353,12 @@ public class KubernetesService {
     /**
      * Xóa statefulset
      */
-    public void deleteStatefulSet(Long clusterId, String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deleteStatefulSet(String namespace, String name) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.apps().statefulSets().inNamespace(namespace).withName(name).delete();
             logger.info("Deleted statefulset: {}/{}", namespace, name);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to delete statefulset {}/{} for cluster: {}", namespace, name, clusterId, e);
+            logger.error("Failed to delete statefulset {}/{}: {}", namespace, name, e.getMessage(), e);
             throw new RuntimeException("Failed to delete statefulset: " + e.getMessage(), e);
         }
     }
@@ -1369,15 +1367,15 @@ public class KubernetesService {
      * Lấy daemonsets - nếu namespace là null, trả về tất cả daemonsets trong
      * tất cả namespaces
      */
-    public DaemonSetList getDaemonSets(Long clusterId, String namespace) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public DaemonSetList getDaemonSets(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             if (namespace != null && !namespace.isEmpty()) {
                 return client.apps().daemonSets().inNamespace(namespace).list();
             } else {
                 return client.apps().daemonSets().inAnyNamespace().list();
             }
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get daemonsets for cluster: {}, namespace: {}", clusterId, namespace, e);
+            logger.error("Failed to get daemonsets for namespace: {}", namespace, e);
             throw new RuntimeException("Failed to get daemonsets: " + e.getMessage(), e);
         }
     }
@@ -1385,11 +1383,11 @@ public class KubernetesService {
     /**
      * Lấy daemonset cụ thể theo tên
      */
-    public DaemonSet getDaemonSet(Long clusterId, String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public DaemonSet getDaemonSet(String namespace, String name) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.apps().daemonSets().inNamespace(namespace).withName(name).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get daemonset {}/{} for cluster: {}", namespace, name, clusterId, e);
+            logger.error("Failed to get daemonset {}/{}: {}", namespace, name, e.getMessage(), e);
             throw new RuntimeException("Failed to get daemonset: " + e.getMessage(), e);
         }
     }
@@ -1398,12 +1396,12 @@ public class KubernetesService {
      * Xóa daemonset
      * Lưu ý: DaemonSets không thể scale
      */
-    public void deleteDaemonSet(Long clusterId, String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deleteDaemonSet(String namespace, String name) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.apps().daemonSets().inNamespace(namespace).withName(name).delete();
             logger.info("Deleted daemonset: {}/{}", namespace, name);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to delete daemonset {}/{} for cluster: {}", namespace, name, clusterId, e);
+            logger.error("Failed to delete daemonset {}/{}: {}", namespace, name, e.getMessage(), e);
             throw new RuntimeException("Failed to delete daemonset: " + e.getMessage(), e);
         }
     }
@@ -1412,15 +1410,15 @@ public class KubernetesService {
      * Lấy services - nếu namespace là null, trả về tất cả services trong tất cả
      * namespaces
      */
-    public ServiceList getServices(Long clusterId, String namespace) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public ServiceList getServices(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             if (namespace != null && !namespace.isEmpty()) {
                 return client.services().inNamespace(namespace).list();
             } else {
                 return client.services().inAnyNamespace().list();
             }
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get services for cluster: {}, namespace: {}", clusterId, namespace, e);
+            logger.error("Failed to get services for namespace: {}", namespace, e);
             throw new RuntimeException("Failed to get services: " + e.getMessage(), e);
         }
     }
@@ -1428,11 +1426,11 @@ public class KubernetesService {
     /**
      * Lấy service cụ thể theo tên
      */
-    public io.fabric8.kubernetes.api.model.Service getService(Long clusterId, String namespace, String serviceName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public io.fabric8.kubernetes.api.model.Service getService(String namespace, String serviceName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.services().inNamespace(namespace).withName(serviceName).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get service {}/{} for cluster: {}", namespace, serviceName, clusterId, e);
+            logger.error("Failed to get service {}/{}: {}", namespace, serviceName, e.getMessage(), e);
             throw new RuntimeException("Failed to get service: " + e.getMessage(), e);
         }
     }
@@ -1440,12 +1438,12 @@ public class KubernetesService {
     /**
      * Xóa service
      */
-    public void deleteService(Long clusterId, String namespace, String serviceName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deleteService(String namespace, String serviceName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.services().inNamespace(namespace).withName(serviceName).delete();
             logger.info("Deleted service: {}/{}", namespace, serviceName);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to delete service {}/{} for cluster: {}", namespace, serviceName, clusterId, e);
+            logger.error("Failed to delete service {}/{}: {}", namespace, serviceName, e.getMessage(), e);
             throw new RuntimeException("Failed to delete service: " + e.getMessage(), e);
         }
     }
@@ -1454,15 +1452,15 @@ public class KubernetesService {
      * Lấy ingress - nếu namespace là null, trả về tất cả ingress trong tất cả
      * namespaces
      */
-    public IngressList getIngress(Long clusterId, String namespace) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public IngressList getIngress(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
             if (namespace != null && !namespace.isEmpty()) {
                 return client.network().v1().ingresses().inNamespace(namespace).list();
             } else {
                 return client.network().v1().ingresses().inAnyNamespace().list();
             }
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get ingress for cluster: {}, namespace: {}", clusterId, namespace, e);
+            logger.error("Failed to get ingress for namespace: {}", namespace, e);
             throw new RuntimeException("Failed to get ingress: " + e.getMessage(), e);
         }
     }
@@ -1470,11 +1468,11 @@ public class KubernetesService {
     /**
      * Lấy ingress cụ thể theo tên
      */
-    public Ingress getIngress(Long clusterId, String namespace, String ingressName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public Ingress getIngress(String namespace, String ingressName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             return client.network().v1().ingresses().inNamespace(namespace).withName(ingressName).get();
         } catch (KubernetesClientException e) {
-            logger.error("Failed to get ingress {}/{} for cluster: {}", namespace, ingressName, clusterId, e);
+            logger.error("Failed to get ingress {}/{}: {}", namespace, ingressName, e.getMessage(), e);
             throw new RuntimeException("Failed to get ingress: " + e.getMessage(), e);
         }
     }
@@ -1482,12 +1480,12 @@ public class KubernetesService {
     /**
      * Xóa ingress
      */
-    public void deleteIngress(Long clusterId, String namespace, String ingressName) {
-        try (KubernetesClient client = getKubernetesClient(clusterId)) {
+    public void deleteIngress(String namespace, String ingressName) {
+        try (KubernetesClient client = getKubernetesClient()) {
             client.network().v1().ingresses().inNamespace(namespace).withName(ingressName).delete();
             logger.info("Deleted ingress: {}/{}", namespace, ingressName);
         } catch (KubernetesClientException e) {
-            logger.error("Failed to delete ingress {}/{} for cluster: {}", namespace, ingressName, clusterId, e);
+            logger.error("Failed to delete ingress {}/{}: {}", namespace, ingressName, e.getMessage(), e);
             throw new RuntimeException("Failed to delete ingress: " + e.getMessage(), e);
         }
     }

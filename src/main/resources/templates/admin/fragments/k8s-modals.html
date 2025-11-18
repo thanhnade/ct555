@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="vi" xmlns:th="http://www.thymeleaf.org">
+<body>
+  <!-- K8s Output Modal (for describe operations) -->
+  <div th:fragment="k8s-modals">
+    <div class="modal fade" id="k8s-output-modal" tabindex="-1" aria-labelledby="k8s-output-modalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+        <div class="modal-content d-flex flex-column" style="max-height: 85vh;">
+          <div class="modal-header flex-shrink-0">
+            <h5 class="modal-title" id="k8s-output-modalLabel">
+              ℹ️ <span id="k8s-output-title">Chi tiết Kubernetes Resource</span>
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body p-0 flex-grow-1 overflow-hidden" style="min-height: 300px; max-height: calc(85vh - 120px);">
+            <pre class="bg-dark text-light p-3 mb-0 h-100 overflow-auto font-monospace small" style="white-space: pre; word-wrap: normal;"><code id="k8s-output-content" class="d-block" style="white-space: pre; word-wrap: normal;"></code></pre>
+          </div>
+          <div class="modal-footer flex-shrink-0">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              ✖️ Đóng
+            </button>
+            <button type="button" class="btn btn-outline-primary" id="k8s-output-copy-btn">
+              📋 Sao chép
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scale Workload Modal -->
+    <div class="modal fade" id="scale-workload-modal" tabindex="-1" aria-labelledby="scale-workload-modalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="scale-workload-modalLabel">
+              🔄 Scale Workload
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="scale-workload-info" class="form-label">Workload:</label>
+              <div id="scale-workload-info" class="alert alert-info mb-0">
+                <strong id="scale-workload-name">-</strong>
+                <br>
+                <small class="text-muted">Type: <span id="scale-workload-type">-</span> | Namespace: <span id="scale-workload-namespace">-</span></small>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label for="scale-replicas-input" class="form-label">Số replicas mới:</label>
+              <input type="number" class="form-control" id="scale-replicas-input" min="0" value="1" required>
+              <div class="form-text">Nhập số replicas mong muốn (0 để tạm dừng workload)</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              ✖️ Hủy
+            </button>
+            <button type="button" class="btn btn-primary" id="scale-workload-confirm-btn">
+              ✅ Xác nhận Scale
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+

@@ -77,12 +77,25 @@
     // Load from storage on module initialization
     loadFromStorage();
 
-    // Helper function để escape HTML
+    // Helper functions từ k8sHelpers
     function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
+    }
+
+    function isSystemNamespace(name) {
+        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
+    }
+
+    function canScaleWorkloadType(type) {
+        return window.K8sHelpers ? window.K8sHelpers.canScaleWorkloadType(type) : false;
+    }
+
+    function showK8sOutput(title, output) {
+        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
+            window.K8sHelpers.showK8sOutput(title, output);
+        } else {
+            alert(`${title}\n\n${output}`);
+        }
     }
 
     // Helper function để lấy status class
@@ -316,17 +329,30 @@
             const available = item.available || ready; // Fallback to ready if available not present
             const upToDate = item.updated || ready; // Up-to-date replicas
 
+            const isSystem = isSystemNamespace(item.namespace);
+            const canScale = canScaleWorkloadType('deployment');
+            const namespace = item.namespace || '';
+            const name = item.name || '';
+
             return `<tr>
-                <td>${escapeHtml(item.namespace || '-')}</td>
-                <td><span class="fw-medium">${escapeHtml(item.name || '-')}</span></td>
+                <td><code>${escapeHtml(namespace)}</code></td>
+                <td><span class="fw-medium">${escapeHtml(name)}</span></td>
                 <td><span class="badge ${statusClass}">${ready}/${desired}</span></td>
                 <td>${upToDate}</td>
                 <td>${available}</td>
                 <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showDetail('deployment', '${escapeHtml(item.namespace || '')}', '${escapeHtml(item.name || '')}')">
-                        Chi tiết
-                    </button>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        ${canScale && !isSystem ? `<button class="btn btn-sm btn-outline-warning" onclick="window.K8sWorkloadsModule.scaleWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Scale">
+                            <i class="bi bi-arrows-angle-expand"></i>
+                        </button>` : ''}
+                        ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                            <i class="bi bi-trash"></i>
+                        </button>` : ''}
+                    </div>
                 </td>
             </tr>`;
         }).join('');
@@ -347,15 +373,28 @@
             const desired = item.desired || item.replicas || 0;
             const statusClass = getStatusClass(ready, desired);
 
+            const isSystem = isSystemNamespace(item.namespace);
+            const canScale = canScaleWorkloadType('statefulset');
+            const namespace = item.namespace || '';
+            const name = item.name || '';
+
             return `<tr>
-                <td>${escapeHtml(item.namespace || '-')}</td>
-                <td><span class="fw-medium">${escapeHtml(item.name || '-')}</span></td>
+                <td><code>${escapeHtml(namespace)}</code></td>
+                <td><span class="fw-medium">${escapeHtml(name)}</span></td>
                 <td><span class="badge ${statusClass}">${ready}/${desired}</span></td>
                 <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showDetail('statefulset', '${escapeHtml(item.namespace || '')}', '${escapeHtml(item.name || '')}')">
-                        Chi tiết
-                    </button>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        ${canScale && !isSystem ? `<button class="btn btn-sm btn-outline-warning" onclick="window.K8sWorkloadsModule.scaleWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Scale">
+                            <i class="bi bi-arrows-angle-expand"></i>
+                        </button>` : ''}
+                        ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                            <i class="bi bi-trash"></i>
+                        </button>` : ''}
+                    </div>
                 </td>
             </tr>`;
         }).join('');
@@ -379,9 +418,13 @@
             const available = item.available || ready;
             const statusClass = getStatusClass(ready, desired);
 
+            const isSystem = isSystemNamespace(item.namespace);
+            const namespace = item.namespace || '';
+            const name = item.name || '';
+
             return `<tr>
-                <td>${escapeHtml(item.namespace || '-')}</td>
-                <td><span class="fw-medium">${escapeHtml(item.name || '-')}</span></td>
+                <td><code>${escapeHtml(namespace)}</code></td>
+                <td><span class="fw-medium">${escapeHtml(name)}</span></td>
                 <td>${desired}</td>
                 <td>${current}</td>
                 <td><span class="badge ${statusClass}">${ready}</span></td>
@@ -389,9 +432,14 @@
                 <td>${available}</td>
                 <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showDetail('daemonset', '${escapeHtml(item.namespace || '')}', '${escapeHtml(item.name || '')}')">
-                        Chi tiết
-                    </button>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                            <i class="bi bi-trash"></i>
+                        </button>` : ''}
+                    </div>
                 </td>
             </tr>`;
         }).join('');
@@ -479,11 +527,158 @@
         }
     }
 
-    // Show detail (placeholder - sẽ implement sau)
-    function showDetail(type, namespace, name) {
-        console.log('Show detail:', type, namespace, name);
-        // TODO: Implement detail modal
-        alert(`Chi tiết ${type}: ${name} trong namespace ${namespace}`);
+    // Describe workload
+    async function describeWorkload(type, namespace, name) {
+        try {
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            showK8sOutput(`${type} ${namespace}/${name}`, data.output || '');
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi lấy thông tin workload');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi lấy thông tin workload'));
+            }
+        }
+    }
+
+    // Delete workload
+    async function deleteWorkload(type, namespace, name) {
+        if (isSystemNamespace(namespace)) {
+            if (window.showAlert) {
+                window.showAlert('warning', 'Không cho phép xóa trong namespace hệ thống');
+            } else {
+                alert('Không cho phép xóa trong namespace hệ thống');
+            }
+            return;
+        }
+        if (!confirm(`Xóa ${type} ${namespace}/${name}?`)) return;
+
+        try {
+            const data = await window.ApiClient.delete(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            const defaultOutput = type === 'deployment' ? `deployment.apps "${name}" deleted` :
+                                  type === 'statefulset' ? `statefulset.apps "${name}" deleted` :
+                                  type === 'daemonset' ? `daemonset.apps "${name}" deleted` : `${type} "${name}" deleted`;
+            if (window.showAlert) {
+                window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || defaultOutput)}</pre>`);
+            }
+            await loadWorkloads();
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi xóa workload');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi xóa workload'));
+            }
+        }
+    }
+
+    // Scale workload
+    async function scaleWorkload(type, namespace, name) {
+        if (!canScaleWorkloadType(type) || isSystemNamespace(namespace)) {
+            if (window.showAlert) {
+                window.showAlert('warning', 'Chỉ hỗ trợ scale Deployment/StatefulSet ngoài namespace hệ thống');
+            } else {
+                alert('Chỉ hỗ trợ scale Deployment/StatefulSet ngoài namespace hệ thống');
+            }
+            return;
+        }
+
+        // Hiển thị modal scale
+        const modalEl = document.getElementById('scale-workload-modal');
+        if (!modalEl) {
+            // Fallback: dùng prompt nếu modal không tồn tại
+            const replicas = prompt(`Số replicas mới cho ${type} ${namespace}/${name}:`);
+            if (replicas === null) return;
+            const replicasNum = Number(replicas);
+            if (!Number.isFinite(replicasNum) || replicasNum < 0) {
+                if (window.showAlert) {
+                    window.showAlert('error', 'Giá trị replicas không hợp lệ');
+                }
+                return;
+            }
+            await performScale(type, namespace, name, replicasNum);
+            return;
+        }
+
+        // Cập nhật thông tin trong modal
+        document.getElementById('scale-workload-name').textContent = `${namespace}/${name}`;
+        document.getElementById('scale-workload-type').textContent = type;
+        document.getElementById('scale-workload-namespace').textContent = namespace;
+        const replicasInput = document.getElementById('scale-replicas-input');
+        if (replicasInput) {
+            replicasInput.value = '1';
+            replicasInput.focus();
+        }
+
+        // Xóa event listener cũ (nếu có) và thêm mới
+        const confirmBtn = document.getElementById('scale-workload-confirm-btn');
+        if (confirmBtn) {
+            // Clone và replace để xóa event listeners cũ
+            const newConfirmBtn = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+            
+            newConfirmBtn.addEventListener('click', async () => {
+                const replicas = replicasInput.value;
+                const replicasNum = Number(replicas);
+                if (!Number.isFinite(replicasNum) || replicasNum < 0) {
+                    if (window.showAlert) {
+                        window.showAlert('error', 'Giá trị replicas không hợp lệ. Vui lòng nhập số >= 0');
+                    }
+                    return;
+                }
+
+                // Disable button trong khi xử lý
+                newConfirmBtn.disabled = true;
+                newConfirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Đang xử lý...';
+
+                try {
+                    await performScale(type, namespace, name, replicasNum);
+                    // Đóng modal
+                    if (window.Modal) {
+                        window.Modal.hide('scale-workload-modal');
+                    } else if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                        const modal = bootstrap.Modal.getInstance(modalEl);
+                        if (modal) modal.hide();
+                    }
+                } catch (error) {
+                    // Error đã được xử lý trong performScale
+                } finally {
+                    newConfirmBtn.disabled = false;
+                    newConfirmBtn.innerHTML = '✅ Xác nhận Scale';
+                }
+            });
+        }
+
+        // Hiển thị modal
+        if (window.Modal) {
+            window.Modal.show('scale-workload-modal');
+        } else if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalEl, {
+                backdrop: true,
+                keyboard: true,
+                focus: true
+            });
+            modal.show();
+        }
+    }
+
+    // Hàm thực hiện scale
+    async function performScale(type, namespace, name, replicasNum) {
+        try {
+            const data = await window.ApiClient.post(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`, {
+                replicas: replicasNum
+            });
+            if (window.showAlert) {
+                window.showAlert('success', `Đã scale ${type} ${namespace}/${name} → ${replicasNum} replicas`);
+            }
+            await loadWorkloads();
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi scale workload');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi scale workload'));
+            }
+            throw error;
+        }
     }
 
     // Show loading state for all tabs
@@ -674,7 +869,9 @@
     // Export for external access
     window.K8sWorkloadsModule = {
         loadWorkloads,
-        showDetail
+        describeWorkload,
+        deleteWorkload,
+        scaleWorkload
     };
 })();
 

@@ -4,13 +4,23 @@
 
     let namespacesData = [];
     let filteredData = [];
+    const deletingNamespaces = new Set(); // Theo dõi các namespace đang được xóa
 
-    // Helper function để escape HTML
+    // Helper functions từ k8sHelpers
     function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
+    }
+
+    function isSystemNamespace(name) {
+        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
+    }
+
+    function showK8sOutput(title, output) {
+        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
+            window.K8sHelpers.showK8sOutput(title, output);
+        } else {
+            alert(`${title}\n\n${output}`);
+        }
     }
 
     // Helper function để lấy status badge class
@@ -90,27 +100,84 @@
             const cpuDisplay = Number.isFinite(cpuRaw) ? cpuRaw : 0;
             const ramDisplay = Number.isFinite(ramRaw) ? ramRaw : 0;
 
+            const isSystem = isSystemNamespace(item.name);
+            const isDeleting = deletingNamespaces.has(item.name);
+            const name = item.name || '';
+
             return `<tr>
-                <td><span class="fw-medium">${escapeHtml(item.name || '-')}</span></td>
+                <td><span class="fw-medium">${escapeHtml(name)}</span></td>
                 <td>${pods}</td>
                 <td>${cpuDisplay}</td>
                 <td>${ramDisplay}</td>
-                <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
+                <td>${isDeleting ? '<span class="badge bg-warning">Đang xóa...</span>' : `<span class="badge ${statusClass}">${escapeHtml(status)}</span>`}</td>
                 <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="window.K8sNamespacesModule.showDetail('${escapeHtml(item.name || '')}')">
-                        Chi tiết
-                    </button>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sNamespacesModule.describeNamespace('${escapeHtml(name)}')" title="Xem chi tiết">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        ${!isSystem && !isDeleting ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sNamespacesModule.deleteNamespace('${escapeHtml(name)}')" title="Xóa">
+                            <i class="bi bi-trash"></i>
+                        </button>` : ''}
+                    </div>
                 </td>
             </tr>`;
         }).join('');
     }
 
-    // Show detail (placeholder)
-    function showDetail(name) {
-        console.log('Show detail:', name);
-        // TODO: Implement detail modal
-        alert(`Chi tiết Namespace: ${name}`);
+    // Describe namespace
+    async function describeNamespace(name) {
+        try {
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/namespaces/${encodeURIComponent(name)}`);
+            showK8sOutput(`Namespace ${name}`, data.output || '');
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi lấy thông tin namespace');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi lấy thông tin namespace'));
+            }
+        }
+    }
+
+    // Delete namespace
+    async function deleteNamespace(name) {
+        if (isSystemNamespace(name)) {
+            if (window.showAlert) {
+                window.showAlert('warning', 'Không cho phép xóa namespace hệ thống');
+            } else {
+                alert('Không cho phép xóa namespace hệ thống');
+            }
+            return;
+        }
+        if (deletingNamespaces.has(name)) {
+            return; // Đang xóa rồi
+        }
+        if (!confirm(`Xóa namespace "${name}"?\n\nCảnh báo: Tất cả tài nguyên trong namespace này sẽ bị xóa vĩnh viễn!\n\nQuá trình này có thể mất vài phút...`)) {
+            return;
+        }
+
+        deletingNamespaces.add(name);
+        renderNamespaces();
+        if (window.showAlert) {
+            window.showAlert('info', `Đang xóa namespace "${name}"... Vui lòng đợi (có thể mất vài phút nếu namespace có nhiều tài nguyên).`);
+        }
+
+        try {
+            const data = await window.ApiClient.delete(`/admin/cluster/k8s/namespaces/${encodeURIComponent(name)}`);
+            deletingNamespaces.delete(name);
+            if (window.showAlert) {
+                window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `namespace "${name}" deleted`)}</pre>`);
+            }
+            await loadNamespaces();
+        } catch (error) {
+            deletingNamespaces.delete(name);
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi xóa namespace');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi xóa namespace'));
+            }
+            renderNamespaces();
+        }
     }
 
     // Initialize module
@@ -148,7 +215,8 @@
 
     window.K8sNamespacesModule = {
         loadNamespaces,
-        showDetail
+        describeNamespace,
+        deleteNamespace
     };
 })();
 

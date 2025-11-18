@@ -5,12 +5,21 @@
     let servicesData = [];
     let filteredData = [];
 
-    // Helper function để escape HTML
+    // Helper functions từ k8sHelpers
     function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
+    }
+
+    function isSystemNamespace(name) {
+        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
+    }
+
+    function showK8sOutput(title, output) {
+        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
+            window.K8sHelpers.showK8sOutput(title, output);
+        } else {
+            alert(`${title}\n\n${output}`);
+        }
     }
 
     // Helper function để lấy type badge class
@@ -100,31 +109,73 @@
             const typeClass = getTypeClass(item.type);
             const externalIP = item.externalIP || '-';
             const clusterIP = item.clusterIP === 'None' ? '<none>' : (item.clusterIP || '-');
+            const isSystem = isSystemNamespace(item.namespace);
+            const namespace = item.namespace || '';
+            const name = item.name || '';
 
             return `
                 <tr>
-                    <td>${escapeHtml(item.namespace || '-')}</td>
-                    <td><span class="fw-medium">${escapeHtml(item.name || '-')}</span></td>
+                    <td><code>${escapeHtml(namespace)}</code></td>
+                    <td><span class="fw-medium">${escapeHtml(name)}</span></td>
                     <td><span class="badge ${typeClass} small">${escapeHtml(item.type || '-')}</span></td>
-                    <td>${escapeHtml(clusterIP)}</td>
-                    <td>${escapeHtml(externalIP)}</td>
+                    <td><code>${escapeHtml(clusterIP)}</code></td>
+                    <td><code>${escapeHtml(externalIP)}</code></td>
                     <td class="text-muted small">${escapeHtml(item.ports || '-')}</td>
                     <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-primary" onclick="window.K8sServicesModule.showDetail('${escapeHtml(item.namespace || '')}', '${escapeHtml(item.name || '')}')">
-                            Chi tiết
-                        </button>
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-info" onclick="window.K8sServicesModule.describeService('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sServicesModule.deleteService('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                                <i class="bi bi-trash"></i>
+                            </button>` : ''}
+                        </div>
                     </td>
                 </tr>
             `;
         }).join('');
     }
 
-    // Show detail (placeholder)
-    function showDetail(namespace, name) {
-        console.log('Show detail:', namespace, name);
-        // TODO: Implement detail modal
-        alert(`Chi tiết Service: ${name} trong namespace ${namespace}`);
+    // Describe service
+    async function describeService(namespace, name) {
+        try {
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            showK8sOutput(`Service ${namespace}/${name}`, data.output || '');
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi lấy thông tin service');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi lấy thông tin service'));
+            }
+        }
+    }
+
+    // Delete service
+    async function deleteService(namespace, name) {
+        if (isSystemNamespace(namespace)) {
+            if (window.showAlert) {
+                window.showAlert('warning', 'Không cho phép xóa Service trong namespace hệ thống');
+            } else {
+                alert('Không cho phép xóa Service trong namespace hệ thống');
+            }
+            return;
+        }
+        if (!confirm(`Xóa Service ${namespace}/${name}?`)) return;
+
+        try {
+            const data = await window.ApiClient.delete(`/admin/cluster/k8s/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            if (window.showAlert) {
+                window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `service "${name}" deleted`)}</pre>`);
+            }
+            await loadServices();
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi xóa service');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi xóa service'));
+            }
+        }
     }
 
     // Initialize module
@@ -169,7 +220,8 @@
 
     window.K8sServicesModule = {
         loadServices,
-        showDetail
+        describeService,
+        deleteService
     };
 })();
 

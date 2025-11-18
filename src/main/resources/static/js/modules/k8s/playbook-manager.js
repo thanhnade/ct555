@@ -50,7 +50,7 @@ async function loadPlaybooks(clusterIdOverride) {
 			window.currentClusterId = cid;
 		}
 		
-		const response = await fetch(`/api/ansible-playbook/list/${cid}`);
+		const response = await fetch(`/api/ansible-playbook/list`);
 		
 		// Handle error response với message từ server nếu có
 		if (!response.ok) {
@@ -149,7 +149,7 @@ window.loadPlaybook = async function (filename) {
 	if (!cid || !filename) return;
 
 	try {
-		const response = await fetch(`/api/ansible-playbook/read/${cid}?filename=${encodeURIComponent(filename)}`);
+		const response = await fetch(`/api/ansible-playbook/read?filename=${encodeURIComponent(filename)}`);
 		if (!response.ok) {
 			throw new Error('Failed to load playbook');
 		}
@@ -194,7 +194,7 @@ window.savePlaybook = async function () {
 	}
 
 	try {
-		const response = await fetch(`/api/ansible-playbook/save/${cid}`, {
+		const response = await fetch(`/api/ansible-playbook/save`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
@@ -224,7 +224,7 @@ window.deletePlaybook = async function (filename) {
 	if (!confirm(`Xóa playbook "${filename}"?`)) return;
 
 	try {
-		const response = await fetch(`/api/ansible-playbook/delete/${cid}?filename=${encodeURIComponent(filename)}`, {
+		const response = await fetch(`/api/ansible-playbook/delete?filename=${encodeURIComponent(filename)}`, {
 			method: 'DELETE'
 		});
 
@@ -258,7 +258,7 @@ window.executePlaybook = async function (filename, extraVars = '') {
 			window.showPlaybookExecutionView();
 		}
 
-		const response = await fetch(`/api/ansible-playbook/execute/${cid}`, {
+		const response = await fetch(`/api/ansible-playbook/execute`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
@@ -344,7 +344,7 @@ async function monitorPlaybookExecution(taskId) {
 
 	const checkStatus = async () => {
 		try {
-			const response = await fetch(`/api/ansible-playbook/status/${getClusterId()}?taskId=${encodeURIComponent(taskId)}`);
+			const response = await fetch(`/api/ansible-playbook/status?taskId=${encodeURIComponent(taskId)}`);
 			if (!response.ok) {
 				throw new Error('Failed to check status');
 			}
@@ -486,7 +486,7 @@ async function checkPlaybookExists(filename) {
 	}
 
 	try {
-		const response = await fetch(`/api/ansible-playbook/list/${cid}`);
+		const response = await fetch(`/api/ansible-playbook/list`);
 		if (!response.ok) {
 			console.log('Lỗi tải danh sách playbook:', response.status);
 			return false;
@@ -530,7 +530,7 @@ window.uploadPlaybook = async function (file) {
 		const formData = new FormData();
 		formData.append('file', file);
 
-		const response = await fetch(`/api/ansible-playbook/upload/${cid}`, {
+		const response = await fetch(`/api/ansible-playbook/upload`, {
 			method: 'POST',
 			body: formData
 		});
@@ -643,11 +643,27 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
+    - name: Check if containerd is already installed
+      command: containerd --version
+      register: containerd_check
+      ignore_errors: true
+      changed_when: false
+    
+    - name: Display current status
+      debug:
+        msg: >
+          {% if containerd_check.rc == 0 %}
+          Containerd is already installed ({{ containerd_check.stdout | default('version unknown') }}).
+          Will upgrade/reinstall with latest version and reconfigure.
+          {% else %}
+          Containerd not found, will install new.
+          {% endif %}
+    
     - name: Update apt cache
       apt:
         update_cache: yes
   
-    - name: Install containerd
+    - name: Install or upgrade containerd
       apt:
         name: containerd
         state: present
@@ -658,7 +674,7 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
         path: /etc/containerd
         state: directory
   
-    - name: Generate default containerd configuration
+    - name: Generate default containerd configuration (will overwrite existing)
       shell: "containerd config default > /etc/containerd/config.toml"
   
     - name: Enable SystemdCgroup
@@ -671,7 +687,16 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
       systemd:
         name: containerd
         enabled: yes
-        state: restarted`,
+        state: restarted
+    
+    - name: Verify containerd installation
+      command: containerd --version
+      register: containerd_verify
+      changed_when: false
+    
+    - name: Display installation result
+      debug:
+        msg: "Containerd installation completed: {{ containerd_verify.stdout | default('version check failed') }}"`,
 
 		'04-install-kubernetes': `---
 - hosts: all
@@ -679,6 +704,28 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
   environment:
     DEBIAN_FRONTEND: noninteractive
   tasks:
+    - name: Check if Kubernetes packages are already installed
+      command: |
+        if command -v kubelet >/dev/null 2>&1 && command -v kubeadm >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1; then
+          echo "INSTALLED"
+          kubelet --version 2>&1 | head -1 || echo "version unknown"
+        else
+          echo "NOT_INSTALLED"
+        fi
+      register: k8s_check
+      ignore_errors: true
+      changed_when: false
+    
+    - name: Display current status
+      debug:
+        msg: >
+          {% if 'INSTALLED' in k8s_check.stdout %}
+          Kubernetes packages (kubelet, kubeadm, kubectl) are already installed.
+          Will upgrade/reinstall with latest version from repository.
+          {% else %}
+          Kubernetes packages not found, will install new.
+          {% endif %}
+    
     - name: Install required packages
       apt:
         name:
@@ -699,13 +746,13 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
       changed_when: false
       register: gpg_status
   
-    - name: Add Kubernetes repository
+    - name: Add Kubernetes repository (will overwrite existing)
       copy:
         dest: /etc/apt/sources.list.d/kubernetes.list
         content: |
           deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
   
-    - name: Install kubelet, kubeadm, kubectl
+    - name: Install or upgrade kubelet, kubeadm, kubectl
       apt:
         name:
           - kubelet
@@ -715,7 +762,20 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
         update_cache: yes
   
     - name: Hold package versions
-      command: apt-mark hold kubelet kubeadm kubectl`,
+      command: apt-mark hold kubelet kubeadm kubectl
+    
+    - name: Verify Kubernetes packages installation
+      command: |
+        echo "kubelet: $(kubelet --version 2>&1 | head -1 || echo 'N/A')"
+        echo "kubeadm: $(kubeadm version -o short 2>&1 || echo 'N/A')"
+        echo "kubectl: $(kubectl version --client --short 2>&1 || echo 'N/A')"
+      register: k8s_verify
+      changed_when: false
+      ignore_errors: true
+    
+    - name: Display installation result
+      debug:
+        msg: "{{ k8s_verify.stdout_lines | default(['Kubernetes packages installation completed']) }}"`,
 
 		'05-init-master': `---
 - hosts: master
@@ -1065,50 +1125,7 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
       debug:
         msg: "{{ 'Node ' + inventory_hostname + ' has successfully joined the cluster!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Skipping join' }}"`,
 
-		'09-install-ingress': `---
-- hosts: master
-  become: yes
-  gather_facts: no
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  
-  tasks:
-    - name: Get dynamic master IP address
-      set_fact:
-        master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
-    
-    - name: Display installation info
-      debug:
-        msg: "Installing Ingress on master: {{ master_ip }}"
-  
-    - name: Install Ingress Controller (nginx)
-      shell: |
-        KUBECONFIG=/etc/kubernetes/admin.conf \
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
-      args:
-        executable: /bin/bash
-      register: ingress_install
-      ignore_errors: yes
-  
-    - name: Display Ingress installation result
-      debug:
-        msg: "{{ ingress_install.stdout_lines | default(['Ingress Controller applied']) }}"
-  
-    - name: Check ingress-nginx pod status
-      shell: |
-        KUBECONFIG=/etc/kubernetes/admin.conf \
-        kubectl get pods -n ingress-nginx -o wide
-      register: ingress_pods
-  
-    - name: Display ingress-nginx pods
-      debug:
-        msg: "{{ ingress_pods.stdout_lines }}"
-  
-    - name: Installation complete
-      debug:
-        msg: "Ingress Controller (NGINX) has been installed successfully!"`,
-
-		'11-install-helm': `---
+		'09-install-helm': `---
 - hosts: master
   become: yes
   gather_facts: yes
@@ -1140,8 +1157,197 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
       debug:
         msg: "Helm has been installed successfully on master!"`,
 
-		'10-install-metallb': `---
-- name: Install and configure MetalLB on Kubernetes
+		'10-install-metrics-server': `---
+- name: Install or Update Metrics Server for Kubernetes
+  hosts: master
+  become: yes
+  gather_facts: no
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  
+  vars:
+    metrics_url: "https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml"
+    ms_namespace: "kube-system"
+  
+  tasks:
+    - name: Check if metrics-server is already installed
+      shell: kubectl get deployment metrics-server -n {{ ms_namespace }} --no-headers
+      register: ms_check
+      ignore_errors: true
+      changed_when: false
+  
+    - name: Display current status
+      debug:
+        msg: >
+          {% if ms_check.rc == 0 %}
+          Metrics-server đã tồn tại. Sẽ tiến hành cập nhật lại (apply lại manifest).
+          {% else %}
+          Metrics-server chưa tồn tại. Sẽ tiến hành cài mới.
+          {% endif %}
+  
+    - name: Apply metrics-server manifest from GitHub
+      command: kubectl apply -f {{ metrics_url }}
+      register: ms_apply
+  
+    - name: Display apply result
+      debug:
+        var: ms_apply.stdout_lines
+  
+    - name: Patch metrics-server to allow insecure TLS
+      shell: |
+        kubectl patch deployment metrics-server -n kube-system \
+        --type='json' \
+        -p='[
+          {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
+          {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP"}
+        ]'
+      register: ms_patch
+      ignore_errors: true
+  
+    - name: Display patch result
+      debug:
+        var: ms_patch.stdout_lines
+  
+    - name: Wait for metrics-server pod to be Running
+      shell: |
+        kubectl get pods -n kube-system -l k8s-app=metrics-server \
+        --no-headers 2>/dev/null | grep -c Running || true
+      register: ms_running
+      retries: 10
+      delay: 10
+      until: ms_running.stdout | int > 0
+      ignore_errors: true
+  
+    - name: Confirm metrics-server pod status
+      debug:
+        msg: >
+          Pod metrics-server Running: {{ ms_running.stdout }} instance(s)
+  
+    - name: Get metrics-server logs if pod is not running
+      when: ms_running.stdout | int == 0
+      shell: |
+        POD=$(kubectl get pods -n kube-system -l k8s-app=metrics-server -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -n "$POD" ]; then
+          kubectl logs -n kube-system $POD --tail=50
+        else
+          echo "No metrics-server pod found!"
+        fi
+      register: ms_logs
+      ignore_errors: true
+  
+    - name: Display metrics-server logs when error
+      when: ms_running.stdout | int == 0
+      debug:
+        var: ms_logs.stdout_lines`,
+
+		'11-install-ingress': `---
+- name: Install Nginx Ingress Controller using YAML manifests
+  hosts: master
+  become: yes
+  gather_facts: no
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+    DEBIAN_FRONTEND: noninteractive
+  
+  vars:
+    ingress_nginx_version: "v1.11.1"
+    ingress_nginx_namespace: "ingress-nginx"
+  
+  tasks:
+    - name: Get dynamic master IP address
+      set_fact:
+        master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
+    
+    - name: Display installation info
+      debug:
+        msg: "Installing Nginx Ingress Controller version {{ ingress_nginx_version }} using YAML manifests on master: {{ master_ip }}"
+  
+    - name: Check if Ingress Controller already exists
+      command: kubectl get deployment ingress-nginx-controller -n {{ ingress_nginx_namespace }}
+      register: ingress_check
+      ignore_errors: true
+      changed_when: false
+    
+    - name: Display current status
+      debug:
+        msg: >
+          {% if ingress_check.rc == 0 %}
+          Ingress Controller is already installed. Will update with new configuration.
+          {% else %}
+          Ingress Controller not found, will install new.
+          {% endif %}
+    
+    - name: Download Nginx Ingress Controller manifest
+      shell: |
+        curl -L https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-{{ ingress_nginx_version }}/deploy/static/provider/cloud/deploy.yaml -o /tmp/ingress-nginx.yaml
+      register: download_result
+      changed_when: download_result.rc == 0
+    
+    - name: Patch Service to use LoadBalancer type
+      shell: |
+        sed -i 's/type: NodePort/type: LoadBalancer/' /tmp/ingress-nginx.yaml || true
+        sed -i 's/type: ClusterIP/type: LoadBalancer/' /tmp/ingress-nginx.yaml || true
+      ignore_errors: true
+    
+    - name: Apply Nginx Ingress Controller manifest
+      command: kubectl apply -f /tmp/ingress-nginx.yaml
+      register: apply_result
+      changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout or 'unchanged' not in apply_result.stdout"
+  
+    - name: Display Ingress installation result
+      debug:
+        msg: "{{ apply_result.stdout_lines | default(['Ingress Controller applied']) }}"
+  
+    - name: Patch ingress-nginx-controller-admission service to ClusterIP
+      command: kubectl patch svc ingress-nginx-controller-admission -n {{ ingress_nginx_namespace }} -p '{"spec":{"type":"ClusterIP"}}'
+      register: patch_admission_result
+      ignore_errors: true
+      changed_when: patch_admission_result.rc == 0
+  
+    - name: Display admission service patch result
+      debug:
+        msg: "{{ patch_admission_result.stdout_lines | default(['Admission service patched to ClusterIP']) if patch_admission_result.rc == 0 else ['Admission service patch skipped (may not exist)'] }}"
+  
+    - name: Wait for ingress-nginx pods to be Running
+      shell: |
+        kubectl get pods -n {{ ingress_nginx_namespace }} -l app.kubernetes.io/name=ingress-nginx --no-headers 2>/dev/null | grep -c 'Running' || true
+      register: ingress_running
+      until: ingress_running.stdout | int > 0
+      retries: 15
+      delay: 10
+      ignore_errors: true
+  
+    - name: Check ingress-nginx pod status
+      shell: |
+        kubectl get pods -n {{ ingress_nginx_namespace }} -o wide
+      register: ingress_pods
+      changed_when: false
+  
+    - name: Display ingress-nginx pods
+      debug:
+        msg: "{{ ingress_pods.stdout_lines | default(['No ingress-nginx pods found']) }}"
+  
+    - name: Display ingress-nginx service
+      shell: |
+        kubectl get svc -n {{ ingress_nginx_namespace }} ingress-nginx-controller
+      register: ingress_svc
+      changed_when: false
+      ignore_errors: true
+  
+    - name: Display service information
+      debug:
+        msg: "{{ ingress_svc.stdout_lines | default(['Service information not available']) }}"
+  
+    - name: Installation complete
+      debug:
+        msg:
+          - "Ingress Controller (NGINX) has been installed successfully using YAML manifests!"
+          - "Version: {{ ingress_nginx_version }}"
+          - "Namespace: {{ ingress_nginx_namespace }}"
+          - "Use 'kubectl get svc -n {{ ingress_nginx_namespace }}' to check the LoadBalancer IP"`,
+
+		'12-install-metallb': `---
+- name: Install and configure MetalLB on Kubernetes using YAML manifests
   hosts: master
   become: yes
   gather_facts: yes
@@ -1151,7 +1357,6 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
   vars:
     metallb_version: "v0.14.8"
     metallb_namespace: "metallb-system"
-    metallb_url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
   tasks:
     - name: Get master IP address dynamically
       set_fact:
@@ -1177,26 +1382,36 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
           - "Master IP: {{ master_ip }}"
           - "Auto-detected MetalLB IP Pool: {{ ip_range_start }} - {{ ip_range_end }}"
           - "IP range auto-calculated from master node network"
+          - "Installing MetalLB version {{ metallb_version }} using YAML manifests"
   
-    - name: Check if MetalLB namespace exists
-      command: kubectl get namespace {{ metallb_namespace }}
-      register: ns_check
-      failed_when: false
+    - name: Check if MetalLB already exists
+      command: kubectl get deployment controller -n {{ metallb_namespace }}
+      register: metallb_check
+      ignore_errors: true
       changed_when: false
   
-    - name: Create MetalLB namespace if missing
-      command: kubectl create namespace {{ metallb_namespace }}
-      when: ns_check.rc != 0
-      changed_when: true
+    - name: Display current status
+      debug:
+        msg: >
+          {% if metallb_check.rc == 0 %}
+          MetalLB is already installed. Will update with new configuration.
+          {% else %}
+          MetalLB not found, will install new.
+          {% endif %}
+    
+    - name: Download MetalLB manifest
+      shell: |
+        kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml
+      register: apply_result
+      changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout or 'unchanged' not in apply_result.stdout"
   
-    - name: Apply MetalLB official manifest
-      command: kubectl apply -f {{ metallb_url }}
-      register: metallb_apply
-      changed_when: "'created' in metallb_apply.stdout or 'configured' in metallb_apply.stdout"
+    - name: Display MetalLB installation result
+      debug:
+        msg: "{{ apply_result.stdout_lines | default(['MetalLB applied']) }}"
   
     - name: Wait for MetalLB controller pods to start
       shell: |
-        kubectl get pods -n {{ metallb_namespace }} -l component=controller --no-headers | grep -c 'Running' || true
+        kubectl get pods -n {{ metallb_namespace }} -l app.kubernetes.io/name=metallb,app.kubernetes.io/component=controller --no-headers | grep -c 'Running' || true
       register: metallb_running
       until: metallb_running.stdout | int > 0
       retries: 10
@@ -1252,56 +1467,183 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
     - name: Display summary
       debug:
         msg:
-          - "MetalLB installed successfully."
+          - "MetalLB installed successfully using YAML manifests!"
+          - "Version: {{ metallb_version }}"
           - "Namespace: {{ metallb_namespace }}"
           - "Master IP: {{ master_ip }}"
           - "Auto-detected IP Pool: {{ ip_range_start }} - {{ ip_range_end }}"
           - "{{ metallb_status.stdout_lines }}"`,
 
-		'12-setup-storage': `---
-- hosts: master
+		'13-setup-storage': `---
+- name: Install NFS Server on Master Node
+  hosts: master
   become: yes
-  gather_facts: no
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  
   vars:
-    nfs_manifest_dir: /etc/kubernetes/storage
+    nfs_dir: /srv/nfs/k8s
   
   tasks:
-    - name: Create NFS manifest directory
+    - name: Install NFS server packages
+      apt:
+        name:
+          - nfs-kernel-server
+        state: present
+        update_cache: yes
+  
+    - name: Create NFS export directory
       file:
-        path: "{{ nfs_manifest_dir }}"
+        path: "{{ nfs_dir }}"
         state: directory
-        mode: '0755'
+        owner: nobody
+        group: nogroup
+        mode: "0777"
   
-    - name: Download and apply NFS Provisioner (example)
-      shell: |
-        KUBECONFIG=/etc/kubernetes/admin.conf \
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/nfs-subdir-external-provisioner/master/deploy/rbac.yaml
-        KUBECONFIG=/etc/kubernetes/admin.conf \
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/nfs-subdir-external-provisioner/master/deploy/deployment.yaml
-      args:
-        executable: /bin/bash
-      register: nfs_apply
-      ignore_errors: yes
+    - name: Configure /etc/exports
+      copy:
+        dest: /etc/exports
+        content: "{{ nfs_dir }} *(rw,sync,no_subtree_check,no_root_squash,no_all_squash)"
+        mode: "0644"
   
-    - name: Display NFS deployment result
-      debug:
-        msg: "{{ nfs_apply.stdout_lines | default(['NFS Provisioner applied']) }}"
+    - name: Export NFS shares
+      command: exportfs -rav
   
-    - name: Set default StorageClass
-      shell: |
-        KUBECONFIG=/etc/kubernetes/admin.conf \
-        kubectl patch storageclass nfs-client -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}' || true
-      args:
-        executable: /bin/bash
-  
-    - name: Setup complete
-      debug:
-        msg: "Default StorageClass (NFS) configuration has been completed!"`,
+    - name: Restart NFS server
+      systemd:
+        name: nfs-kernel-server
+        enabled: yes
+        state: restarted
 
-		'13-prepare-and-join-worker': `---
+- name: Install NFS Utilities on All Nodes (Master + Workers)
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install NFS client utils
+      apt:
+        name: nfs-common
+        state: present
+        update_cache: yes
+
+- name: Deploy NFS Client Provisioner to Kubernetes
+  hosts: master
+  become: yes
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  
+  vars:
+    nfs_server_ip: "{{ hostvars[groups['master'][0]].ansible_host }}"
+    nfs_path: "/srv/nfs/k8s"
+  
+  tasks:
+    - name: Create nfs-provisioner namespace
+      command: kubectl create namespace nfs-provisioner --dry-run=client -o yaml | kubectl apply -f -
+      register: ns_result
+  
+    - name: Create NFS Client Provisioner deployment
+      copy:
+        dest: /tmp/nfs-provisioner.yaml
+        content: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: nfs-client-provisioner
+            namespace: nfs-provisioner
+          ---
+          kind: Deployment
+          apiVersion: apps/v1
+          metadata:
+            name: nfs-client-provisioner
+            namespace: nfs-provisioner
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nfs-client-provisioner
+            template:
+              metadata:
+                labels:
+                  app: nfs-client-provisioner
+              spec:
+                serviceAccountName: nfs-client-provisioner
+                containers:
+                  - name: nfs-client-provisioner
+                    image: registry.k8s.io/sig-storage/nfs-subdir-external-provisioner:v4.0.2
+                    volumeMounts:
+                      - name: nfs-client-root
+                        mountPath: /persistentvolumes
+                    env:
+                      - name: PROVISIONER_NAME
+                        value: nfs.storage.k8s.io
+                      - name: NFS_SERVER
+                        value: "{{ nfs_server_ip }}"
+                      - name: NFS_PATH
+                        value: "{{ nfs_path }}"
+                volumes:
+                  - name: nfs-client-root
+                    nfs:
+                      server: "{{ nfs_server_ip }}"
+                      path: "{{ nfs_path }}"
+          ---
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: nfs-storage
+          provisioner: nfs.storage.k8s.io
+          reclaimPolicy: Delete
+          allowVolumeExpansion: true
+          volumeBindingMode: Immediate
+      register: deploy_file
+  
+    - name: Apply NFS Provisioner
+      command: kubectl apply -f /tmp/nfs-provisioner.yaml
+      register: deploy_apply
+  
+    - name: Show deploy result
+      debug:
+        var: deploy_apply.stdout_lines
+
+- name: Verify Storage Setup
+  hosts: master
+  become: yes
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  
+  tasks:
+    - name: Check StorageClass
+      command: kubectl get storageclass
+      register: sc_check
+  
+    - name: Display StorageClass
+      debug:
+        var: sc_check.stdout_lines
+  
+    - name: Test PVC creation
+      command: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: test-pvc
+        spec:
+          storageClassName: nfs-storage
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+        EOF
+      register: pvc_test
+  
+    - name: Wait PVC bound
+      shell: kubectl get pvc test-pvc --no-headers | awk '{print $2}'
+      register: pvc_status
+      retries: 10
+      delay: 5
+      until: pvc_status.stdout == "Bound"
+  
+    - name: Show PVC result
+      debug:
+        msg: "PVC test-pvc status: {{ pvc_status.stdout }}"`,
+
+		'14-prepare-and-join-worker': `---
 - name: Precheck not-ready workers
   hosts: master
   gather_facts: no
@@ -1648,732 +1990,80 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
           - "Node {{ inventory_hostname }} has been reset cleanly (data only deleted)."`,
 
 		'deploy-full-cluster': `---
-- name: Step 0 - Reset Kubernetes cluster
-  hosts: all
-  become: yes
-  gather_facts: yes
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Reset old cluster if exists
-      shell: kubeadm reset -f || true
-      ignore_errors: true
-  
-    - name: Remove old Kubernetes configuration
-      file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/kubernetes
-        - /etc/cni/net.d
-        - /root/.kube
-        - "/home/{{ ansible_user }}/.kube"
-      ignore_errors: true
-  
-    - name: Restart containerd service
-      shell: systemctl restart containerd || true
-      ignore_errors: true
-  
-- name: Step 1 - Update /etc/hosts and hostname
-  hosts: all
-  become: yes
-  gather_facts: yes
-  tasks:
-    - name: Update /etc/hosts file for all nodes
-      lineinfile:
-        path: /etc/hosts
-        line: "{{ hostvars[item].ansible_host }} {{ item }}"
-        state: present
-        create: yes
-        insertafter: EOF
-      loop: "{{ groups['all'] }}"
-      when: hostvars[item].ansible_host is defined
-  
-    - name: Set hostname according to inventory
-      hostname:
-        name: "{{ inventory_hostname }}"
-      when: ansible_hostname != inventory_hostname
-  
-    - name: Verify hostname
-      shell: hostnamectl
-      register: host_info
-  
-    - name: Display hostname info
-      debug:
-        msg: "{{ host_info.stdout_lines }}"
-  
-- name: Step 2 - Configure kernel and containerd
-  hosts: all
-  become: yes
-  gather_facts: no
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Disable swap
-      shell: swapoff -a && sed -i '/swap/d' /etc/fstab || true
-  
-    - name: Load kernel modules for containerd
-      copy:
-        dest: /etc/modules-load.d/containerd.conf
-        content: |
-          overlay
-          br_netfilter
-  
-    - name: Activate kernel modules
-      shell: |
-        modprobe overlay || true
-        modprobe br_netfilter || true
-  
-    - name: Configure sysctl parameters for Kubernetes
-      copy:
-        dest: /etc/sysctl.d/99-kubernetes-cri.conf
-        content: |
-          net.bridge.bridge-nf-call-iptables  = 1
-          net.bridge.bridge-nf-call-ip6tables = 1
-          net.ipv4.ip_forward                 = 1
-  
-    - name: Apply sysctl configuration
-      command: sysctl --system
-  
-    - name: Install containerd runtime
-      apt:
-        name: containerd
-        state: present
-        update_cache: yes
-  
-    - name: Generate default containerd config
-      shell: |
-        mkdir -p /etc/containerd
-        containerd config default > /etc/containerd/config.toml
-  
-    - name: Enable SystemdCgroup
-      replace:
-        path: /etc/containerd/config.toml
-        regexp: 'SystemdCgroup = false'
-        replace: 'SystemdCgroup = true'
-  
-    - name: Restart and enable containerd
-      systemd:
-        name: containerd
-        state: restarted
-        enabled: yes
-  
-- name: Step 3 - Install Kubernetes core components
-  hosts: all
-  become: yes
-  gather_facts: no
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Add Kubernetes GPG key
-      shell: |
-        mkdir -p /usr/share/keyrings
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \
-        gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
-      changed_when: false
-      ignore_errors: true
-  
-    - name: Add Kubernetes repository
-      copy:
-        dest: /etc/apt/sources.list.d/kubernetes.list
-        content: |
-          deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
-  
-    - name: Install kubelet, kubeadm, kubectl
-      apt:
-        name:
-          - kubelet
-          - kubeadm
-          - kubectl
-        state: present
-        update_cache: yes
-  
-    - name: Hold package version
-      command: apt-mark hold kubelet kubeadm kubectl
-  
-- name: Step 4 - Initialize Master node
-  hosts: master
-  become: yes
-  gather_facts: yes
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Get master IP address
-      set_fact:
-        master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
-  
-    - name: Reset old control plane (if any)
-      shell: kubeadm reset -f || true
-  
-    - name: Initialize Kubernetes control plane
-      command: >
-        kubeadm init
-        --control-plane-endpoint "{{ master_ip }}:6443"
-        --apiserver-advertise-address {{ master_ip }}
-        --pod-network-cidr 10.244.0.0/16
-        --upload-certs
-      args:
-        creates: /etc/kubernetes/admin.conf
-      register: kubeadm_init
-      failed_when: "'error' in kubeadm_init.stderr"
-      changed_when: "'Your Kubernetes control-plane has initialized successfully' in kubeadm_init.stdout"
-  
-    - name: Copy kubeconfig for root
-      shell: |
-        mkdir -p /root/.kube
-        cp -i /etc/kubernetes/admin.conf /root/.kube/config
-        chown root:root /root/.kube/config
-      args:
-        executable: /bin/bash
-  
-    - name: Copy kubeconfig for normal user
-      when: ansible_user != "root"
-      block:
-        - name: Create ~/.kube directory
-          file:
-            path: "/home/{{ ansible_user }}/.kube"
-            state: directory
-            owner: "{{ ansible_user }}"
-            group: "{{ ansible_user }}"
-            mode: '0755'
-  
-        - name: Copy kubeconfig file
-          copy:
-            src: /etc/kubernetes/admin.conf
-            dest: "/home/{{ ansible_user }}/.kube/config"
-            remote_src: yes
-            owner: "{{ ansible_user }}"
-            group: "{{ ansible_user }}"
-            mode: '0600'
-  
-- name: Step 5 - Install Calico CNI
-  hosts: master
-  become: yes
-  gather_facts: false
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-    DEBIAN_FRONTEND: noninteractive
-  vars:
-    calico_version: "v3.27.3"
-    calico_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml"
-  tasks:
-    - name: Check if Calico CNI exists
-      command: kubectl get daemonset calico-node -n kube-system
-      register: calico_check
-      ignore_errors: true
-  
-    - name: Apply Calico manifest (install or update)
-      command: kubectl apply -f {{ calico_url }}
-      register: calico_apply
-      retries: 3
-      delay: 10
-      until: calico_apply.rc == 0
-  
-    - name: Wait for Calico node pods to be Running
-      shell: |
-        kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers 2>/dev/null | grep -c 'Running' || true
-      register: calico_running
-      retries: 10
-      delay: 15
-      until: calico_running.stdout | int > 0
-  
-    - name: Confirm Calico pods are active
-      debug:
-        msg: "Calico is running ({{ calico_running.stdout }} pods Running)."
-  
-- name: Step 6 - Join worker nodes
-  hosts: workers
-  become: yes
-  gather_facts: false
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  vars:
-    join_script: /tmp/kube_join.sh
-  tasks:
-    - name: Test SSH connectivity to worker node
-      ping:
-      register: ping_result
-      ignore_errors: yes
-  
-    - name: Mark worker online status
-      set_fact:
-        worker_online: "{{ ping_result is succeeded }}"
-  
-    - name: Display worker online status
-      debug:
-        msg: "Worker {{ inventory_hostname }} is {{ 'ONLINE' if worker_online else 'OFFLINE' }}"
-  
-    - name: Retrieve join command from master
-      delegate_to: "{{ groups['master'][0] }}"
-      run_once: true
-      shell: kubeadm token create --print-join-command
-      register: join_cmd
-      when: worker_online
-  
-    - name: Save join command to script file
-      copy:
-        content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
-        dest: "{{ join_script }}"
-        mode: '0755'
-      when: worker_online
-      ignore_errors: yes
-  
-    - name: Reset old worker node
-      shell: kubeadm reset -f || true
-      ignore_errors: yes
-      when: worker_online
-  
-    - name: Execute join command
-      shell: "{{ join_script }}"
-      register: join_output
-      ignore_errors: yes
-      when: worker_online
-  
-    - name: Display join result summary
-      debug:
-        msg: "{{ 'Node ' + inventory_hostname + ' has successfully joined the cluster!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Skipping join' }}"
-  
-- name: Step 7 - Verify Kubernetes cluster status
-  hosts: master
-  become: yes
-  gather_facts: false
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Check kubectl binary
-      command: which kubectl
-      register: kubectl_check
-      failed_when: kubectl_check.rc != 0
-      changed_when: false
-  
-    - name: List all nodes
-      command: kubectl get nodes -o wide
-      register: nodes_info
-      changed_when: false
-  
-    - name: List system pods
-      command: kubectl get pods -n kube-system -o wide
-      register: pods_info
-      changed_when: false
-  
-    - name: Display cluster info
-      debug:
-        msg:
-          - "Node list:"
-          - "{{ nodes_info.stdout_lines }}"
-          - "Pods in kube-system namespace:"
-          - "{{ pods_info.stdout_lines }}"
-  
-    - name: Check node readiness
-    shell: kubectl get nodes --no-headers | awk '{print $1, $2}' | column -t
-    register: node_status
-    changed_when: false
-  
-    - name: Node status summary
-      debug:
-        msg: |
-          {% if 'NotReady' in node_status.stdout %}
-          Some nodes are not ready:
-          {{ node_status.stdout }}
-          Please check kubelet or CNI (Calico) on those nodes.
-          {% else %}
-          All nodes are in Ready state!
-          {{ node_status.stdout }}
-          {% endif %}
-  
-    - name: Detect problematic pods
-    shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
-    register: bad_pods
-    changed_when: false
-  
-    - name: Report problematic pods
-      debug:
-        msg: |
-          {% if bad_pods.stdout %}
-          Some pods in kube-system are not stable:
-          {{ bad_pods.stdout }}
-          {% else %}
-          All kube-system pods are Running or Completed!
-          {% endif %}
-  
-    - name: Collect logs from problematic pods
-      when: bad_pods.stdout != ""
-      shell: |
-        echo "==== Problematic Pod Logs ===="
-        for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
-          echo "---------------------------------------------"
-          echo "Pod: $pod"
-          kubectl logs -n kube-system $pod --tail=30 || echo "Cannot get logs for $pod"
-          echo
-        done
-      register: bad_pods_logs
-      ignore_errors: yes
-  
-    - name: Display detailed logs
-      when: bad_pods.stdout != ""
-      debug:
-        msg: "{{ bad_pods_logs.stdout_lines | default(['No error logs or pods restarted.']) }}"
-`
-		,
+- import_playbook: 00-reset-cluster.yml
+- import_playbook: 01-update-hosts-hostname.yml
+- import_playbook: 02-kernel-sysctl.yml
+- import_playbook: 03-install-containerd.yml
+- import_playbook: 04-install-kubernetes.yml
+- import_playbook: 05-init-master.yml
+- import_playbook: 06-install-cni.yml
+- import_playbook: 07-join-workers.yml
+- import_playbook: 08-verify-cluster.yml`,
 
 		'deploy-full-cluster-flannel': `---
-- name: Step 0 - Reset Kubernetes cluster
-  hosts: all
-  become: yes
-  gather_facts: yes
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Reset old cluster if exists
-      shell: kubeadm reset -f || true
-      ignore_errors: true
-  
-    - name: Remove old Kubernetes configuration
-      file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/kubernetes
-        - /etc/cni/net.d
-        - /root/.kube
-        - "/home/{{ ansible_user }}/.kube"
-      ignore_errors: true
-  
-    - name: Restart containerd service
-      shell: systemctl restart containerd || true
-      ignore_errors: true
-  
-- name: Step 1 - Update /etc/hosts and hostname
-  hosts: all
-  become: yes
-  gather_facts: yes
-  tasks:
-    - name: Update /etc/hosts file for all nodes
-      lineinfile:
-        path: /etc/hosts
-        line: "{{ hostvars[item].ansible_host }} {{ item }}"
-        state: present
-        create: yes
-        insertafter: EOF
-      loop: "{{ groups['all'] }}"
-      when: hostvars[item].ansible_host is defined
-  
-    - name: Set hostname according to inventory
-      hostname:
-        name: "{{ inventory_hostname }}"
-      when: ansible_hostname != inventory_hostname
-  
-    - name: Verify hostname
-      shell: hostnamectl
-      register: host_info
-  
-    - name: Display hostname info
-      debug:
-        msg: "{{ host_info.stdout_lines }}"
-  
-- name: Step 2 - Configure kernel and containerd
-  hosts: all
-  become: yes
-  gather_facts: no
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Disable swap
-      shell: swapoff -a && sed -i '/swap/d' /etc/fstab || true
-  
-    - name: Load kernel modules for containerd
-      copy:
-        dest: /etc/modules-load.d/containerd.conf
-        content: |
-          overlay
-          br_netfilter
-  
-    - name: Activate kernel modules
-      shell: |
-        modprobe overlay || true
-        modprobe br_netfilter || true
-  
-    - name: Configure sysctl parameters for Kubernetes
-      copy:
-        dest: /etc/sysctl.d/99-kubernetes-cri.conf
-        content: |
-          net.bridge.bridge-nf-call-iptables  = 1
-          net.bridge.bridge-nf-call-ip6tables = 1
-          net.ipv4.ip_forward                 = 1
-  
-    - name: Apply sysctl configuration
-      command: sysctl --system
-  
-    - name: Install containerd runtime
-      apt:
-        name: containerd
-        state: present
-        update_cache: yes
-  
-    - name: Generate default containerd config
-      shell: |
-        mkdir -p /etc/containerd
-        containerd config default > /etc/containerd/config.toml
-  
-    - name: Enable SystemdCgroup
-      replace:
-        path: /etc/containerd/config.toml
-        regexp: 'SystemdCgroup = false'
-        replace: 'SystemdCgroup = true'
-  
-    - name: Restart and enable containerd
-      systemd:
-        name: containerd
-        state: restarted
-        enabled: yes
-  
-- name: Step 3 - Install Kubernetes core components
-  hosts: all
-  become: yes
-  gather_facts: no
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Add Kubernetes GPG key
-      shell: |
-        mkdir -p /usr/share/keyrings
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | \
-        gpg --dearmor --yes -o /usr/share/keyrings/kubernetes-archive-keyring.gpg
-      changed_when: false
-      ignore_errors: true
-  
-    - name: Add Kubernetes repository
-      copy:
-        dest: /etc/apt/sources.list.d/kubernetes.list
-        content: |
-          deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
-  
-    - name: Install kubelet, kubeadm, kubectl
-      apt:
-        name:
-          - kubelet
-          - kubeadm
-          - kubectl
-        state: present
-        update_cache: yes
-  
-    - name: Hold package version
-      command: apt-mark hold kubelet kubeadm kubectl
-  
-- name: Step 4 - Initialize Master node
-  hosts: master
-  become: yes
-  gather_facts: yes
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Get master IP address
-      set_fact:
-        master_ip: "{{ hostvars[inventory_hostname].ansible_host | default(ansible_default_ipv4.address) }}"
-  
-    - name: Reset old control plane (if any)
-      shell: kubeadm reset -f || true
-  
-    - name: Initialize Kubernetes control plane
-      command: >
-        kubeadm init
-        --control-plane-endpoint "{{ master_ip }}:6443"
-        --apiserver-advertise-address {{ master_ip }}
-        --pod-network-cidr 10.244.0.0/16
-      args:
-        creates: /etc/kubernetes/admin.conf
-      register: kubeadm_init
-      failed_when: "'error' in kubeadm_init.stderr"
-      changed_when: "'Your Kubernetes control-plane has initialized successfully' in kubeadm_init.stdout"
-  
-    - name: Copy kubeconfig for root
-      shell: |
-        mkdir -p /root/.kube
-        cp -i /etc/kubernetes/admin.conf /root/.kube/config
-        chown root:root /root/.kube/config
-      args:
-        executable: /bin/bash
-  
-    - name: Copy kubeconfig for normal user
-      when: ansible_user != "root"
-      block:
-        - name: Create ~/.kube directory
-          file:
-            path: "/home/{{ ansible_user }}/.kube"
-            state: directory
-            owner: "{{ ansible_user }}"
-            group: "{{ ansible_user }}"
-            mode: '0755'
-  
-        - name: Copy kubeconfig file
-          copy:
-            src: /etc/kubernetes/admin.conf
-            dest: "/home/{{ ansible_user }}/.kube/config"
-            remote_src: yes
-            owner: "{{ ansible_user }}"
-            group: "{{ ansible_user }}"
-            mode: '0600'
-  
-- name: Step 5 - Install Flannel CNI
-  hosts: master
-  become: yes
-  gather_facts: false
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Apply Flannel CNI manifest
-      command: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
-      register: flannel_apply
-      changed_when: "'created' in flannel_apply.stdout or 'configured' in flannel_apply.stdout"
-  
-    - name: Wait for Flannel pods to be Running
-      shell: |
-        kubectl get pods -n kube-flannel --no-headers 2>/dev/null | grep -c 'Running' || true
-      register: flannel_running
-      retries: 10
-      delay: 15
-      until: flannel_running.stdout | int > 0
-  
-    - name: Confirm Flannel pods are active
-      debug:
-        msg: "Flannel is running ({{ flannel_running.stdout }} pods Running)."
-  
-- name: Step 6 - Join worker nodes
-  hosts: workers
-  become: yes
-  gather_facts: false
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  vars:
-    join_script: /tmp/kube_join.sh
-  tasks:
-    - name: Test SSH connectivity to worker node
-      ping:
-      register: ping_result
-      ignore_errors: yes
-  
-    - name: Mark worker online status
-      set_fact:
-        worker_online: "{{ ping_result is succeeded }}"
-  
-    - name: Display worker online status
-      debug:
-        msg: "Worker {{ inventory_hostname }} is {{ 'ONLINE' if worker_online else 'OFFLINE' }}"
-  
-    - name: Retrieve join command from master
-      delegate_to: "{{ groups['master'][0] }}"
-      run_once: true
-      shell: kubeadm token create --print-join-command
-      register: join_cmd
-      when: worker_online
-  
-    - name: Save join command to script file
-      copy:
-        content: "{{ join_cmd.stdout }} --ignore-preflight-errors=all"
-        dest: "{{ join_script }}"
-        mode: '0755'
-      when: worker_online
-      ignore_errors: yes
-  
-    - name: Reset old worker node
-      shell: kubeadm reset -f || true
-      ignore_errors: yes
-      when: worker_online
-  
-    - name: Execute join command
-      shell: "{{ join_script }}"
-      register: join_output
-      ignore_errors: yes
-      when: worker_online
-  
-    - name: Display join result summary
-      debug:
-        msg: "{{ 'Node ' + inventory_hostname + ' has successfully joined the cluster!' if worker_online else 'Worker ' + inventory_hostname + ' OFFLINE - Skipping join' }}"
-  
-- name: Step 7 - Verify Kubernetes cluster status
-  hosts: master
-  become: yes
-  gather_facts: false
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-    DEBIAN_FRONTEND: noninteractive
-  tasks:
-    - name: Check kubectl binary
-      command: which kubectl
-      register: kubectl_check
-      failed_when: kubectl_check.rc != 0
-      changed_when: false
-  
-    - name: List all nodes
-      command: kubectl get nodes -o wide
-      register: nodes_info
-      changed_when: false
-  
-    - name: List system pods
-      command: kubectl get pods -n kube-system -o wide
-      register: pods_info
-      changed_when: false
-  
-    - name: Display cluster info
-      debug:
-        msg:
-          - "Node list:"
-          - "{{ nodes_info.stdout_lines }}"
-          - "Pods in kube-system namespace:"
-          - "{{ pods_info.stdout_lines }}"
-  
-    - name: Check node readiness
-      shell: kubectl get nodes --no-headers | awk '{print $1, $2}' | column -t
-      register: node_status
-      changed_when: false
-  
-    - name: Node status summary
-      debug:
-        msg: |
-          {% if 'NotReady' in node_status.stdout %}
-          Some nodes are not ready:
-          {{ node_status.stdout }}
-          Please check kubelet or CNI (Flannel) on those nodes.
-          {% else %}
-          All nodes are in Ready state!
-          {{ node_status.stdout }}
-          {% endif %}
-  
-    - name: Detect problematic pods
-      shell: kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' || true
-      register: bad_pods
-      changed_when: false
-  
-    - name: Report problematic pods
-      debug:
-        msg: |
-          {% if bad_pods.stdout %}
-          Some pods in kube-system are not stable:
-          {{ bad_pods.stdout }}
-          {% else %}
-          All kube-system pods are Running or Completed!
-          {% endif %}
-  
-    - name: Collect logs from problematic pods
-      when: bad_pods.stdout != ""
-      shell: |
-        echo "==== Problematic Pod Logs ===="
-        for pod in $(kubectl get pods -n kube-system --no-headers | grep -vE 'Running|Completed' | awk '{print $1}'); do
-          echo "---------------------------------------------"
-          echo "Pod: $pod"
-          kubectl logs -n kube-system $pod --tail=30 || echo "Cannot get logs for $pod"
-          echo
-        done
-      register: bad_pods_logs
-      ignore_errors: yes
-  
-    - name: Display detailed logs
-      when: bad_pods.stdout != ""
-      debug:
-        msg: "{{ bad_pods_logs.stdout_lines | default(['No error logs or pods restarted.']) }}"
-  `
+- import_playbook: 00-reset-cluster.yml
+- import_playbook: 01-update-hosts-hostname.yml
+- import_playbook: 02-kernel-sysctl.yml
+- import_playbook: 03-install-containerd.yml
+- import_playbook: 04-install-kubernetes.yml
+- import_playbook: 05-init-master.yml
+- import_playbook: 06-install-flannel.yml
+- import_playbook: 07-join-workers.yml
+- import_playbook: 08-verify-cluster.yml`
+	};
+
+	// Upload tất cả template playbook lên máy Ansible
+	window.uploadAllTemplates = async function() {
+		try {
+			// Lấy danh sách template cần upload (chỉ các template từ 00-08 và deploy-full-cluster)
+			const templateKeys = [
+				'00-reset-cluster',
+				'01-update-hosts-hostname',
+				'02-kernel-sysctl',
+				'03-install-containerd',
+				'04-install-kubernetes',
+				'05-init-master',
+				'06-install-cni',
+				'06-install-flannel',
+				'07-join-workers',
+				'08-verify-cluster',
+				'deploy-full-cluster',
+				'deploy-full-cluster-flannel'
+			];
+
+			// Tạo Map<filename, content>
+			const templatesMap = {};
+			for (const key of templateKeys) {
+				if (templates[key]) {
+					const filename = key + '.yml';
+					templatesMap[filename] = templates[key];
+				}
+			}
+
+			if (Object.keys(templatesMap).length === 0) {
+				throw new Error('Không có template nào để upload');
+			}
+
+			// Gọi API upload templates
+			const response = await fetch('/api/ansible-playbook/upload-templates', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(templatesMap)
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.error || 'Lỗi upload templates');
+			}
+
+			const result = await response.json();
+			return result;
+		} catch (error) {
+			console.error('Error uploading templates:', error);
+			throw error;
+		}
 	};
 
 	// Map template value (without numbers) to template key (with numbers)
@@ -2387,14 +2077,15 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
 		'install-flannel': '06-install-flannel',
 		'join-workers': '07-join-workers',
 		'verify-cluster': '08-verify-cluster',
-		'install-ingress': '09-install-ingress',
-		'install-metallb': '10-install-metallb',
-		'install-helm': '11-install-helm',
-		'setup-storage': '12-setup-storage',
-		'prepare-and-join-worker': '13-prepare-and-join-worker',
+		'install-helm': '09-install-helm',
+		'install-metrics-server': '10-install-metrics-server',
+		'install-ingress': '11-install-ingress',
+		'install-metallb': '12-install-metallb',
+		'setup-storage': '13-setup-storage',
+		'prepare-and-join-worker': '14-prepare-and-join-worker',
+		'reset-cluster': '00-reset-cluster',
 		'deploy-full-cluster': 'deploy-full-cluster',
-		'deploy-full-cluster-flannel': 'deploy-full-cluster-flannel',
-		'reset-cluster': '00-reset-cluster'
+		'deploy-full-cluster-flannel': 'deploy-full-cluster-flannel'
 	};
 
 	// Get the actual template key
@@ -2423,13 +2114,14 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
 			'06-install-flannel': 'Cài CNI (Flannel)',
 			'07-join-workers': 'Join Workers',
 			'08-verify-cluster': 'Xác minh trạng thái cụm',
-			'09-install-ingress': 'Cài Ingress Controller',
-			'10-install-metallb': 'Cài MetalLB LoadBalancer',
-			'11-install-helm': 'Cài Helm',
-			'12-setup-storage': 'Setup Storage',
-			'13-prepare-and-join-worker': 'Chuẩn bị & Join Worker (02→03→04→07)',
-			'deploy-full-cluster': 'Triển khai toàn bộ cluster (Calico)',
-			'deploy-full-cluster-flannel': 'Triển khai toàn bộ cluster (Flannel)'
+			'09-install-helm': 'Cài Helm',
+			'10-install-metrics-server': 'Cài đặt Metrics Server',
+			'11-install-ingress': 'Cài Ingress Controller',
+			'12-install-metallb': 'Cài MetalLB LoadBalancer',
+			'13-setup-storage': 'Setup Storage',
+			'14-prepare-and-join-worker': 'Chuẩn bị & Join Worker (02→03→04→07)',
+			'deploy-full-cluster': 'Triển khai toàn bộ cluster (00→08)',
+			'deploy-full-cluster-flannel': 'Triển khai toàn bộ cluster với Flannel (00→08)'
 		};
 
 		const templateName = templateNames[actualTemplate] || actualTemplate;
@@ -2452,7 +2144,7 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
 	}
 
 	try {
-		const result = await fetch(`/api/ansible-playbook/save/${getClusterId()}`, {
+		const result = await fetch(`/api/ansible-playbook/save`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
@@ -2477,8 +2169,14 @@ window.showPlaybookContentView = function () {
 	const contentArea = document.getElementById('playbook-content-area');
 	const executionArea = document.getElementById('playbook-execution-status');
 
-	if (contentArea) contentArea.style.display = 'block';
-	if (executionArea) executionArea.style.display = 'none';
+	if (contentArea) {
+		contentArea.style.display = 'block';
+		contentArea.classList.remove('d-none');
+	}
+	if (executionArea) {
+		executionArea.style.display = 'none';
+		executionArea.classList.add('d-none');
+	}
 };
 
 // Hiển thị thực thi playbook
@@ -2486,8 +2184,14 @@ window.showPlaybookExecutionView = function () {
 	const contentArea = document.getElementById('playbook-content-area');
 	const executionArea = document.getElementById('playbook-execution-status');
 
-	if (contentArea) contentArea.style.display = 'none';
-	if (executionArea) executionArea.style.display = 'block';
+	if (contentArea) {
+		contentArea.style.display = 'none';
+		contentArea.classList.add('d-none');
+	}
+	if (executionArea) {
+		executionArea.style.display = 'block';
+		executionArea.classList.remove('d-none');
+	}
 };
 
 // Tìm kiếm playbook
@@ -2833,8 +2537,14 @@ window.resetPlaybookUI = function () {
 		if (ed) ed.value = '';
 		const contentArea = document.getElementById('playbook-content-area');
 		const execArea = document.getElementById('playbook-execution-status');
-		if (contentArea) contentArea.style.display = 'none';
-		if (execArea) execArea.style.display = 'none';
+		if (contentArea) {
+			contentArea.style.display = 'none';
+			contentArea.classList.add('d-none');
+		}
+		if (execArea) {
+			execArea.style.display = 'none';
+			execArea.classList.add('d-none');
+		}
 		const output = document.getElementById('ansible-output');
 		if (output) output.textContent = '';
 		const alertBox = document.getElementById('playbook-alert');

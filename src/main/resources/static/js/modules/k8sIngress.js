@@ -5,12 +5,21 @@
     let ingressData = [];
     let filteredData = [];
 
-    // Helper function để escape HTML
+    // Helper functions từ k8sHelpers
     function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
+    }
+
+    function isSystemNamespace(name) {
+        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
+    }
+
+    function showK8sOutput(title, output) {
+        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
+            window.K8sHelpers.showK8sOutput(title, output);
+        } else {
+            alert(`${title}\n\n${output}`);
+        }
     }
 
     // Load ingress data
@@ -88,31 +97,73 @@
             const host = item.host || (item.hosts && item.hosts.length > 0 ? item.hosts[0] : '*');
             const address = item.address || (item.addresses && item.addresses.length > 0 ? item.addresses[0] : '-');
             const ports = item.ports ? item.ports.join(', ') : '80,443';
+            const isSystem = isSystemNamespace(item.namespace);
+            const namespace = item.namespace || '';
+            const name = item.name || '';
 
             return `
                 <tr>
-                    <td>${escapeHtml(item.namespace || '-')}</td>
-                    <td><span class="fw-medium">${escapeHtml(item.name || '-')}</span></td>
-                    <td class="text-muted small">${escapeHtml(item.class || '-')}</td>
-                    <td>${escapeHtml(host)}</td>
-                    <td>${escapeHtml(address)}</td>
+                    <td><code>${escapeHtml(namespace)}</code></td>
+                    <td><span class="fw-medium">${escapeHtml(name)}</span></td>
+                    <td class="text-muted small"><code>${escapeHtml(item.class || '-')}</code></td>
+                    <td class="text-muted small">${escapeHtml(host)}</td>
+                    <td class="text-muted small">${escapeHtml(address)}</td>
                     <td class="text-muted small">${escapeHtml(ports)}</td>
                     <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-primary" onclick="window.K8sIngressModule.showDetail('${escapeHtml(item.namespace || '')}', '${escapeHtml(item.name || '')}')">
-                            Chi tiết
-                        </button>
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-info" onclick="window.K8sIngressModule.describeIngress('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            ${!isSystem ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sIngressModule.deleteIngress('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                                <i class="bi bi-trash"></i>
+                            </button>` : ''}
+                        </div>
                     </td>
                 </tr>
             `;
         }).join('');
     }
 
-    // Show detail (placeholder)
-    function showDetail(namespace, name) {
-        console.log('Show detail:', namespace, name);
-        // TODO: Implement detail modal
-        alert(`Chi tiết Ingress: ${name} trong namespace ${namespace}`);
+    // Describe ingress
+    async function describeIngress(namespace, name) {
+        try {
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/ingress/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            showK8sOutput(`Ingress ${namespace}/${name}`, data.output || '');
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi lấy thông tin ingress');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi lấy thông tin ingress'));
+            }
+        }
+    }
+
+    // Delete ingress
+    async function deleteIngress(namespace, name) {
+        if (isSystemNamespace(namespace)) {
+            if (window.showAlert) {
+                window.showAlert('warning', 'Không cho phép xóa Ingress trong namespace hệ thống');
+            } else {
+                alert('Không cho phép xóa Ingress trong namespace hệ thống');
+            }
+            return;
+        }
+        if (!confirm(`Xóa Ingress ${namespace}/${name}?`)) return;
+
+        try {
+            const data = await window.ApiClient.delete(`/admin/cluster/k8s/ingress/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            if (window.showAlert) {
+                window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `ingress.networking.k8s.io "${name}" deleted`)}</pre>`);
+            }
+            await loadIngress();
+        } catch (error) {
+            if (window.showAlert) {
+                window.showAlert('error', error.message || 'Lỗi xóa ingress');
+            } else {
+                alert('Lỗi: ' + (error.message || 'Lỗi xóa ingress'));
+            }
+        }
     }
 
     // Initialize module
@@ -150,7 +201,8 @@
 
     window.K8sIngressModule = {
         loadIngress,
-        showDetail
+        describeIngress,
+        deleteIngress
     };
 })();
 
