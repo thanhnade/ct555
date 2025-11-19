@@ -50,6 +50,7 @@ public class ClusterAdminController {
 
     // Constants for timeouts and commands
     private static final int SSH_TIMEOUT = 10000; // Tăng timeout cho combined commands
+    private static final int OVERVIEW_API_TIMEOUT_SECONDS = 30; // Timeout cho overview API calls (tăng từ 10s lên 30s để đủ thời gian cho lần đầu load)
     private static final String COMBINED_METRICS_COMMAND = "echo \"CPU_CORES:$(nproc)\"; " +
             "echo \"CPU_LOAD:$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')\"; " +
             "echo \"RAM_TOTAL:$(free -h | awk '/^Mem:/{print $2}')\"; " +
@@ -246,45 +247,64 @@ public class ClusterAdminController {
             io.fabric8.kubernetes.api.model.apps.StatefulSetList statefulSets = null;
             io.fabric8.kubernetes.api.model.apps.DaemonSetList daemonSets = null;
             
+            CompletableFuture<io.fabric8.kubernetes.api.model.apps.DeploymentList> deploymentsFuture = null;
+            CompletableFuture<io.fabric8.kubernetes.api.model.apps.StatefulSetList> statefulSetsFuture = null;
+            CompletableFuture<io.fabric8.kubernetes.api.model.apps.DaemonSetList> daemonSetsFuture = null;
+            
             try {
-                CompletableFuture<io.fabric8.kubernetes.api.model.apps.DeploymentList> deploymentsFuture = 
-                    CompletableFuture.supplyAsync(() -> {
-                        try {
-                            return kubernetesService.getDeployments(null);
-                        } catch (Exception e) {
-                            logger.debug("Không lấy được Deployments: " + e.getMessage());
-                            return null;
-                        }
-                    }, executorService);
+                deploymentsFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return kubernetesService.getDeployments(null);
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được Deployments: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
                 
-                CompletableFuture<io.fabric8.kubernetes.api.model.apps.StatefulSetList> statefulSetsFuture = 
-                    CompletableFuture.supplyAsync(() -> {
-                        try {
-                            return kubernetesService.getStatefulSets(null);
-                        } catch (Exception e) {
-                            logger.debug("Không lấy được StatefulSets: " + e.getMessage());
-                            return null;
-                        }
-                    }, executorService);
+                statefulSetsFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return kubernetesService.getStatefulSets(null);
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được StatefulSets: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
                 
-                CompletableFuture<io.fabric8.kubernetes.api.model.apps.DaemonSetList> daemonSetsFuture = 
-                    CompletableFuture.supplyAsync(() -> {
-                        try {
-                            return kubernetesService.getDaemonSets(null);
-                        } catch (Exception e) {
-                            logger.debug("Không lấy được DaemonSets: " + e.getMessage());
-                            return null;
-                        }
-                    }, executorService);
+                daemonSetsFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return kubernetesService.getDaemonSets(null);
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được DaemonSets: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
                 
                 CompletableFuture.allOf(deploymentsFuture, statefulSetsFuture, daemonSetsFuture)
-                    .get(10, TimeUnit.SECONDS);
+                    .get(OVERVIEW_API_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 
                 deployments = deploymentsFuture.get();
                 statefulSets = statefulSetsFuture.get();
                 daemonSets = daemonSetsFuture.get();
+            } catch (java.util.concurrent.TimeoutException e) {
+                logger.warn("[Overview Workloads] Timeout sau {} giây khi lấy workloads: {}", OVERVIEW_API_TIMEOUT_SECONDS, e.getMessage());
+                System.out.println("[Overview Workloads] Timeout sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây khi lấy workloads: " + e.getMessage());
+                // Lấy kết quả đã có (có thể null nếu chưa hoàn thành)
+                try {
+                    if (deploymentsFuture != null && deploymentsFuture.isDone()) {
+                        deployments = deploymentsFuture.get();
+                    }
+                    if (statefulSetsFuture != null && statefulSetsFuture.isDone()) {
+                        statefulSets = statefulSetsFuture.get();
+                    }
+                    if (daemonSetsFuture != null && daemonSetsFuture.isDone()) {
+                        daemonSets = daemonSetsFuture.get();
+                    }
+                } catch (Exception ex) {
+                    logger.debug("Không lấy được kết quả từ futures: " + ex.getMessage());
+                }
             } catch (Exception e) {
-                logger.debug("Lỗi khi lấy workloads: " + e.getMessage());
+                logger.warn("[Overview Workloads] Lỗi khi lấy workloads: " + e.getMessage());
+                System.out.println("[Overview Workloads] Lỗi khi lấy workloads: " + e.getMessage());
             }
             
             int workloadsCount = 0;
@@ -337,34 +357,50 @@ public class ClusterAdminController {
             io.fabric8.kubernetes.api.model.PodList pods = null;
             io.fabric8.kubernetes.api.model.NamespaceList namespaces = null;
             
+            CompletableFuture<io.fabric8.kubernetes.api.model.PodList> podsFuture = null;
+            CompletableFuture<io.fabric8.kubernetes.api.model.NamespaceList> namespacesFuture = null;
+            
             try {
-                CompletableFuture<io.fabric8.kubernetes.api.model.PodList> podsFuture = 
-                    CompletableFuture.supplyAsync(() -> {
-                        try {
-                            return kubernetesService.getPods(null);
-                        } catch (Exception e) {
-                            logger.debug("Không lấy được Pods: " + e.getMessage());
-                            return null;
-                        }
-                    }, executorService);
+                podsFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return kubernetesService.getPods(null);
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được Pods: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
                 
-                CompletableFuture<io.fabric8.kubernetes.api.model.NamespaceList> namespacesFuture = 
-                    CompletableFuture.supplyAsync(() -> {
-                        try {
-                            return kubernetesService.getNamespaces();
-                        } catch (Exception e) {
-                            logger.debug("Không lấy được Namespaces: " + e.getMessage());
-                            return null;
-                        }
-                    }, executorService);
+                namespacesFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return kubernetesService.getNamespaces();
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được Namespaces: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
                 
                 CompletableFuture.allOf(podsFuture, namespacesFuture)
-                    .get(10, TimeUnit.SECONDS);
+                    .get(OVERVIEW_API_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 
                 pods = podsFuture.get();
                 namespaces = namespacesFuture.get();
+            } catch (java.util.concurrent.TimeoutException e) {
+                logger.warn("[Overview Pods/Namespaces] Timeout sau {} giây khi lấy pods/namespaces: {}", OVERVIEW_API_TIMEOUT_SECONDS, e.getMessage());
+                System.out.println("[Overview Pods/Namespaces] Timeout sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây khi lấy pods/namespaces: " + e.getMessage());
+                // Lấy kết quả đã có (có thể null nếu chưa hoàn thành)
+                try {
+                    if (podsFuture != null && podsFuture.isDone()) {
+                        pods = podsFuture.get();
+                    }
+                    if (namespacesFuture != null && namespacesFuture.isDone()) {
+                        namespaces = namespacesFuture.get();
+                    }
+                } catch (Exception ex) {
+                    logger.debug("Không lấy được kết quả từ futures: " + ex.getMessage());
+                }
             } catch (Exception e) {
-                logger.debug("Lỗi khi lấy pods/namespaces: " + e.getMessage());
+                logger.warn("[Overview Pods/Namespaces] Lỗi khi lấy pods/namespaces: " + e.getMessage());
+                System.out.println("[Overview Pods/Namespaces] Lỗi khi lấy pods/namespaces: " + e.getMessage());
             }
             
             int totalPodsCount = 0;
@@ -495,11 +531,11 @@ public class ClusterAdminController {
                     java.util.List<Map<String, Object>> metricsList = new java.util.ArrayList<>();
                     for (var future : metricsFutures) {
                         try {
-                            Map<String, Object> metrics = future.get(10, TimeUnit.SECONDS);
+                            Map<String, Object> metrics = future.get(OVERVIEW_API_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                             metricsList.add(metrics);
                         } catch (java.util.concurrent.TimeoutException e) {
-                            logger.warn("[Resource Usage] Timeout lấy metrics cho overview: {}", e.getMessage());
-                            System.out.println("[Resource Usage] Timeout lấy metrics cho overview: " + e.getMessage());
+                            logger.warn("[Resource Usage] Timeout lấy metrics cho overview sau {} giây: {}", OVERVIEW_API_TIMEOUT_SECONDS, e.getMessage());
+                            System.out.println("[Resource Usage] Timeout lấy metrics cho overview sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây: " + e.getMessage());
                         } catch (Exception e) {
                             logger.warn("[Resource Usage] Lỗi lấy metrics cho overview: {}", e.getMessage());
                             System.out.println("[Resource Usage] Lỗi lấy metrics cho overview: " + e.getMessage());
@@ -852,13 +888,17 @@ public class ClusterAdminController {
                         }
                     }
                     
-                    // Match nodes với servers và lấy metrics
+                    // Tối ưu: Lấy metrics cho tất cả nodes song song thay vì tuần tự
+                    java.util.List<java.util.Map.Entry<java.util.Map<String, Object>, CompletableFuture<Map<String, Object>>>> nodeMetricsFutures = 
+                            new java.util.ArrayList<>();
+                    
+                    // Tạo futures cho tất cả nodes cần lấy metrics
                     for (var node : nodes) {
                         String nodeIP = (String) node.get("k8sInternalIP");
                         if (nodeIP != null && !nodeIP.isBlank()) {
                             com.example.AutoDeployApp.entity.Server server = serverByIP.get(nodeIP);
                             if (server != null && server.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE) {
-                                // Lấy metrics từ SSH
+                                // Tạo ServerData và CompletableFuture
                                 ServerData serverData = new ServerData(
                                     server.getId(),
                                     server.getHost(),
@@ -872,17 +912,37 @@ public class ClusterAdminController {
                                     true
                                 );
                                 
-                                try {
-                                    Map<String, Object> metrics = getServerMetricsAsync(serverData, pwCache)
-                                        .get(5, TimeUnit.SECONDS);
-                                    
-                                    // Thêm usage metrics vào node
-                                    addUsageMetricsToNode(node, metrics);
-                                } catch (Exception e) {
-                                    // Timeout hoặc lỗi khi lấy metrics, bỏ qua
-                                    logger.debug("Không lấy được metrics cho node " + nodeIP + ": " + e.getMessage());
-                                }
+                                CompletableFuture<Map<String, Object>> metricsFuture = getServerMetricsAsync(serverData, pwCache);
+                                nodeMetricsFutures.add(java.util.Map.entry(node, metricsFuture));
                             }
+                        }
+                    }
+                    
+                    // Chờ tất cả futures hoàn thành với timeout (tối ưu: timeout ngắn hơn vì đã parallelize)
+                    int timeoutSeconds = Math.max(5, Math.min(10, nodeMetricsFutures.size())); // 5-10 giây tùy số lượng nodes
+                    try {
+                        CompletableFuture.allOf(nodeMetricsFutures.stream()
+                                .map(entry -> entry.getValue())
+                                .toArray(CompletableFuture[]::new))
+                                .get(timeoutSeconds, TimeUnit.SECONDS);
+                    } catch (java.util.concurrent.TimeoutException e) {
+                        logger.warn("[Nodes] Timeout sau {} giây khi lấy metrics cho {} nodes", timeoutSeconds, nodeMetricsFutures.size());
+                    } catch (Exception e) {
+                        logger.debug("Lỗi khi chờ metrics futures: " + e.getMessage());
+                    }
+                    
+                    // Lấy kết quả từ các futures đã hoàn thành
+                    for (var entry : nodeMetricsFutures) {
+                        var node = entry.getKey();
+                        var metricsFuture = entry.getValue();
+                        try {
+                            if (metricsFuture.isDone()) {
+                                Map<String, Object> metrics = metricsFuture.get();
+                                addUsageMetricsToNode(node, metrics);
+                            }
+                        } catch (Exception e) {
+                            // Bỏ qua nếu future chưa hoàn thành hoặc có lỗi
+                            logger.debug("Không lấy được metrics cho node " + node.get("k8sInternalIP") + ": " + e.getMessage());
                         }
                     }
                 }
@@ -994,12 +1054,115 @@ public class ClusterAdminController {
 	@GetMapping("/k8s/namespaces")
 	public ResponseEntity<?> listNamespaces(HttpServletRequest request) {
         try {
-            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
+            // Tối ưu: Lấy tất cả dữ liệu một lần thay vì gọi API cho từng namespace
             var namespaceList = kubernetesService.getNamespaces();
             var namespaceItems = namespaceList != null && namespaceList.getItems() != null
                     ? namespaceList.getItems()
                     : java.util.Collections.<io.fabric8.kubernetes.api.model.Namespace>emptyList();
 
+            // Lấy tất cả pods một lần (từ tất cả namespaces)
+            java.util.Map<String, Integer> podsCountByNamespace = new java.util.HashMap<>();
+            try {
+                io.fabric8.kubernetes.api.model.PodList allPods = kubernetesService.getPods(null); // null = lấy tất cả pods
+                if (allPods != null && allPods.getItems() != null) {
+                    // Group pods theo namespace
+                    java.util.Map<String, Integer> tempMap = allPods.getItems().stream()
+                            .filter(pod -> pod.getMetadata() != null && pod.getMetadata().getNamespace() != null)
+                            .collect(java.util.stream.Collectors.groupingBy(
+                                    pod -> pod.getMetadata().getNamespace(),
+                                    java.util.stream.Collectors.collectingAndThen(
+                                            java.util.stream.Collectors.counting(),
+                                            Long::intValue)));
+                    podsCountByNamespace.putAll(tempMap);
+                }
+            } catch (Exception e) {
+                logger.debug("Không lấy được pods: " + e.getMessage());
+            }
+
+            // Lấy tất cả pod metrics một lần (từ tất cả namespaces)
+            java.util.Map<String, Map<String, Double>> metricsByNamespace = new java.util.HashMap<>();
+            try {
+                var allPodMetrics = kubernetesService.getPodMetrics(null); // null = lấy tất cả metrics
+                if (allPodMetrics != null && !allPodMetrics.isEmpty()) {
+                    // Group metrics theo namespace và tính tổng CPU/RAM
+                    java.util.Map<String, java.util.List<io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics>> metricsGrouped = 
+                            allPodMetrics.stream()
+                                    .filter(pm -> pm.getMetadata() != null && pm.getMetadata().getNamespace() != null)
+                                    .collect(java.util.stream.Collectors.groupingBy(
+                                            pm -> pm.getMetadata().getNamespace()));
+                    
+                    for (var entry : metricsGrouped.entrySet()) {
+                        String nsName = entry.getKey();
+                        var podMetricsList = entry.getValue();
+                        
+                        double totalCpuNanoCores = 0.0;
+                        double totalMemoryBytes = 0.0;
+                        
+                        for (var podMetric : podMetricsList) {
+                            var containers = podMetric.getContainers();
+                            if (containers != null) {
+                                for (var container : containers) {
+                                    var usage = container.getUsage();
+                                    if (usage != null) {
+                                        // CPU usage (nano cores)
+                                        var cpuUsage = usage.get("cpu");
+                                        if (cpuUsage != null) {
+                                            try {
+                                                String cpuStr = cpuUsage.getAmount();
+                                                // Parse quantity: "100m" = 0.1 cores = 100000000 nano cores, "1" = 1000000000 nano cores
+                                                if (cpuStr != null && !cpuStr.isBlank()) {
+                                                    cpuStr = cpuStr.trim();
+                                                    if (cpuStr.endsWith("m")) {
+                                                        double millicores = Double.parseDouble(cpuStr.substring(0, cpuStr.length() - 1));
+                                                        totalCpuNanoCores += millicores * 1_000_000.0;
+                                                    } else {
+                                                        double cores = Double.parseDouble(cpuStr);
+                                                        totalCpuNanoCores += cores * 1_000_000_000.0;
+                                                    }
+                                                }
+                                            } catch (Exception e) {
+                                                logger.debug("Khong parse duoc CPU usage cho pod {}: {}", 
+                                                        podMetric.getMetadata().getName(), e.getMessage());
+                                            }
+                                        }
+                                        
+                                        // Memory usage (bytes)
+                                        var memoryUsage = usage.get("memory");
+                                        if (memoryUsage != null) {
+                                            try {
+                                                String memoryStr = memoryUsage.getAmount();
+                                                // Parse quantity: "1Gi" = 1073741824 bytes, "512Mi" = 536870912 bytes, "1K" = 1024 bytes
+                                                if (memoryStr != null && !memoryStr.isBlank()) {
+                                                    memoryStr = memoryStr.trim();
+                                                    double bytes = parseQuantityToBytes(memoryStr);
+                                                    totalMemoryBytes += bytes;
+                                                }
+                                            } catch (Exception e) {
+                                                logger.debug("Khong parse duoc Memory usage cho pod {}: {}", 
+                                                        podMetric.getMetadata().getName(), e.getMessage());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Convert nano cores sang cores
+                        double totalCpuCores = totalCpuNanoCores / 1_000_000_000.0;
+                        // Đảm bảo giá trị cores hợp lệ (không phải nano cores)
+                        if (totalCpuCores > 1000) {
+                            // Nếu giá trị lớn hơn 1000, có thể đã là nano cores, convert lại
+                            logger.warn("[Namespaces] CPU value too large for namespace {}: {}, converting from nano cores", nsName, totalCpuCores);
+                            totalCpuCores = totalCpuNanoCores / 1_000_000_000.0;
+                        }
+                        metricsByNamespace.put(nsName, Map.of("cpu", totalCpuCores, "ram", totalMemoryBytes));
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Khong lay duoc pod metrics: " + e.getMessage());
+            }
+
+            // Map namespaces với dữ liệu đã lấy
             java.util.List<java.util.Map<String, Object>> result = namespaceItems.stream()
                     .map(ns -> {
                         String namespaceName = ns.getMetadata() != null ? ns.getMetadata().getName() : "";
@@ -1014,42 +1177,24 @@ public class ClusterAdminController {
                         }
                         map.put("age", age);
                         
-                        // Get pods count for this namespace
-                        int podsCount = 0;
-                        try {
-                            var pods = kubernetesService.getPods(namespaceName);
-                            podsCount = pods.getItems() != null ? pods.getItems().size() : 0;
-                        } catch (Exception e) {
-                            logger.debug("Không lấy được pods cho namespace " + namespaceName + ": " + e.getMessage());
-                        }
+                        // Get pods count từ map đã tính
+                        int podsCount = podsCountByNamespace.getOrDefault(namespaceName, 0);
                         map.put("pods", podsCount);
-                        double cpuUsage = 0.0;
-                        double ramUsage = 0.0;
-                        try {
-                            var pods = kubernetesService.getPods(namespaceName);
-                            if (pods.getItems() != null) {
-                                for (var pod : pods.getItems()) {
-                                    if (pod.getSpec() != null && pod.getSpec().getContainers() != null) {
-                                        for (var container : pod.getSpec().getContainers()) {
-                                            if (container.getResources() != null && container.getResources().getRequests() != null) {
-                                                var cpuRequest = container.getResources().getRequests().get("cpu");
-                                                if (cpuRequest != null && cpuRequest.getAmount() != null) {
-                                                    cpuUsage += Double.parseDouble(cpuRequest.getAmount());
-                                                }
-                                                var memoryRequest = container.getResources().getRequests().get("memory");
-                                                if (memoryRequest != null && memoryRequest.getAmount() != null) {
-                                                    ramUsage += Double.parseDouble(memoryRequest.getAmount());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (Exception e) {
-                            logger.debug("Không tính được CPU/RAM cho namespace " + namespaceName + ": " + e.getMessage());
+                        
+                        // Lấy CPU và RAM usage từ map đã tính
+                        var metrics = metricsByNamespace.get(namespaceName);
+                        double cpuUsageCores = 0.0;
+                        double ramUsageBytes = 0.0;
+                        if (metrics != null) {
+                            cpuUsageCores = metrics.get("cpu") != null ? metrics.get("cpu") : 0.0;
+                            ramUsageBytes = metrics.get("ram") != null ? metrics.get("ram") : 0.0;
                         }
-                        map.put("cpu", cpuUsage);
-                        map.put("ram", ramUsage);
+                        
+                        // CPU: đã được convert sang cores (từ nano cores)
+                        map.put("cpu", cpuUsageCores);
+                        // RAM: convert bytes sang Mi (để hiển thị dễ đọc hơn)
+                        double ramUsageMi = ramUsageBytes / (1024.0 * 1024.0);
+                        map.put("ram", ramUsageMi);
                         return map;
                     })
                     .collect(java.util.stream.Collectors.toList());
@@ -2832,6 +2977,58 @@ public class ClusterAdminController {
         }
         
         return w;
+    }
+
+    /**
+     * Parse Quantity string sang bytes
+     * Hỗ trợ: "1Gi" = 1073741824 bytes, "512Mi" = 536870912 bytes, "1K" = 1024 bytes
+     */
+    private double parseQuantityToBytes(String quantity) {
+        if (quantity == null || quantity.isBlank()) return 0.0;
+        quantity = quantity.trim();
+        try {
+            // Parse số
+            double value = 0.0;
+            String unit = "";
+            
+            // Tách số và unit
+            int unitStart = -1;
+            for (int i = 0; i < quantity.length(); i++) {
+                char c = quantity.charAt(i);
+                if (Character.isLetter(c)) {
+                    unitStart = i;
+                    break;
+                }
+            }
+            
+            if (unitStart > 0) {
+                value = Double.parseDouble(quantity.substring(0, unitStart));
+                unit = quantity.substring(unitStart);
+            } else {
+                // Không có unit, giả sử là bytes
+                return Double.parseDouble(quantity);
+            }
+
+            // Convert sang bytes
+            return switch (unit.toUpperCase()) {
+                case "KI", "K" -> value * 1024;
+                case "MI", "M" -> value * 1024 * 1024;
+                case "GI", "G" -> value * 1024 * 1024 * 1024;
+                case "TI", "T" -> value * 1024L * 1024 * 1024 * 1024;
+                case "PI", "P" -> value * 1024L * 1024 * 1024 * 1024 * 1024;
+                default -> {
+                    // Nếu không có unit hoặc unit không nhận dạng được, giả sử là bytes
+                    try {
+                        yield Double.parseDouble(quantity);
+                    } catch (Exception e) {
+                        yield 0.0;
+                    }
+                }
+            };
+        } catch (Exception e) {
+            logger.debug("Khong parse duoc quantity sang bytes: {}", quantity);
+            return 0.0;
+        }
     }
 
     /**

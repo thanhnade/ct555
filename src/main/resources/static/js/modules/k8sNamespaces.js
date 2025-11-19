@@ -112,11 +112,40 @@
             const statusClass = getStatusClass(item.status);
             const status = item.status || 'Unknown';
             const pods = item.pods !== undefined ? item.pods : 0;
-            const cpuRaw = typeof item.cpu === 'number' ? item.cpu : parseFloat(item.cpu || '0');
+            let cpuRaw = typeof item.cpu === 'number' ? item.cpu : parseFloat(item.cpu || '0');
             const ramRaw = typeof item.ram === 'number' ? item.ram : parseFloat(item.ram || '0');
 
-            const cpuDisplay = Number.isFinite(cpuRaw) ? cpuRaw : 0;
-            const ramDisplay = Number.isFinite(ramRaw) ? ramRaw : 0;
+            // Kiểm tra nếu CPU là nano cores (giá trị lớn hơn 1000) thì convert sang cores
+            // Backend có thể trả về nano cores hoặc cores tùy trường hợp
+            if (cpuRaw > 1000) {
+                // Có thể là nano cores, convert sang cores
+                cpuRaw = cpuRaw / 1_000_000_000.0;
+            }
+
+            // Format CPU: nếu < 1 core thì hiển thị millicores (m), nếu >= 1 thì hiển thị cores
+            let cpuDisplay = '0';
+            if (Number.isFinite(cpuRaw) && cpuRaw > 0) {
+                if (cpuRaw < 1) {
+                    const millicores = Math.round(cpuRaw * 1000);
+                    cpuDisplay = millicores + 'm';
+                } else {
+                    cpuDisplay = cpuRaw.toFixed(2) + '';
+                    // Xóa trailing zeros
+                    cpuDisplay = cpuDisplay.replace(/\.?0+$/, '');
+                }
+            }
+
+            // Format RAM: đã là Mi, hiển thị với đơn vị Mi hoặc Gi nếu >= 1024 Mi
+            let ramDisplay = '0 Mi';
+            if (Number.isFinite(ramRaw) && ramRaw > 0) {
+                if (ramRaw >= 1024) {
+                    const gib = (ramRaw / 1024).toFixed(2);
+                    ramDisplay = gib.replace(/\.?0+$/, '') + ' Gi';
+                } else {
+                    const mi = Math.round(ramRaw);
+                    ramDisplay = mi + ' Mi';
+                }
+            }
 
             const isSystem = isSystemNamespace(item.name);
             const isDeleting = deletingNamespaces.has(item.name);

@@ -1218,6 +1218,110 @@ public class KubernetesService {
     }
 
     /**
+     * Lấy pod metrics từ Kubernetes Metrics API (metrics-server) cho namespace cụ thể
+     * Trả về danh sách PodMetrics hoặc empty list nếu không có hoặc metrics-server chưa cài đặt
+     */
+    public java.util.List<io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics> getPodMetrics(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
+            try {
+                if (namespace != null && !namespace.trim().isEmpty()) {
+                    return client.top().pods().inNamespace(namespace).metrics().getItems();
+                } else {
+                    // Lấy tất cả pod metrics từ tất cả namespaces
+                    // Fabric8 không có inAnyNamespace() cho metrics, cần lấy từng namespace
+                    java.util.List<io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics> allMetrics = new java.util.ArrayList<>();
+                    var namespaces = getNamespaces();
+                    if (namespaces != null && namespaces.getItems() != null) {
+                        for (var ns : namespaces.getItems()) {
+                            String nsName = ns.getMetadata() != null ? ns.getMetadata().getName() : null;
+                            if (nsName != null && !nsName.isEmpty()) {
+                                try {
+                                    var nsMetrics = client.top().pods().inNamespace(nsName).metrics().getItems();
+                                    if (nsMetrics != null) {
+                                        allMetrics.addAll(nsMetrics);
+                                    }
+                                } catch (Exception e) {
+                                    logger.debug("Khong the lay pod metrics cho namespace {}: {}", nsName, e.getMessage());
+                                }
+                            }
+                        }
+                    }
+                    return allMetrics;
+                }
+            } catch (KubernetesClientException e) {
+                // Metrics API có thể không available nếu metrics-server chưa cài đặt
+                if (e.getCode() == 404 || e.getCode() == 503) {
+                    logger.debug("Metrics API khong available cho namespace {} (metrics-server co the chua cai dat): {}", 
+                            namespace, e.getMessage());
+                    return java.util.List.of();
+                }
+                throw e;
+            }
+        } catch (Exception e) {
+            logger.debug("Khong the lay pod metrics tu Metrics API cho namespace {}: {}", namespace, e.getMessage());
+            return java.util.List.of();
+        }
+    }
+
+    /**
+     * Tính tổng CPU và RAM usage cho namespace từ pod metrics
+     * Trả về Map với keys: "cpu" (cores), "ram" (bytes)
+     */
+    public Map<String, Double> calculateNamespaceResourceUsageFromMetrics(String namespace) {
+        try {
+            var podMetricsList = getPodMetrics(namespace);
+            if (podMetricsList == null || podMetricsList.isEmpty()) {
+                return Map.of("cpu", 0.0, "ram", 0.0);
+            }
+
+            double totalCpuNanoCores = 0.0;
+            double totalMemoryBytes = 0.0;
+
+            for (var podMetric : podMetricsList) {
+                var containers = podMetric.getContainers();
+                if (containers != null) {
+                    for (var container : containers) {
+                        var usage = container.getUsage();
+                        if (usage != null) {
+                            // CPU usage (nano cores)
+                            var cpuUsage = usage.get("cpu");
+                            if (cpuUsage != null) {
+                                try {
+                                    String cpuStr = cpuUsage.getAmount();
+                                    totalCpuNanoCores += parseQuantityToNanoCores(cpuStr);
+                                } catch (Exception e) {
+                                    logger.debug("Khong parse duoc CPU usage cho pod {}: {}", 
+                                            podMetric.getMetadata().getName(), e.getMessage());
+                                }
+                            }
+
+                            // Memory usage (bytes)
+                            var memoryUsage = usage.get("memory");
+                            if (memoryUsage != null) {
+                                try {
+                                    String memoryStr = memoryUsage.getAmount();
+                                    totalMemoryBytes += parseQuantityToBytes(memoryStr);
+                                } catch (Exception e) {
+                                    logger.debug("Khong parse duoc Memory usage cho pod {}: {}", 
+                                            podMetric.getMetadata().getName(), e.getMessage());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Convert nano cores sang cores
+            double totalCpuCores = totalCpuNanoCores / 1_000_000_000.0;
+
+            return Map.of("cpu", totalCpuCores, "ram", totalMemoryBytes);
+        } catch (Exception e) {
+            logger.debug("Loi tinh resource usage tu Metrics API cho namespace {}: {}", namespace, e.getMessage());
+            return Map.of("cpu", 0.0, "ram", 0.0);
+        }
+    }
+
+    /**
      * Tính tổng resource usage từ node metrics (K8s Metrics API)
      * Trả về Map với keys: "cpu", "ram" (percentages dựa trên capacity từ Node spec)
      */

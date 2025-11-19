@@ -35,9 +35,27 @@
 		const url = path.startsWith('http') ? path : (baseUrl + path);
 
 		const headers = Object.assign({}, DEFAULT_HEADERS, options.headers || {});
-		const init = Object.assign({}, options, { headers });
+		
+		// Thêm timeout cho overview API calls (60 giây để đủ thời gian cho lần đầu load)
+		const timeoutMs = path.includes('/overview/') ? 60000 : 30000; // 60s cho overview, 30s cho các API khác
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+		
+		const init = Object.assign({}, options, { 
+			headers,
+			signal: controller.signal
+		});
 
-		return parseResponse(await fetch(url, init));
+		try {
+			return await parseResponse(await fetch(url, init));
+		} catch (error) {
+			if (error.name === 'AbortError') {
+				throw new Error(`Request timeout sau ${timeoutMs / 1000} giây`);
+			}
+			throw error;
+		} finally {
+			clearTimeout(timeoutId);
+		}
 	}
 
 	function json(method, path, body, headers) {
