@@ -105,7 +105,7 @@
 			<scope>test</scope>
 		</dependency>
 
-		<!-- Spring Boot DevTools - Tắt khi làm giao diện xem nhanh -->
+		<!-- Spring Boot DevTools - Tắt khi làm backend xem nhanh -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-devtools</artifactId>

@@ -14,7 +14,7 @@
 	}
 
 	// State
-	let currentClusterId = null;
+	// currentClusterId không còn cần thiết vì hệ thống chỉ có 1 cluster (sử dụng clusterStatus = "AVAILABLE")
 	let clusterPagination = null;
 	let allClusters = []; // Store all clusters for pagination
 
@@ -117,7 +117,7 @@
 						</div>
 						<div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 16px; border-top: 1px solid #E0E0E0;">
 							<button class="btn btn-primary" style="padding: 6px 12px; font-size: 13px;" onclick="window.location.href='/admin/kubernetes/overview'">👁️ Xem chi tiết</button>
-							<button class="btn" style="padding: 6px 12px; font-size: 13px;" onclick="window.location.href='/admin/cluster/setup?clusterId=${cluster.id}'">⚙️ Cluster Setup</button>
+							<button class="btn" style="padding: 6px 12px; font-size: 13px;" onclick="window.location.href='/admin/cluster/setup'">⚙️ Cluster Setup</button>
 							<button class="btn" style="padding: 6px 12px; font-size: 13px;" onclick="window.location.href='/admin/cluster/assign'">🔗 Gán Servers</button>
 							${totalNodes > 0 ? `<button class="btn btn-success" style="padding: 6px 12px; font-size: 13px;" onclick="window.location.href='/admin/server'">🖥️ Quản lý Servers</button>` : ''}
 						</div>
@@ -344,7 +344,7 @@
 				<td>${statusChip}</td>
 				<td style="white-space: nowrap;">
 					<button class="btn" style="padding: 4px 8px; font-size: 12px;" onclick="window.location.href='/admin/kubernetes/overview'" title="Xem chi tiết">👁️</button>
-					<button class="btn btn-primary" style="padding: 4px 8px; font-size: 12px;" onclick="window.location.href='/admin/cluster/setup?clusterId=${c.id}'" title="Cài đặt">⚙️</button>
+					<button class="btn btn-primary" style="padding: 4px 8px; font-size: 12px;" onclick="window.location.href='/admin/cluster/setup'" title="Cài đặt">⚙️</button>
 					${c.isOwner ? `<button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="window.K8sClustersModule.deleteCluster(${c.id}, '${escapeHtml(c.name || '')}')" title="Xóa">🗑️</button>` : ''}
 				</td>
 			`;
@@ -1069,24 +1069,15 @@
 
 	// Reset cluster data
 	function resetClusterData() {
-		currentClusterId = null;
-		window.currentClusterId = null;
+		// currentClusterId không còn cần thiết vì hệ thống chỉ có 1 cluster
 
 		// Reset in playbook-manager.js
-		if (window.setCurrentClusterId) {
-			window.setCurrentClusterId(null);
-		}
 		if (window.resetPlaybookUI) {
 			window.resetPlaybookUI();
 		}
 
-		// Reset trong các module khác
-		if (window.AnsibleConfigModule && window.AnsibleConfigModule.setCurrentClusterId) {
-			window.AnsibleConfigModule.setCurrentClusterId(null);
-		}
-		if (window.AnsibleWebSocketModule && window.AnsibleWebSocketModule.setCurrentClusterId) {
-			window.AnsibleWebSocketModule.setCurrentClusterId(null);
-		}
+		// Reset trong các module khác (các module này đã được refactor để không cần clusterId)
+		// Không cần gọi setCurrentClusterId nữa
 
 		// Đóng các WebSocket connections nếu có
 		if (window.AnsibleWebSocketModule && window.AnsibleWebSocketModule.closeAnsibleWebSocket) {
@@ -1217,7 +1208,7 @@
 		// Đã clear tất cả dữ liệu cluster
 	}
 
-	// Clear cluster detail UI (không reset currentClusterId - dùng khi chuyển cluster)
+	// Clear cluster detail UI
 	function clearClusterDetailUI() {
 		// Clear cluster info
 		const elementsToReset = ['cd-name', 'cd-master', 'cd-workers', 'cd-status', 'cd-version'];
@@ -1303,19 +1294,11 @@
 	// Show cluster detail (simplified version - full implementation can be added later)
 	// Với hệ thống chỉ có 1 cluster, clusterId không còn bắt buộc
 	async function showClusterDetail(clusterId = null) {
-		// Với hệ thống chỉ có 1 cluster, luôn dùng id = 1
-		const id = 1;
+		// Với hệ thống chỉ có 1 cluster, không cần clusterId
+		// clusterId parameter được giữ lại để backward compatibility nhưng không được sử dụng
 
 		// Clear dữ liệu cũ trước khi load cluster mới
 		clearClusterDetailUI();
-
-		currentClusterId = id;
-		window.currentClusterId = id;
-
-		// Set in playbook-manager.js
-		if (window.setCurrentClusterId) {
-			window.setCurrentClusterId(id);
-		}
 
 		// Switch sections (only if we're on cluster.html, not kubernetes.html)
 		const k8sListEl = document.getElementById('k8s-list');
@@ -1389,21 +1372,16 @@
 			}
 			loadClusterNodes(detail);
 
-			// Set current cluster ID trong các module
-			if (window.AnsibleConfigModule) {
-				window.AnsibleConfigModule.setCurrentClusterId(id);
-			}
-			if (window.AnsibleWebSocketModule) {
-				window.AnsibleWebSocketModule.setCurrentClusterId(id);
-			}
+			// Các module đã được refactor để không cần clusterId nữa
+			// Không cần set current cluster ID trong các module
 
-			// Tự động load trạng thái Ansible
+			// Tự động load trạng thái Ansible (không cần clusterId)
 			if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
-				window.checkAnsibleStatus(id).catch(err => {
+				window.checkAnsibleStatus().catch(err => {
 					console.error('Error checking Ansible status:', err);
 				});
 			} else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
-				window.AnsibleConfigModule.checkAnsibleStatus(id).catch(err => {
+				window.AnsibleConfigModule.checkAnsibleStatus().catch(err => {
 					console.error('Error checking Ansible status:', err);
 				});
 			}
@@ -1423,7 +1401,7 @@
 				// Remove old listener if exists
 				const newReloadBtn = reloadBtn.cloneNode(true);
 				reloadBtn.parentNode.replaceChild(newReloadBtn, reloadBtn);
-				newReloadBtn.addEventListener('click', () => showClusterDetail(id));
+				newReloadBtn.addEventListener('click', () => showClusterDetail());
 			}
 
 			// Bind add node button
@@ -1437,9 +1415,10 @@
 					if (modal) {
 						const clusterIdInput = modal.querySelector('#add-node-cluster-id');
 						const clusterNameSpan = modal.querySelector('#add-node-cluster-name');
-						// Với hệ thống chỉ có 1 cluster, set mặc định là 1
+					// Với hệ thống chỉ có 1 cluster, không cần clusterId nữa
+					// Nhưng vẫn set giá trị để backward compatibility với form
 						if (clusterIdInput) {
-							clusterIdInput.value = '1';
+						clusterIdInput.value = ''; // Hoặc có thể ẩn input này
 						}
 						if (clusterNameSpan) {
 							const clusterName = document.getElementById('cd-name')?.textContent?.trim() || '';
@@ -1747,10 +1726,8 @@
 
 			window.showAlert('success', `✓ Đã gán ${nodeIds.length} server vào cluster (clusterStatus = "AVAILABLE") với role tương ứng`);
 
-			// Refresh ngay
-			if (currentClusterId) {
-				await showClusterDetail(currentClusterId);
-			}
+			// Refresh ngay (không cần kiểm tra currentClusterId)
+			await showClusterDetail();
 			await Promise.all([loadClusterList(), loadClustersAndServers()]);
 		} catch (error) {
 			console.error('Error adding servers to cluster:', error);
@@ -1894,10 +1871,8 @@
 
 			window.showAlert('success', `✓ Đã gán ${nodeIds.length} server vào cluster (clusterStatus = "AVAILABLE") với role tương ứng`);
 
-			// Refresh ngay
-			if (currentClusterId) {
-				await showClusterDetail(currentClusterId);
-			}
+			// Refresh ngay (không cần kiểm tra currentClusterId)
+			await showClusterDetail();
 			await Promise.all([loadClusterList(), loadClustersAndServers()]);
 		} catch (error) {
 			console.error('Error adding existing nodes with roles:', error);
@@ -1960,16 +1935,13 @@
 					}
 				}
 
-					if (currentClusterId) {
-						await showClusterDetail(currentClusterId);
-					}
+					// Refresh ngay (không cần kiểm tra currentClusterId)
+					await showClusterDetail();
 					await Promise.all([loadClusterList(), loadClustersAndServers()]);
 				}, 1000);
 			} else {
 				// Nếu được gọi từ nút "Gán vào cluster", refresh ngay
-				if (currentClusterId) {
-					await showClusterDetail(currentClusterId);
-				}
+				await showClusterDetail();
 				await Promise.all([loadClusterList(), loadClustersAndServers()]);
 			}
 		} catch (error) {
@@ -2002,9 +1974,8 @@
 			await window.ApiClient.put(`/admin/servers/${nodeId}`, body);
 
 			window.showAlert('success', `Đã xóa node ${nodeId} khỏi cluster (clusterStatus = "UNAVAILABLE")`);
-			if (currentClusterId) {
-				await showClusterDetail(currentClusterId);
-			}
+			// Refresh ngay (không cần kiểm tra currentClusterId)
+			await showClusterDetail();
 			await Promise.all([loadClusterList(), loadClustersAndServers()]);
 		} catch (err) {
 			window.showAlert('error', err.message || 'Xóa node thất bại');
@@ -2237,17 +2208,8 @@
 		const playbookModal = document.getElementById('playbookManagerModal');
 		if (playbookModal) {
 			playbookModal.addEventListener('show.bs.modal', () => {
-				if (!currentClusterId) {
-					if (window.showAlert) {
-						window.showAlert('warning', 'Vui lòng chọn cluster trước khi mở Playbook Manager');
-					}
-					return;
-				}
-				
-				// Set currentClusterId cho playbook manager
-				if (window.setCurrentClusterId && typeof window.setCurrentClusterId === 'function') {
-					window.setCurrentClusterId(currentClusterId);
-				}
+				// Với hệ thống chỉ có 1 cluster, không cần kiểm tra currentClusterId
+				// Playbook manager đã được refactor để không cần clusterId
 				
 				// Bind buttons
 				if (window.bindPlaybookManagerButtons && typeof window.bindPlaybookManagerButtons === 'function') {

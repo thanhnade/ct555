@@ -21,8 +21,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
-import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -34,9 +32,6 @@ public class KubernetesService {
 
     private final ClusterService clusterService;
     private final ServerService serverService;
-
-    @Value("${k8s.kubeconfig.path:}")
-    private String kubeconfigPath;
 
     public KubernetesService(ClusterService clusterService, ServerService serverService) {
         this.clusterService = clusterService;
@@ -74,46 +69,71 @@ public class KubernetesService {
                 return false; // Không có SSH key, không thể kiểm tra
             }
 
-            // Kiểm tra nhanh: systemctl status kubelet - nếu loaded thì đã cài
-            String checkCmd = "sudo systemctl status kubelet 2>&1 | grep -q 'Loaded:' && echo 'LOADED' || echo 'NOT_LOADED'";
+            // Kiểm tra nhanh: systemctl is-enabled kubelet hoặc systemctl status kubelet
+            // Thử nhiều cách để đảm bảo hoạt động
+            String result = null;
+            
+            // Cách 1: systemctl is-enabled (đơn giản nhất)
             try {
-                String result = serverService.execCommandWithKey(master.getHost(), port, username, pem, checkCmd, 3000);
-                boolean isLoaded = result != null && result.trim().contains("LOADED");
+                String checkCmd1 = "sudo systemctl is-enabled kubelet 2>&1";
+                logger.info("[K8s Service] isKubeletLoaded() - Trying method 1: {}", checkCmd1);
+                System.out.println("[K8s Service] isKubeletLoaded() - Trying method 1: " + checkCmd1);
+                result = serverService.execCommandWithKey(master.getHost(), port, username, pem, checkCmd1, 5000);
+                logger.info("[K8s Service] isKubeletLoaded() - Method 1 result: {}", result);
+                System.out.println("[K8s Service] isKubeletLoaded() - Method 1 result: " + result);
                 
-                if (isLoaded) {
-                    logger.debug("Kubelet is loaded on master {}, attempting restart and retry...", master.getHost());
-                    
-                    // Nếu loaded, thử restart service một lần
-                    try {
-                        String restartCmd = "sudo systemctl restart kubelet";
-                        serverService.execCommandWithKey(master.getHost(), port, username, pem, restartCmd, 5000);
-                        logger.debug("Kubelet restarted on master {}", master.getHost());
-                        
-                        // Đợi một chút để service khởi động lại
-                        Thread.sleep(2000);
-                        
-                        // Gọi lại với timeout ngắn hơn (2 giây thay vì 3 giây)
-                        String retryCheckCmd = "sudo systemctl status kubelet 2>&1 | grep -q 'Loaded:' && echo 'LOADED' || echo 'NOT_LOADED'";
-                        String retryResult = serverService.execCommandWithKey(master.getHost(), port, username, pem, retryCheckCmd, 2000);
-                        boolean stillLoaded = retryResult != null && retryResult.trim().contains("LOADED");
-                        logger.debug("Kubelet status after restart on master {}: {}", master.getHost(), stillLoaded ? "LOADED" : "NOT_LOADED");
-                        return stillLoaded;
-                    } catch (Exception e) {
-                        logger.debug("Failed to restart kubelet on master {}: {}", master.getHost(), e.getMessage());
-                        // Nếu restart thất bại nhưng vẫn loaded, trả về true
-                        return true;
-                    }
+                if (result != null && (result.trim().equals("enabled") || result.trim().equals("static") || result.trim().contains("enabled"))) {
+                    logger.info("[K8s Service] isKubeletLoaded() - Kubelet is enabled (method 1)");
+                    System.out.println("[K8s Service] isKubeletLoaded() - Kubelet is enabled (method 1)");
+                    return true;
                 }
-                
-                logger.debug("Kubelet status check on master {}: NOT_LOADED", master.getHost());
-                return false;
-            } catch (Exception e) {
-                logger.debug("Failed to check kubelet status on master {}: {}", master.getHost(), e.getMessage());
-                return false;
+            } catch (Exception e1) {
+                logger.debug("[K8s Service] isKubeletLoaded() - Method 1 failed: {}", e1.getMessage());
             }
-
+            
+            // Cách 2: systemctl status với grep
+            try {
+                String checkCmd2 = "sudo systemctl status kubelet 2>&1 | grep -c 'Loaded:' || echo '0'";
+                logger.info("[K8s Service] isKubeletLoaded() - Trying method 2: {}", checkCmd2);
+                System.out.println("[K8s Service] isKubeletLoaded() - Trying method 2: " + checkCmd2);
+                result = serverService.execCommandWithKey(master.getHost(), port, username, pem, checkCmd2, 5000);
+                logger.info("[K8s Service] isKubeletLoaded() - Method 2 result: {}", result);
+                System.out.println("[K8s Service] isKubeletLoaded() - Method 2 result: " + result);
+                
+                if (result != null && !result.trim().equals("0") && Integer.parseInt(result.trim()) > 0) {
+                    logger.info("[K8s Service] isKubeletLoaded() - Kubelet is loaded (method 2)");
+                    System.out.println("[K8s Service] isKubeletLoaded() - Kubelet is loaded (method 2)");
+                    return true;
+                }
+            } catch (Exception e2) {
+                logger.debug("[K8s Service] isKubeletLoaded() - Method 2 failed: {}", e2.getMessage());
+            }
+            
+            // Cách 3: Kiểm tra file unit tồn tại
+            try {
+                String checkCmd3 = "test -f /etc/systemd/system/kubelet.service.d/10-kubeadm.conf && echo 'EXISTS' || echo 'NOT_EXISTS'";
+                logger.info("[K8s Service] isKubeletLoaded() - Trying method 3: {}", checkCmd3);
+                System.out.println("[K8s Service] isKubeletLoaded() - Trying method 3: " + checkCmd3);
+                result = serverService.execCommandWithKey(master.getHost(), port, username, pem, checkCmd3, 5000);
+                logger.info("[K8s Service] isKubeletLoaded() - Method 3 result: {}", result);
+                System.out.println("[K8s Service] isKubeletLoaded() - Method 3 result: " + result);
+                
+                if (result != null && result.trim().contains("EXISTS")) {
+                    logger.info("[K8s Service] isKubeletLoaded() - Kubelet config exists (method 3)");
+                    System.out.println("[K8s Service] isKubeletLoaded() - Kubelet config exists (method 3)");
+                    return true;
+                }
+            } catch (Exception e3) {
+                logger.debug("[K8s Service] isKubeletLoaded() - Method 3 failed: {}", e3.getMessage());
+            }
+            
+            logger.warn("[K8s Service] isKubeletLoaded() - All methods failed, kubelet may not be installed");
+            System.out.println("[K8s Service] isKubeletLoaded() - All methods failed, kubelet may not be installed");
+            return false;
         } catch (Exception e) {
-            logger.debug("Error checking kubelet status on master {}: {}", master.getHost(), e.getMessage());
+            logger.warn("[K8s Service] isKubeletLoaded() - Error checking kubelet status on master {}: {}", master.getHost(), e.getMessage());
+            System.out.println("[K8s Service] isKubeletLoaded() - Error checking kubelet status on master " + master.getHost() + ": " + e.getMessage());
+            e.printStackTrace();
             return false;
         }
     }
@@ -152,27 +172,6 @@ public class KubernetesService {
     }
 
     /**
-     * Lấy Kubernetes client từ config file (dự phòng)
-     */
-    private KubernetesClient getKubernetesClientFromConfig() {
-        try {
-            if (kubeconfigPath != null && !kubeconfigPath.trim().isEmpty()) {
-                File kubeconfigFile = new File(kubeconfigPath);
-                if (kubeconfigFile.exists()) {
-                    Config config = Config.fromKubeconfig(null, Files.readString(kubeconfigFile.toPath()), null);
-                    return new KubernetesClientBuilder().withConfig(config).build();
-                }
-            }
-            // Dự phòng: sử dụng vị trí kubeconfig mặc định (~/.kube/config) hoặc service
-            // account
-            return new KubernetesClientBuilder().build();
-        } catch (Exception e) {
-            logger.error("Failed to create Kubernetes client from config", e);
-            throw new RuntimeException("Cannot connect to Kubernetes cluster: " + e.getMessage(), e);
-        }
-    }
-
-    /**
      * Lấy kubeconfig từ master node qua SSH
      */
     private String getKubeconfigFromMaster(Server master) {
@@ -197,7 +196,7 @@ public class KubernetesService {
                     } else {
                         // Nếu không có key, cần password - nhưng không có trong context này
                         // Có thể throw exception hoặc log warning
-                        logger.warn("Không thể lấy kubeconfig mà không có password cho master: {}", master.getHost());
+                        logger.warn("Khong the lay kubeconfig ma khong co password cho master: {}", master.getHost());
                         throw new RuntimeException("Không thể xác thực với master node. Cần SSH key.");
                     }
 
@@ -478,16 +477,16 @@ public class KubernetesService {
      */
     public void waitForDeploymentReady(String namespace, String deploymentName, long timeoutMinutes) {
         try (KubernetesClient client = getKubernetesClient()) {
-            logger.info("Đang chờ Deployment {}/{} sẵn sàng...", namespace, deploymentName);
+            logger.info("Dang cho Deployment {}/{} san sang...", namespace, deploymentName);
 
             client.apps().deployments()
                     .inNamespace(namespace)
                     .withName(deploymentName)
                     .waitUntilReady(timeoutMinutes, TimeUnit.MINUTES);
 
-            logger.info("Deployment {}/{} đã sẵn sàng", namespace, deploymentName);
+            logger.info("Deployment {}/{} da san sang", namespace, deploymentName);
         } catch (Exception e) {
-            logger.error("Chờ Deployment sẵn sàng thất bại: {}/{}", namespace, deploymentName, e);
+            logger.error("Cho Deployment san sang that bai: {}/{}", namespace, deploymentName, e);
 
             String diagnostics = collectDeploymentDiagnostics(namespace, deploymentName, 50);
 
@@ -648,9 +647,9 @@ public class KubernetesService {
                 try {
                     String svcName = "svc-" + appName;
                     client.services().inNamespace(namespace).withName(svcName).delete();
-                    logger.info("Đã xóa service: {}/{}", namespace, svcName);
+                    logger.info("Da xoa service: {}/{}", namespace, svcName);
                 } catch (Exception e2) {
-                    logger.debug("Service {}/{} không tìm thấy hoặc đã bị xóa", namespace, appName);
+                    logger.debug("Service {}/{} khong tim thay hoac da bi xoa", namespace, appName);
                 }
             }
 
@@ -794,10 +793,8 @@ public class KubernetesService {
                 return;
             }
 
-            // Ngăn xóa các namespace hệ thống
-            String nsLower = namespace.toLowerCase();
-            if (nsLower.equals("kube-system") || nsLower.equals("kube-public")
-                    || nsLower.equals("kube-node-lease") || nsLower.equals("default")) {
+            // Ngăn xóa các namespace hệ thống (tái sử dụng helper method)
+            if (isSystemNamespace(namespace)) {
                 throw new IllegalArgumentException("Cannot delete system namespace: " + namespace);
             }
 
@@ -823,37 +820,136 @@ public class KubernetesService {
     }
 
     /**
+     * Helper method: Kiểm tra namespace có phải là system namespace không
+     */
+    private boolean isSystemNamespace(String namespace) {
+        if (namespace == null) {
+            return false;
+        }
+        String nsLower = namespace.toLowerCase();
+        return nsLower.equals("kube-system") || nsLower.equals("kube-public")
+                || nsLower.equals("kube-node-lease") || nsLower.equals("default");
+    }
+
+    /**
+     * Helper method: Kiểm tra namespace có giá trị không
+     */
+    private boolean isNamespaceNotEmpty(String namespace) {
+        return namespace != null && !namespace.isEmpty();
+    }
+
+    /**
+     * Helper method: Convert memory bytes sang human-readable format (cho capacity)
+     * Format: "X.XX Gi" hoặc "X.XX Mi" hoặc "X B"
+     */
+    private String convertMemoryToHumanReadable(String amount) {
+        if (amount == null || amount.isEmpty()) {
+            return "";
+        }
+        try {
+            long bytes = Long.parseLong(amount);
+            if (bytes >= 1024L * 1024L * 1024L) {
+                double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+                return String.format("%.2f Gi", gb);
+            } else if (bytes >= 1024L * 1024L) {
+                double mb = bytes / (1024.0 * 1024.0);
+                return String.format("%.2f Mi", mb);
+            } else {
+                return amount + " B";
+            }
+        } catch (NumberFormatException e) {
+            return amount;
+        }
+    }
+
+    /**
+     * Helper method: Convert memory bytes sang Mi format (cho allocatable)
+     * Format: "XMi" hoặc "XB"
+     */
+    private String convertMemoryToMi(String amount) {
+        if (amount == null || amount.isEmpty()) {
+            return "";
+        }
+        try {
+            long bytes = Long.parseLong(amount);
+            if (bytes >= 1024L * 1024L * 1024L) {
+                double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+                return String.format("%.0fMi", gb * 1024);
+            } else if (bytes >= 1024L * 1024L) {
+                double mb = bytes / (1024.0 * 1024.0);
+                return String.format("%.0fMi", mb);
+            } else {
+                return amount + "B";
+            }
+        } catch (NumberFormatException e) {
+            return amount;
+        }
+    }
+
+    /**
      * Lấy tất cả các node trong cluster
      * Trả về null nếu kubelet chưa loaded hoặc không thể kết nối
      */
     public NodeList getNodes() {
         try {
+            logger.info("[K8s Service] getNodes() - Tim MASTER online...");
+            System.out.println("[K8s Service] getNodes() - Tim MASTER online...");
             // Tìm MASTER online đầu tiên trong các server AVAILABLE
             Server master = clusterService.getFirstHealthyMaster().orElse(null);
 
-            if (master == null || master.getStatus() != Server.ServerStatus.ONLINE) {
+            if (master == null) {
+                logger.warn("[K8s Service] getNodes() - Khong tim thay MASTER");
+                System.out.println("[K8s Service] getNodes() - Khong tim thay MASTER");
                 return null;
             }
+            if (master.getStatus() != Server.ServerStatus.ONLINE) {
+                logger.warn("[K8s Service] getNodes() - MASTER khong ONLINE (status: {})", master.getStatus());
+                System.out.println("[K8s Service] getNodes() - MASTER khong ONLINE (status: " + master.getStatus() + ")");
+                return null;
+            }
+            
+            logger.info("[K8s Service] getNodes() - Tim thay MASTER: {}", master.getHost());
+            System.out.println("[K8s Service] getNodes() - Tim thay MASTER: " + master.getHost());
 
             // Kiểm tra nhanh xem kubelet đã loaded chưa
+            logger.info("[K8s Service] getNodes() - Kiem tra kubelet loaded...");
+            System.out.println("[K8s Service] getNodes() - Kiem tra kubelet loaded...");
             if (!isKubeletLoaded(master)) {
-                logger.debug("Kubelet not loaded on master node");
+                logger.warn("[K8s Service] getNodes() - Kubelet chua loaded tren master node");
+                System.out.println("[K8s Service] getNodes() - Kubelet chua loaded tren master node");
                 return null; // Kubelet chưa loaded, bỏ qua
             }
+            
+            logger.info("[K8s Service] getNodes() - Kubelet da loaded, lay nodes tu K8s API...");
+            System.out.println("[K8s Service] getNodes() - Kubelet da loaded, lay nodes tu K8s API...");
 
         try (KubernetesClient client = getKubernetesClient()) {
-            return client.nodes().list();
+            NodeList nodeList = client.nodes().list();
+            if (nodeList != null && nodeList.getItems() != null) {
+                logger.info("[K8s Service] getNodes() - K8s API tra ve {} nodes", nodeList.getItems().size());
+                System.out.println("[K8s Service] getNodes() - K8s API tra ve " + nodeList.getItems().size() + " nodes");
+            } else {
+                logger.warn("[K8s Service] getNodes() - K8s API tra ve null hoac empty");
+                System.out.println("[K8s Service] getNodes() - K8s API tra ve null hoac empty");
+            }
+            return nodeList;
         } catch (KubernetesClientException e) {
-                logger.warn("Failed to get nodes: {}. Kubernetes may not be fully set up.", 
+                logger.warn("[K8s Service] getNodes() - KubernetesClientException: {}. Kubernetes may not be fully set up.", 
                         e.getMessage());
+                System.out.println("[K8s Service] getNodes() - KubernetesClientException: " + e.getMessage());
+                e.printStackTrace();
                 return null; // Trả về null thay vì throw exception
             } catch (Exception e) {
-                logger.warn("Failed to get nodes: {}. Kubernetes may not be running yet.", 
+                logger.warn("[K8s Service] getNodes() - Exception: {}. Kubernetes may not be running yet.", 
                         e.getMessage());
+                System.out.println("[K8s Service] getNodes() - Exception: " + e.getMessage());
+                e.printStackTrace();
                 return null;
             }
         } catch (Exception e) {
-            logger.debug("Error checking kubelet status: {}", e.getMessage());
+            logger.warn("[K8s Service] getNodes() - Error checking kubelet status: {}", e.getMessage());
+            System.out.println("[K8s Service] getNodes() - Error checking kubelet status: " + e.getMessage());
+            e.printStackTrace();
             return null;
         }
     }
@@ -875,16 +971,39 @@ public class KubernetesService {
      */
     public List<Map<String, Object>> getKubernetesNodes() {
         try {
+            logger.info("[K8s Service] Dang goi getNodes()...");
+            System.out.println("[K8s Service] Dang goi getNodes()...");
             NodeList nodeList = getNodes();
-            if (nodeList == null || nodeList.getItems() == null) {
-                logger.debug("NodeList is null or empty");
+            if (nodeList == null) {
+                logger.warn("[K8s Service] getNodes() tra ve null");
+                System.out.println("[K8s Service] getNodes() tra ve null");
                 return new java.util.ArrayList<>();
             }
-            return nodeList.getItems().stream()
+            if (nodeList.getItems() == null) {
+                logger.warn("[K8s Service] NodeList.getItems() la null");
+                System.out.println("[K8s Service] NodeList.getItems() la null");
+                return new java.util.ArrayList<>();
+            }
+            int itemsCount = nodeList.getItems().size();
+            logger.info("[K8s Service] getNodes() tra ve {} nodes", itemsCount);
+            System.out.println("[K8s Service] getNodes() tra ve " + itemsCount + " nodes");
+            
+            if (itemsCount == 0) {
+                logger.warn("[K8s Service] NodeList co 0 items");
+                System.out.println("[K8s Service] NodeList co 0 items");
+                return new java.util.ArrayList<>();
+            }
+            
+            List<Map<String, Object>> parsedNodes = nodeList.getItems().stream()
                     .map(this::parseNodeToMap)
                     .collect(Collectors.toList());
+            logger.info("[K8s Service] Parse thanh cong {} nodes", parsedNodes.size());
+            System.out.println("[K8s Service] Parse thanh cong " + parsedNodes.size() + " nodes");
+            return parsedNodes;
         } catch (Exception e) {
-            logger.error("Failed to get and parse Kubernetes nodes: {}", e.getMessage(), e);
+            logger.error("[K8s Service] Failed to get and parse Kubernetes nodes: {}", e.getMessage(), e);
+            System.out.println("[K8s Service] Failed to get and parse Kubernetes nodes: " + e.getMessage());
+            e.printStackTrace();
             // Trả về empty list thay vì throw exception để tránh 500 error
             return new java.util.ArrayList<>();
         }
@@ -958,24 +1077,8 @@ public class KubernetesService {
                     cpuCapacity = cpuQty.getAmount();
                 }
                 if (memoryQty != null) {
-                    // Convert bytes to human readable (MB/GB)
-                    try {
-                        String amount = memoryQty.getAmount();
-                        if (amount != null && !amount.isEmpty()) {
-                            long bytes = Long.parseLong(amount);
-                            if (bytes >= 1024L * 1024L * 1024L) {
-                                double gb = bytes / (1024.0 * 1024.0 * 1024.0);
-                                memoryCapacity = String.format("%.2f Gi", gb);
-                            } else if (bytes >= 1024L * 1024L) {
-                                double mb = bytes / (1024.0 * 1024.0);
-                                memoryCapacity = String.format("%.2f Mi", mb);
-                            } else {
-                                memoryCapacity = amount + " B";
-                            }
-                        }
-                    } catch (NumberFormatException e) {
-                        memoryCapacity = memoryQty.getAmount();
-                    }
+                    // Convert bytes to human readable (tái sử dụng helper method)
+                    memoryCapacity = convertMemoryToHumanReadable(memoryQty.getAmount());
                 }
                 if (podsQty != null) {
                     podsCapacity = podsQty.getAmount();
@@ -998,24 +1101,8 @@ public class KubernetesService {
                     allocatableCpu = cpuQty.getAmount();
                 }
                 if (memoryQty != null) {
-                    // Convert bytes to human readable (MB/GB)
-                    try {
-                        String amount = memoryQty.getAmount();
-                        if (amount != null && !amount.isEmpty()) {
-                            long bytes = Long.parseLong(amount);
-                            if (bytes >= 1024L * 1024L * 1024L) {
-                                double gb = bytes / (1024.0 * 1024.0 * 1024.0);
-                                allocatableMemory = String.format("%.0fMi", gb * 1024); // Convert to Mi
-                            } else if (bytes >= 1024L * 1024L) {
-                                double mb = bytes / (1024.0 * 1024.0);
-                                allocatableMemory = String.format("%.0fMi", mb);
-                            } else {
-                                allocatableMemory = amount + "B";
-                            }
-                        }
-                    } catch (NumberFormatException e) {
-                        allocatableMemory = memoryQty.getAmount();
-                    }
+                    // Convert bytes to Mi format (tái sử dụng helper method)
+                    allocatableMemory = convertMemoryToMi(memoryQty.getAmount());
                 }
                 if (podsQty != null) {
                     allocatablePods = podsQty.getAmount();
@@ -1106,6 +1193,239 @@ public class KubernetesService {
             result.put("k8sStatusMessage", message);
         }
         return result;
+    }
+
+    /**
+     * Lấy node metrics từ Kubernetes Metrics API (metrics-server)
+     * Trả về danh sách NodeMetrics hoặc empty list nếu không có hoặc metrics-server chưa cài đặt
+     */
+    public java.util.List<io.fabric8.kubernetes.api.model.metrics.v1beta1.NodeMetrics> getNodeMetrics() {
+        try (KubernetesClient client = getKubernetesClient()) {
+            try {
+                return client.top().nodes().metrics().getItems();
+            } catch (KubernetesClientException e) {
+                // Metrics API có thể không available nếu metrics-server chưa cài đặt
+                if (e.getCode() == 404 || e.getCode() == 503) {
+                    logger.debug("Metrics API khong available (metrics-server co the chua cai dat): {}", e.getMessage());
+                    return java.util.List.of();
+                }
+                throw e;
+            }
+        } catch (Exception e) {
+            logger.debug("Khong the lay node metrics tu Metrics API: {}", e.getMessage());
+            return java.util.List.of();
+        }
+    }
+
+    /**
+     * Tính tổng resource usage từ node metrics (K8s Metrics API)
+     * Trả về Map với keys: "cpu", "ram" (percentages dựa trên capacity từ Node spec)
+     */
+    public Map<String, Double> calculateClusterResourceUsageFromMetrics() {
+        try {
+            // Lấy node metrics từ Metrics API
+            var nodeMetricsList = getNodeMetrics();
+            if (nodeMetricsList == null || nodeMetricsList.isEmpty()) {
+                return Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
+            }
+
+            // Lấy nodes để có capacity (CPU và Memory)
+            var nodes = getNodes();
+            if (nodes == null || nodes.getItems().isEmpty()) {
+                return Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
+            }
+
+            // Tạo map node name -> Node để lookup capacity
+            Map<String, Node> nodeMap = nodes.getItems().stream()
+                    .collect(java.util.stream.Collectors.toMap(
+                            n -> n.getMetadata().getName(),
+                            n -> n));
+
+            double totalCpuUsageNanoCores = 0.0;
+            double totalCpuCapacityCores = 0.0;
+            double totalMemoryUsageBytes = 0.0;
+            double totalMemoryCapacityBytes = 0.0;
+
+            for (var nodeMetric : nodeMetricsList) {
+                String nodeName = nodeMetric.getMetadata().getName();
+                Node node = nodeMap.get(nodeName);
+                
+                if (node == null || node.getStatus() == null) {
+                    continue;
+                }
+
+                // Lấy CPU và Memory usage từ metrics
+                var usage = nodeMetric.getUsage();
+                if (usage == null) continue;
+
+                // CPU usage (nano cores) - usage là Map<String, Quantity>
+                var cpuUsage = usage.get("cpu");
+                if (cpuUsage != null) {
+                    try {
+                        // Convert từ Quantity (có thể là "100m", "1", "500m", etc.) sang nano cores
+                        String cpuStr = cpuUsage.getAmount();
+                        totalCpuUsageNanoCores += parseQuantityToNanoCores(cpuStr);
+                    } catch (Exception e) {
+                        logger.debug("Khong parse duoc CPU usage cho node {}: {}", nodeName, e.getMessage());
+                    }
+                }
+
+                // Memory usage (bytes) - usage là Map<String, Quantity>
+                var memoryUsage = usage.get("memory");
+                if (memoryUsage != null) {
+                    try {
+                        String memoryStr = memoryUsage.getAmount();
+                        totalMemoryUsageBytes += parseQuantityToBytes(memoryStr);
+                    } catch (Exception e) {
+                        logger.debug("Khong parse duoc Memory usage cho node {}: {}", nodeName, e.getMessage());
+                    }
+                }
+
+                // Lấy capacity từ Node spec
+                var capacity = node.getStatus().getCapacity();
+                if (capacity != null) {
+                    // CPU capacity
+                    var cpuCapacity = capacity.get("cpu");
+                    if (cpuCapacity != null) {
+                        try {
+                            String cpuCapStr = cpuCapacity.getAmount();
+                            totalCpuCapacityCores += parseQuantityToCores(cpuCapStr);
+                        } catch (Exception e) {
+                            logger.debug("Khong parse duoc CPU capacity cho node {}: {}", nodeName, e.getMessage());
+                        }
+                    }
+
+                    // Memory capacity
+                    var memoryCapacity = capacity.get("memory");
+                    if (memoryCapacity != null) {
+                        try {
+                            String memoryCapStr = memoryCapacity.getAmount();
+                            totalMemoryCapacityBytes += parseQuantityToBytes(memoryCapStr);
+                        } catch (Exception e) {
+                            logger.debug("Khong parse duoc Memory capacity cho node {}: {}", nodeName, e.getMessage());
+                        }
+                    }
+                }
+            }
+
+            // Tính phần trăm usage
+            double cpuUsagePercent = 0.0;
+            if (totalCpuCapacityCores > 0) {
+                // Convert nano cores sang cores để tính phần trăm
+                double totalCpuUsageCores = totalCpuUsageNanoCores / 1_000_000_000.0;
+                cpuUsagePercent = (totalCpuUsageCores / totalCpuCapacityCores) * 100.0;
+            }
+
+            double ramUsagePercent = 0.0;
+            if (totalMemoryCapacityBytes > 0) {
+                ramUsagePercent = (totalMemoryUsageBytes / totalMemoryCapacityBytes) * 100.0;
+            }
+
+            // Disk usage không có trong Metrics API, giữ nguyên 0.0 hoặc có thể lấy từ SSH fallback
+            return Map.of(
+                    "cpu", Math.min(100.0, Math.max(0.0, cpuUsagePercent)),
+                    "ram", Math.min(100.0, Math.max(0.0, ramUsagePercent)),
+                    "disk", 0.0); // Disk không có trong Metrics API
+        } catch (Exception e) {
+            logger.debug("Loi tinh resource usage tu Metrics API: {}", e.getMessage());
+            return Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
+        }
+    }
+
+    /**
+     * Helper method để parse Quantity string sang nano cores
+     * Hỗ trợ: "100m" = 100000000 nano cores, "1" = 1000000000 nano cores, "500m" = 500000000 nano cores
+     */
+    private double parseQuantityToNanoCores(String quantity) {
+        if (quantity == null || quantity.isBlank()) return 0.0;
+        quantity = quantity.trim();
+        try {
+            if (quantity.endsWith("m")) {
+                // Millicores: "100m" = 0.1 cores = 100000000 nano cores
+                double millicores = Double.parseDouble(quantity.substring(0, quantity.length() - 1));
+                return millicores * 1_000_000.0; // Convert to nano cores
+            } else {
+                // Cores: "1" = 1 core = 1000000000 nano cores
+                double cores = Double.parseDouble(quantity);
+                return cores * 1_000_000_000.0; // Convert to nano cores
+            }
+        } catch (Exception e) {
+            logger.debug("Khong parse duoc quantity sang nano cores: {}", quantity);
+            return 0.0;
+        }
+    }
+
+    /**
+     * Helper method để parse Quantity string sang cores (để tính capacity)
+     */
+    private double parseQuantityToCores(String quantity) {
+        if (quantity == null || quantity.isBlank()) return 0.0;
+        quantity = quantity.trim();
+        try {
+            if (quantity.endsWith("m")) {
+                // Millicores: "100m" = 0.1 cores
+                double millicores = Double.parseDouble(quantity.substring(0, quantity.length() - 1));
+                return millicores / 1000.0;
+            } else {
+                // Cores: "1" = 1 core
+                return Double.parseDouble(quantity);
+            }
+        } catch (Exception e) {
+            logger.debug("Khong parse duoc quantity sang cores: {}", quantity);
+            return 0.0;
+        }
+    }
+
+    /**
+     * Helper method để parse Quantity string sang bytes
+     * Hỗ trợ: "1Gi" = 1073741824 bytes, "512Mi" = 536870912 bytes, "1G" = 1000000000 bytes
+     */
+    private double parseQuantityToBytes(String quantity) {
+        if (quantity == null || quantity.isBlank()) return 0.0;
+        quantity = quantity.trim();
+        try {
+            // Parse số
+            double value = 0.0;
+            String unit = "";
+            
+            // Tách số và unit
+            int unitStart = -1;
+            for (int i = 0; i < quantity.length(); i++) {
+                char c = quantity.charAt(i);
+                if (Character.isLetter(c)) {
+                    unitStart = i;
+                    break;
+                }
+            }
+            
+            if (unitStart > 0) {
+                value = Double.parseDouble(quantity.substring(0, unitStart));
+                unit = quantity.substring(unitStart);
+            } else {
+                // Không có unit, giả sử là bytes
+                return Double.parseDouble(quantity);
+            }
+
+            // Convert sang bytes
+            return switch (unit.toUpperCase()) {
+                case "KI", "K" -> value * 1024;
+                case "MI", "M" -> value * 1024 * 1024;
+                case "GI", "G" -> value * 1024 * 1024 * 1024;
+                case "TI", "T" -> value * 1024L * 1024 * 1024 * 1024;
+                case "PI", "P" -> value * 1024L * 1024 * 1024 * 1024 * 1024;
+                default -> {
+                    // Nếu không có unit hoặc unit không nhận dạng được, giả sử là bytes
+                    try {
+                        yield Double.parseDouble(quantity);
+                    } catch (Exception e) {
+                        yield 0.0;
+                    }
+                }
+            };
+        } catch (Exception e) {
+            logger.debug("Khong parse duoc quantity sang bytes: {}", quantity);
+            return 0.0;
+        }
     }
 
     /**
@@ -1217,7 +1537,8 @@ public class KubernetesService {
      */
     public PodList getPods(String namespace) {
         try (KubernetesClient client = getKubernetesClient()) {
-            if (namespace != null && !namespace.isEmpty()) {
+            // Tái sử dụng helper method để kiểm tra namespace
+            if (isNamespaceNotEmpty(namespace)) {
                 return client.pods().inNamespace(namespace).list();
             } else {
                 return client.pods().inAnyNamespace().list();
@@ -1259,7 +1580,8 @@ public class KubernetesService {
      */
     public DeploymentList getDeployments(String namespace) {
         try (KubernetesClient client = getKubernetesClient()) {
-            if (namespace != null && !namespace.isEmpty()) {
+            // Tái sử dụng helper method để kiểm tra namespace
+            if (isNamespaceNotEmpty(namespace)) {
                 return client.apps().deployments().inNamespace(namespace).list();
             } else {
                 return client.apps().deployments().inAnyNamespace().list();
@@ -1314,7 +1636,8 @@ public class KubernetesService {
      */
     public StatefulSetList getStatefulSets(String namespace) {
         try (KubernetesClient client = getKubernetesClient()) {
-            if (namespace != null && !namespace.isEmpty()) {
+            // Tái sử dụng helper method để kiểm tra namespace
+            if (isNamespaceNotEmpty(namespace)) {
                 return client.apps().statefulSets().inNamespace(namespace).list();
             } else {
                 return client.apps().statefulSets().inAnyNamespace().list();
@@ -1369,7 +1692,8 @@ public class KubernetesService {
      */
     public DaemonSetList getDaemonSets(String namespace) {
         try (KubernetesClient client = getKubernetesClient()) {
-            if (namespace != null && !namespace.isEmpty()) {
+            // Tái sử dụng helper method để kiểm tra namespace
+            if (isNamespaceNotEmpty(namespace)) {
                 return client.apps().daemonSets().inNamespace(namespace).list();
             } else {
                 return client.apps().daemonSets().inAnyNamespace().list();
@@ -1412,7 +1736,8 @@ public class KubernetesService {
      */
     public ServiceList getServices(String namespace) {
         try (KubernetesClient client = getKubernetesClient()) {
-            if (namespace != null && !namespace.isEmpty()) {
+            // Tái sử dụng helper method để kiểm tra namespace
+            if (isNamespaceNotEmpty(namespace)) {
                 return client.services().inNamespace(namespace).list();
             } else {
                 return client.services().inAnyNamespace().list();
@@ -1454,7 +1779,8 @@ public class KubernetesService {
      */
     public IngressList getIngress(String namespace) {
         try (KubernetesClient client = getKubernetesClient()) {
-            if (namespace != null && !namespace.isEmpty()) {
+            // Tái sử dụng helper method để kiểm tra namespace
+            if (isNamespaceNotEmpty(namespace)) {
                 return client.network().v1().ingresses().inNamespace(namespace).list();
             } else {
                 return client.network().v1().ingresses().inAnyNamespace().list();

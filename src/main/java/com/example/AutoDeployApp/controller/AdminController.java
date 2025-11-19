@@ -300,7 +300,7 @@ public class AdminController {
                         map.put("username", username);
                         map.put("status", app.getStatus());
                         map.put("k8sNamespace", app.getK8sNamespace());
-                        map.put("clusterId", app.getClusterId());
+                        // clusterId không được trả về vì chỉ có 1 cluster duy nhất (sử dụng clusterStatus = "AVAILABLE")
                         map.put("accessUrl", app.getAccessUrl());
                         map.put("cpuRequest", app.getCpuRequest());
                         map.put("cpuLimit", app.getCpuLimit());
@@ -361,9 +361,9 @@ public class AdminController {
             }
 
             // Nếu đang retry từ ERROR, dọn tài nguyên cũ trước
+            // clusterId không được sử dụng (luôn null), chỉ kiểm tra deployment name
             boolean isRetry = "ERROR".equals(currentStatus);
-            if (isRetry && application.getClusterId() != null
-                    && application.getK8sDeploymentName() != null
+            if (isRetry && application.getK8sDeploymentName() != null
                     && !application.getK8sDeploymentName().isEmpty()) {
                 try {
                     logger.info("Retry deployment: Cleaning up old K8s resources for application: {}", id);

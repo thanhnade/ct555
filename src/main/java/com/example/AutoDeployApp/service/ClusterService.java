@@ -3,7 +3,6 @@ package com.example.AutoDeployApp.service;
 import com.example.AutoDeployApp.entity.Server;
 import com.example.AutoDeployApp.repository.ServerRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -15,13 +14,6 @@ public class ClusterService {
 
     public ClusterService(ServerRepository serverRepository) {
         this.serverRepository = serverRepository;
-    }
-
-    /**
-     * Lấy tất cả server có clusterStatus = "AVAILABLE"
-     */
-    public List<Server> getAvailableClusterServers() {
-        return serverRepository.findByClusterStatus("AVAILABLE");
     }
 
     /**
@@ -46,46 +38,12 @@ public class ClusterService {
     /**
      * Kiểm tra cluster có MASTER online không
      * Cluster được định nghĩa là các server có clusterStatus = "AVAILABLE"
+     * Tái sử dụng logic từ getFirstHealthyMaster() để tránh duplicate code
      * 
      * @return true nếu có MASTER và MASTER đang ONLINE trong các server AVAILABLE
      */
     public boolean hasMasterOnline() {
-        List<Server> availableServers = serverRepository.findByClusterStatus("AVAILABLE");
-        if (availableServers.isEmpty()) {
-            return false;
-        }
-
-        return availableServers.stream()
-                .filter(s -> "MASTER".equals(s.getRole()))
-                .anyMatch(s -> s.getStatus() == Server.ServerStatus.ONLINE);
-    }
-
-    /**
-     * Lấy danh sách server MASTER trong cluster (các server có clusterStatus = "AVAILABLE")
-     */
-    public List<Server> getMasterServers() {
-        return serverRepository.findByClusterStatus("AVAILABLE").stream()
-                .filter(s -> "MASTER".equals(s.getRole()))
-                .toList();
-    }
-
-    /**
-     * Lấy danh sách server WORKER trong cluster (các server có clusterStatus = "AVAILABLE")
-     */
-    public List<Server> getWorkerServers() {
-        return serverRepository.findByClusterStatus("AVAILABLE").stream()
-                .filter(s -> "WORKER".equals(s.getRole()))
-                .toList();
-    }
-
-    /**
-     * Kiểm tra cluster có server nào không
-     * 
-     * @return true nếu có ít nhất 1 server với clusterStatus = "AVAILABLE"
-     */
-    public boolean hasServers() {
-        List<Server> availableServers = serverRepository.findByClusterStatus("AVAILABLE");
-        return !availableServers.isEmpty();
+        return getFirstHealthyMaster().isPresent();
     }
 
     /**
