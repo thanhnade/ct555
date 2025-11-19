@@ -11,7 +11,7 @@
     }
 
     const ClusterSetupModule = {
-        currentClusterId: 1, // Với 1 cluster duy nhất, luôn dùng ID = 1
+        // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 
         init: function() {
             this.loadClusterInfo();
@@ -64,11 +64,10 @@
                         opt.textContent = cluster.name || 'Default Cluster';
                         opt.selected = true;
                         select.appendChild(opt);
-                        this.currentClusterId = cluster.id;
+                        // Cluster info loaded
                     }
                 } else {
                     // Có servers, kiểm tra K8s status
-                    this.currentClusterId = cluster.id;
                     if (select) {
                         select.innerHTML = '';
                         const opt = document.createElement('option');
@@ -124,17 +123,10 @@
                 });
             }
 
-            // Helper function to get clusterID (với 1 cluster duy nhất, luôn trả về 1)
-            const getClusterId = async () => {
-                // Với 1 cluster duy nhất, luôn trả về ID = 1
-                return this.currentClusterId || 1;
-            };
-
             // Step 1: Prepare Nodes
             const btnStep1 = document.getElementById('btn-step-1-prepare');
             if (btnStep1) {
                 btnStep1.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.prepareNodes();
                 });
             }
@@ -143,7 +135,6 @@
             const btnStep2 = document.getElementById('btn-step-2-controller');
             if (btnStep2) {
                 btnStep2.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.setupControllerNode();
                 });
             }
@@ -152,7 +143,6 @@
             const btnStep3 = document.getElementById('btn-step-3-clone');
             if (btnStep3) {
                 btnStep3.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.cloneKubespray();
                 });
             }
@@ -161,7 +151,6 @@
             const btnStep4 = document.getElementById('btn-step-4-inventory');
             if (btnStep4) {
                 btnStep4.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.buildInventory();
                 });
             }
@@ -170,7 +159,6 @@
             const btnStep5 = document.getElementById('btn-step-5-configure');
             if (btnStep5) {
                 btnStep5.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.configureRolesAndAddons();
                 });
             }
@@ -179,7 +167,6 @@
             const btnStep6 = document.getElementById('btn-step-6-deploy');
             if (btnStep6) {
                 btnStep6.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.deployCluster();
                 });
             }
@@ -188,7 +175,6 @@
             const btnStep7 = document.getElementById('btn-step-7-kubeconfig');
             if (btnStep7) {
                 btnStep7.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.getKubeconfig();
                 });
             }
@@ -197,7 +183,6 @@
             const btnStep8Calico = document.getElementById('btn-step-8-calico');
             if (btnStep8Calico) {
                 btnStep8Calico.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.installCalico();
                 });
             }
@@ -205,7 +190,6 @@
             const btnStep8Ingress = document.getElementById('btn-step-8-ingress');
             if (btnStep8Ingress) {
                 btnStep8Ingress.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.installIngress();
                 });
             }
@@ -213,7 +197,6 @@
             const btnStep8MetalLB = document.getElementById('btn-step-8-metallb');
             if (btnStep8MetalLB) {
                 btnStep8MetalLB.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.installMetalLB();
                 });
             }
@@ -221,7 +204,6 @@
             const btnStep8Helm = document.getElementById('btn-step-8-helm');
             if (btnStep8Helm) {
                 btnStep8Helm.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.installHelm();
                 });
             }
@@ -230,7 +212,6 @@
             const btnStep9 = document.getElementById('btn-step-9-verify');
             if (btnStep9) {
                 btnStep9.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
                     this.verifyCluster();
                 });
             }
@@ -239,21 +220,17 @@
             const checkAnsibleBtn = document.getElementById('cd-check-ansible');
             if (checkAnsibleBtn) {
                 checkAnsibleBtn.addEventListener('click', async () => {
-                    const clusterId = await getClusterId();
-                    // Với 1 cluster duy nhất, không cần kiểm tra clusterId nữa
-                    
-                    // Gọi checkAnsibleStatus với clusterId hiện tại
-                    // Function này sẽ tự động kiểm tra máy master của cluster
+                    // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
                     if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
                         try {
-                            await window.checkAnsibleStatus(clusterId);
+                            await window.checkAnsibleStatus();
                         } catch (err) {
                             console.error('Error checking Ansible status:', err);
                             window.showAlert('error', 'Không thể kiểm tra trạng thái Ansible: ' + (err.message || 'Lỗi không xác định'));
                         }
                     } else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
                         try {
-                            await window.AnsibleConfigModule.checkAnsibleStatus(clusterId);
+                            await window.AnsibleConfigModule.checkAnsibleStatus();
                         } catch (err) {
                             console.error('Error checking Ansible status:', err);
                             window.showAlert('error', 'Không thể kiểm tra trạng thái Ansible: ' + (err.message || 'Lỗi không xác định'));
@@ -269,13 +246,7 @@
             const playbookModal = document.getElementById('playbookManagerModal');
             if (playbookModal) {
                 playbookModal.addEventListener('show.bs.modal', async () => {
-                    const clusterId = await getClusterId();
-                    // Với 1 cluster duy nhất, luôn có clusterId = 1
-                    
-                    // Set currentClusterId cho playbook manager
-                    if (window.setCurrentClusterId && typeof window.setCurrentClusterId === 'function') {
-                        window.setCurrentClusterId(clusterId);
-                    }
+                    // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
                     
                     // Bind buttons trong modal (chỉ bind một lần)
                     if (window.bindPlaybookManagerButtons && typeof window.bindPlaybookManagerButtons === 'function') {
@@ -309,9 +280,10 @@
                     }
                     
                     // Load playbooks sau khi đã kiểm tra cluster
+                    // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
                     if (window.loadPlaybooks && typeof window.loadPlaybooks === 'function') {
                         try {
-                            await window.loadPlaybooks(clusterId);
+                            await window.loadPlaybooks();
                         } catch (err) {
                             console.error('Error loading playbooks:', err);
                             // Không hiển thị alert nữa vì loadPlaybooks đã tự hiển thị error
@@ -345,35 +317,35 @@
             window.showAlert('info', 'Đang chuẩn bị nodes (hostname, update, swapoff, kernel modules)...');
             // TODO: Implement node preparation
             // Run playbook để cập nhật hostname, system update, tắt swap, load kernel modules trên tất cả nodes
-            console.log('Preparing nodes for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         setupControllerNode: function() {
             window.showAlert('info', 'Đang cài đặt Python, Ansible, Git trên controller node...');
             // TODO: Implement controller node setup
             // Cài Python, Ansible, Git trên master node để dùng làm controller
-            console.log('Setting up controller node for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         cloneKubespray: function() {
             window.showAlert('info', 'Đang clone Kubespray repository...');
             // TODO: Implement Kubespray cloning
             // Clone kubespray từ GitHub vào controller node (ví dụ: /opt/kubespray)
-            console.log('Cloning Kubespray for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         buildInventory: function() {
             window.showAlert('info', 'Đang tạo inventory từ servers có clusterStatus = "AVAILABLE"...');
             // TODO: Implement inventory building
             // Tạo inventory từ template của Kubespray, điền thông tin nodes dựa trên servers
-            console.log('Building inventory for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         configureRolesAndAddons: function() {
             window.showAlert('info', 'Mở cấu hình Roles trong inventory...');
             // TODO: Implement configuration UI
             // Mở modal hoặc form để chỉnh roles (master/worker) trong inventory của Kubespray
-            console.log('Configuring roles in inventory for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         loadStep5ClusterInfo: async function() {
@@ -420,38 +392,38 @@
             window.showAlert('info', 'Đang triển khai cluster bằng ansible-playbook cluster.yml...');
             // TODO: Implement cluster deployment
             // Chạy ansible-playbook cluster.yml từ controller node
-            console.log('Deploying cluster for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         getKubeconfig: function() {
             window.showAlert('info', 'Đang lấy kubeconfig từ master node...');
             // TODO: Implement kubeconfig retrieval
             // Lấy /etc/kubernetes/admin.conf từ master node và hiển thị/download
-            console.log('Getting kubeconfig for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         installIngress: function() {
             window.showAlert('info', 'Đang cài đặt Ingress NGINX...');
             // TODO: Implement Ingress installation
-            console.log('Installing Ingress for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         installMetalLB: function() {
             window.showAlert('info', 'Đang cài đặt MetalLB...');
             // TODO: Implement MetalLB installation
-            console.log('Installing MetalLB for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         installHelm: function() {
             window.showAlert('info', 'Đang cài đặt Helm 3...');
             // TODO: Implement Helm installation
-            console.log('Installing Helm for cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         verifyCluster: function() {
             window.showAlert('info', 'Đang verify cluster (kubectl get nodes, top nodes, pods...)...');
             // TODO: Implement cluster verification
-            console.log('Verifying cluster:', this.currentClusterId);
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
         },
 
         // Tự động kiểm tra trạng thái Ansible khi trang load
@@ -478,14 +450,11 @@
                     }
 
                     // Có cluster và servers, tự động kiểm tra trạng thái Ansible
-                    // Sử dụng clusterId từ currentClusterId hoặc từ cluster response
-                    const clusterId = this.currentClusterId || clusterResponse.id || 1;
-                    
-                    // Gọi checkAnsibleStatus nếu function đã sẵn sàng
+                    // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster
                     if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
-                        await window.checkAnsibleStatus(clusterId);
+                        await window.checkAnsibleStatus();
                     } else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
-                        await window.AnsibleConfigModule.checkAnsibleStatus(clusterId);
+                        await window.AnsibleConfigModule.checkAnsibleStatus();
                     } else {
                         // Nếu function chưa sẵn sàng, thử lại sau 1 giây
                         setTimeout(() => this.checkAnsibleStatusOnLoad(), 1000);

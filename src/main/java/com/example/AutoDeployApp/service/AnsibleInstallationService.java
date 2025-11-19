@@ -146,7 +146,7 @@ public class AnsibleInstallationService {
     /**
      * Kiểm tra Ansible đã cài đặt trên controller server (ưu tiên ANSIBLE, fallback MASTER)
      */
-    public Map<String, Object> checkAnsibleInstallation(Long clusterId, Map<Long, String> passwordCache) {
+    public Map<String, Object> checkAnsibleInstallation(Map<Long, String> passwordCache) {
         // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
         Server controllerServer = null;
         try {
@@ -170,7 +170,6 @@ public class AnsibleInstallationService {
 
         if (controllerServer == null) {
             Map<String, Object> result = new java.util.HashMap<>();
-            result.put("clusterId", clusterId);
             result.put("allInstalled", false);
             result.put("someInstalled", false);
             result.put("totalServers", 0);
@@ -186,7 +185,6 @@ public class AnsibleInstallationService {
         // Kiểm tra controller server có online không
         if (controllerServer.getStatus() != Server.ServerStatus.ONLINE) {
             Map<String, Object> result = new java.util.HashMap<>();
-            result.put("clusterId", clusterId);
             result.put("allInstalled", false);
             result.put("someInstalled", false);
             result.put("totalServers", 1);
@@ -263,7 +261,6 @@ public class AnsibleInstallationService {
             roleSummary.put(controllerRole, controllerInfo);
 
             Map<String, Object> finalResult = new java.util.HashMap<>();
-            finalResult.put("clusterId", clusterId);
             finalResult.put("allInstalled", isInstalled);
             finalResult.put("someInstalled", isInstalled);
             finalResult.put("totalServers", 1);
@@ -291,7 +288,6 @@ public class AnsibleInstallationService {
             detailedResults.put(controllerServer.getHost(), serverStatus);
 
             Map<String, Object> result = new java.util.HashMap<>();
-            result.put("clusterId", clusterId);
             result.put("allInstalled", false);
             result.put("someInstalled", false);
             result.put("totalServers", 1);
@@ -353,7 +349,7 @@ public class AnsibleInstallationService {
      * Cài đặt Ansible trên controller server (ưu tiên ANSIBLE, fallback MASTER)
      */
     @Transactional
-    public CompletableFuture<Map<String, Object>> installAnsibleOnCluster(Long clusterId,
+    public CompletableFuture<Map<String, Object>> installAnsibleOnCluster(
             Map<Long, String> passwordCache,
             Map<Long, String> sudoPasswordCache) {
         return CompletableFuture.supplyAsync(() -> {
@@ -406,7 +402,6 @@ public class AnsibleInstallationService {
                 }
 
                 Map<String, Object> finalResult = new java.util.HashMap<>();
-                finalResult.put("clusterId", clusterId);
                 finalResult.put("installationResults", results);
                 finalResult.put("timestamp", System.currentTimeMillis());
                 return finalResult;

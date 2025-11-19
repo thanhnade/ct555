@@ -65,6 +65,24 @@
         }
     }
 
+    // Load namespaces data ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+    async function loadNamespacesSilent() {
+        try {
+            const response = await window.ApiClient.get('/admin/cluster/k8s/namespaces').catch(() => null);
+
+            if (response && response.namespaces) {
+                namespacesData = response.namespaces || [];
+                applyFilters();
+            } else {
+                // Nếu response null, giữ nguyên dữ liệu cũ
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading namespaces silently:', error);
+            // Không hiển thị lỗi, giữ nguyên dữ liệu cũ
+        }
+    }
+
     // Apply filters
     function applyFilters() {
         const searchTerm = document.getElementById('namespaces-search')?.value.toLowerCase() || '';
@@ -168,7 +186,8 @@
             if (window.showAlert) {
                 window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `namespace "${name}" deleted`)}</pre>`);
             }
-            await loadNamespaces();
+            // Load dữ liệu ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+            await loadNamespacesSilent();
         } catch (error) {
             deletingNamespaces.delete(name);
             if (window.showAlert) {

@@ -5,7 +5,6 @@
 	// Trạng thái module
 	let ansibleWebSocket = null; // WebSocket cho Ansible installation
 	let initActionsWS = null; // WebSocket cho Ansible init actions
-	let currentClusterId = null;
 	let ansibleLogData = [];
 
 	// Callbacks cho các sự kiện
@@ -24,13 +23,8 @@
 	}
 
 	// Kết nối WebSocket cho Ansible installation
-	function connectAnsibleWebSocket(clusterId, callbacks = {}) {
-		if (!clusterId) {
-			console.error('connectAnsibleWebSocket: clusterId là bắt buộc');
-			return;
-		}
-
-		currentClusterId = clusterId;
+	// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
+	function connectAnsibleWebSocket(callbacks = {}) {
 
 		// Lưu callbacks
 		onLogMessage = callbacks.onLogMessage || null;
@@ -133,7 +127,6 @@
 
 		const message = {
 			action: 'start_ansible_install',
-			clusterId: currentClusterId,
 			sudoPasswords: sudoPasswords,
 			targetServer: targetServer,
 			isReinstall: isReinstall,
@@ -265,12 +258,8 @@
 	}
 
 	// Chạy Ansible init action qua WebSocket
-	function runInitActionWS(action, clusterId, options = {}) {
-		if (!clusterId) {
-			console.error('runInitActionWS: clusterId là bắt buộc');
-			return;
-		}
-
+	// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
+	function runInitActionWS(action, options = {}) {
 		const host = options.host || null;
 		const sudoPassword = options.sudoPassword || null;
 		const onLog = options.onLog || null; // (line) => void
@@ -289,7 +278,7 @@
 		initActionsWS = new WebSocket(`${protocol}://${location.host}/ws/ansible`);
 
 		initActionsWS.onopen = () => {
-			const payload = { action, clusterId, host };
+			const payload = { action, host };
 			if (needSudo && sudoPassword) {
 				payload.sudoPassword = sudoPassword;
 			}
@@ -395,19 +384,17 @@
 		sendInstallationStartCommand,
 		closeAnsibleWebSocket,
 		runInitActionWS,
-		closeInitActionsWS,
-		setCurrentClusterId: (id) => { currentClusterId = id; },
-		getCurrentClusterId: () => currentClusterId
+		closeInitActionsWS
 	};
 
 	// Tương thích ngược: expose các hàm global
-	window.connectAnsibleWebSocket = (clusterId, callbacks) => 
-		window.AnsibleWebSocketModule.connectAnsibleWebSocket(clusterId, callbacks);
+	window.connectAnsibleWebSocket = (callbacks) => 
+		window.AnsibleWebSocketModule.connectAnsibleWebSocket(callbacks);
 	window.sendInstallationStartCommand = (options) => 
 		window.AnsibleWebSocketModule.sendInstallationStartCommand(options);
 	window.closeAnsibleWebSocket = () => window.AnsibleWebSocketModule.closeAnsibleWebSocket();
-	window.runInitActionWS = (action, clusterId, options) => 
-		window.AnsibleWebSocketModule.runInitActionWS(action, clusterId, options);
+	window.runInitActionWS = (action, options) => 
+		window.AnsibleWebSocketModule.runInitActionWS(action, options);
 	window.closeInitActionsWS = () => window.AnsibleWebSocketModule.closeInitActionsWS();
 })();
 

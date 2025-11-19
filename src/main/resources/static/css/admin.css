@@ -959,11 +959,6 @@ body.modal-open {
   box-shadow: 0 0 0 0.2rem rgba(25, 135, 84, 0.25) !important;
 }
 
-/* Cluster info */
-#current-cluster-name {
-  font-weight: 600;
-}
-
 /* Config status panel */
 #config-status-panel {
   border-left: 4px solid #0dcaf0;

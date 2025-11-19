@@ -45,6 +45,24 @@
         }
     }
 
+    // Load ingress data ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+    async function loadIngressSilent() {
+        try {
+            const response = await window.ApiClient.get('/admin/cluster/k8s/ingress').catch(() => null);
+
+            if (response && response.ingress) {
+                ingressData = response.ingress || [];
+                applyFilters();
+            } else {
+                // Nếu response null, giữ nguyên dữ liệu cũ
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading ingress silently:', error);
+            // Không hiển thị lỗi, giữ nguyên dữ liệu cũ
+        }
+    }
+
     // Apply filters
     function applyFilters() {
         const searchTerm = document.getElementById('ingress-search')?.value.toLowerCase() || '';
@@ -156,7 +174,8 @@
             if (window.showAlert) {
                 window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `ingress.networking.k8s.io "${name}" deleted`)}</pre>`);
             }
-            await loadIngress();
+            // Load dữ liệu ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+            await loadIngressSilent();
         } catch (error) {
             if (window.showAlert) {
                 window.showAlert('error', error.message || 'Lỗi xóa ingress');

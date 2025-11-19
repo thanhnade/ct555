@@ -56,6 +56,24 @@
         }
     }
 
+    // Load services data ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+    async function loadServicesSilent() {
+        try {
+            const response = await window.ApiClient.get('/admin/cluster/k8s/services').catch(() => null);
+
+            if (response && response.services) {
+                servicesData = response.services || [];
+                applyFilters();
+            } else {
+                // Nếu response null, giữ nguyên dữ liệu cũ
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading services silently:', error);
+            // Không hiển thị lỗi, giữ nguyên dữ liệu cũ
+        }
+    }
+
     // Apply filters
     function applyFilters() {
         const searchTerm = document.getElementById('services-search')?.value.toLowerCase() || '';
@@ -168,7 +186,8 @@
             if (window.showAlert) {
                 window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `service "${name}" deleted`)}</pre>`);
             }
-            await loadServices();
+            // Load dữ liệu ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+            await loadServicesSilent();
         } catch (error) {
             if (window.showAlert) {
                 window.showAlert('error', error.message || 'Lỗi xóa service');

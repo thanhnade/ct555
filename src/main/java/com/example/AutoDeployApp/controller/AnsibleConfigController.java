@@ -525,14 +525,32 @@ public class AnsibleConfigController {
     public ResponseEntity<Map<String, Object>> checkSudoNopasswd(
             @RequestParam(required = false) String host) {
         try {
-            // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
-            var servers = serverService.findByClusterStatus("AVAILABLE");
-            Server target = pickTarget(servers, host, true);
+            Server target = null;
+            
+            // Nếu có host cụ thể, tìm trong tất cả servers (bao gồm ANSIBLE)
+            if (host != null && !host.trim().isEmpty()) {
+                try {
+                    var allServers = serverService.findAll();
+                    target = allServers.stream()
+                            .filter(s -> host.equals(s.getHost()))
+                            .findFirst()
+                            .orElse(null);
+                } catch (Exception e) {
+                    // Nếu không lấy được tất cả servers, tiếp tục với fallback
+                }
+            }
+            
+            // Nếu không tìm thấy với host cụ thể, hoặc không có host, dùng logic pickTarget
+            if (target == null) {
+                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
+                var servers = serverService.findByClusterStatus("AVAILABLE");
+                target = pickTarget(servers, host, true);
+            }
 
             if (target == null) {
                 return ResponseEntity.badRequest().body(Map.of(
                         "success", false,
-                        "message", "Khong tim thay MASTER trong cluster"));
+                        "message", "Không tìm thấy server" + (host != null ? " với host: " + host : "")));
             }
 
             // Uu tien SSH key tu database

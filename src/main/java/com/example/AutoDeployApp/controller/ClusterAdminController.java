@@ -3005,7 +3005,7 @@ public class ClusterAdminController {
                 pwCache = new java.util.HashMap<>();
             }
 
-            Map<String, Object> status = ansibleInstallationService.checkAnsibleInstallation(id, pwCache);
+            Map<String, Object> status = ansibleInstallationService.checkAnsibleInstallation(pwCache);
 
             // Thêm thông tin cluster
             status.put("clusterInfo", Map.of(
@@ -3088,7 +3088,7 @@ public class ClusterAdminController {
             }
 
             // Bắt đầu cài đặt Ansible
-            ansibleInstallationService.installAnsibleOnCluster(id, pwCache, sudoPasswordCache);
+            ansibleInstallationService.installAnsibleOnCluster(pwCache, sudoPasswordCache);
 
             // Trả về ngay lập tức với task ID
             String taskId = "ansible-install-" + id + "-" + System.currentTimeMillis();

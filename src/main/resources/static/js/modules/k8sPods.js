@@ -56,6 +56,24 @@
         }
     }
 
+    // Load pods data ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+    async function loadPodsSilent() {
+        try {
+            const response = await window.ApiClient.get('/admin/cluster/k8s/pods').catch(() => null);
+
+            if (response && response.pods) {
+                podsData = response.pods || [];
+                applyFilters();
+            } else {
+                // Nếu response null, giữ nguyên dữ liệu cũ
+                return;
+            }
+        } catch (error) {
+            console.error('Error loading pods silently:', error);
+            // Không hiển thị lỗi, giữ nguyên dữ liệu cũ
+        }
+    }
+
     // Apply filters
     function applyFilters() {
         const searchTerm = document.getElementById('pods-search')?.value.toLowerCase() || '';
@@ -168,7 +186,8 @@
             if (window.showAlert) {
                 window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `pod "${name}" deleted`)}</pre>`);
             }
-            await loadPods();
+            // Load dữ liệu ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+            await loadPodsSilent();
         } catch (error) {
             if (window.showAlert) {
                 window.showAlert('error', error.message || 'Lỗi xóa pod');

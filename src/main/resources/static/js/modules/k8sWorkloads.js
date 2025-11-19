@@ -164,6 +164,43 @@
             }
         }
     }
+
+    // Load workloads data ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+    async function loadWorkloadsSilent() {
+        try {
+            // Fetch workloads từ backend - luôn lấy cả 3 loại (deployments, statefulSets, daemonSets)
+            const response = await window.ApiClient.get('/admin/cluster/k8s/workloads').catch(() => null);
+
+            // Luôn xử lý dữ liệu, kể cả khi một số loại thiếu hoặc rỗng
+            if (response) {
+                workloadsData = {
+                    deployments: response.deployments || [],
+                    statefulSets: response.statefulSets || [],
+                    daemonSets: response.daemonSets || []
+                };
+            } else {
+                // Nếu response null, giữ nguyên dữ liệu cũ
+                return;
+            }
+
+            // Đánh dấu tất cả tabs đã được load
+            loadedTabs.deployments = true;
+            loadedTabs.statefulsets = true;
+            loadedTabs.daemonsets = true;
+
+            // Lưu vào sessionStorage
+            saveToStorage();
+
+            // Update counts
+            updateCounts();
+
+            // Apply filters và render (sẽ cập nhật UI với dữ liệu mới)
+            applyFilters();
+        } catch (error) {
+            console.error('Error loading workloads silently:', error);
+            // Không hiển thị lỗi, giữ nguyên dữ liệu cũ
+        }
+    }
     
     // Load data cho một tab cụ thể (chỉ load nếu chưa có dữ liệu)
     async function loadTabData(tabName) {
@@ -570,7 +607,8 @@
             if (window.showAlert) {
                 window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || defaultOutput)}</pre>`);
             }
-            await loadWorkloads();
+            // Load dữ liệu ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+            await loadWorkloadsSilent();
         } catch (error) {
             if (window.showAlert) {
                 window.showAlert('error', error.message || 'Lỗi xóa workload');
@@ -679,7 +717,8 @@
             if (window.showAlert) {
                 window.showAlert('success', `Đã scale ${type} ${namespace}/${name} → ${replicasNum} replicas`);
             }
-            await loadWorkloads();
+            // Load dữ liệu ngầm (không hiển thị loading state, giữ dữ liệu cũ)
+            await loadWorkloadsSilent();
         } catch (error) {
             if (window.showAlert) {
                 window.showAlert('error', error.message || 'Lỗi scale workload');

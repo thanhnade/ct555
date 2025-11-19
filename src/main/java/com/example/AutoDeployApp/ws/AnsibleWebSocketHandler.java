@@ -7,6 +7,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
@@ -35,7 +36,6 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         String action = (String) request.get("action");
 
         if ("start_ansible_install".equals(action)) {
-            Long clusterId = Long.valueOf(request.get("clusterId").toString());
             String targetServer = (String) request.get("targetServer");
             Boolean isReinstall = (Boolean) request.get("isReinstall");
             Boolean isUninstall = (Boolean) request.get("isUninstall");
@@ -73,46 +73,40 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             }
 
             // Bắt đầu cài đặt/gỡ cài đặt Ansible và stream log theo thời gian thực
-            startAnsibleInstallationWithOutput(session, clusterId, sudoPasswords, targetServer, isReinstall,
+            // Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
+            startAnsibleInstallationWithOutput(session, sudoPasswords, targetServer, isReinstall,
                     isUninstall);
         } else if ("init_structure".equals(action)) {
-            Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
-            streamInitStructure(session, clusterId, host, sudoPassword);
+            streamInitStructure(session, host, sudoPassword);
         } else if ("init_config".equals(action)) {
-            Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
-            streamInitConfig(session, clusterId, host, sudoPassword);
+            streamInitConfig(session, host, sudoPassword);
         } else if ("init_all".equals(action)) {
-            Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
-            streamInitAll(session, clusterId, host, sudoPassword);
+            streamInitAll(session, host, sudoPassword);
         } else if ("init_sshkey".equals(action)) {
-            Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
-            streamInitSshKey(session, clusterId, host, sudoPassword);
+            streamInitSshKey(session, host, sudoPassword);
         } else if ("init_ping".equals(action)) {
-            Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
-            streamInitPing(session, clusterId, host, sudoPassword);
+            streamInitPing(session, host, sudoPassword);
         } else if ("read_ansible_config".equals(action)) {
-            Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
-            streamReadAnsibleConfig(session, clusterId, host, sudoPassword);
+            streamReadAnsibleConfig(session, host, sudoPassword);
         } else if ("save_ansible_config".equals(action)) {
-            Long clusterId = toLongSafe(request.get("clusterId"));
             String host = (String) request.get("host");
             String sudoPassword = (String) request.get("sudoPassword");
             String cfg = (String) request.get("cfg");
             String hosts = (String) request.get("hosts");
             String vars = (String) request.get("vars");
-            streamSaveAnsibleConfig(session, clusterId, host, sudoPassword, cfg, hosts, vars);
+            streamSaveAnsibleConfig(session, host, sudoPassword, cfg, hosts, vars);
         }
     }
 
@@ -124,8 +118,9 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
     /**
      * Bắt đầu cài đặt Ansible với real-time output
+     * Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
      */
-    private void startAnsibleInstallationWithOutput(WebSocketSession session, Long clusterId,
+    private void startAnsibleInstallationWithOutput(WebSocketSession session,
             Map<String, String> sudoPasswords, String targetServer, Boolean isReinstall, Boolean isUninstall) {
         CompletableFuture.runAsync(() -> {
             try {
@@ -135,83 +130,115 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session, "{\"type\":\"start\",\"message\":\"Bắt đầu cài đặt Ansible...\"}");
                 }
 
-                // Lấy danh sách servers
-                // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
-                var allClusterServers = serverService.findByClusterStatus("AVAILABLE");
-                java.util.List<com.example.AutoDeployApp.entity.Server> clusterServers;
+                // Tìm controller server: ưu tiên ANSIBLE, fallback về MASTER
+                // Lưu ý: Máy ANSIBLE có thể có clusterStatus != "AVAILABLE" vì không phải K8s node
+                com.example.AutoDeployApp.entity.Server controllerServer = null;
 
-                // Chỉ thao tác trên MASTER server
-                clusterServers = allClusterServers.stream()
-                        .filter(s -> "MASTER".equals(s.getRole()))
-                        .collect(java.util.stream.Collectors.toList());
+                // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
+                // Logic giống hệt với AnsibleInstallationService.checkAnsibleInstallation()
+                try {
+                    var allServers = serverService.findAll();
+                    controllerServer = allServers.stream()
+                            .filter(s -> "ANSIBLE".equals(s.getRole()))
+                            .findFirst()
+                            .orElse(null);
+                } catch (Exception e) {
+                    // Nếu không lấy được tất cả servers, tiếp tục với fallback
+                    System.out.println("DEBUG: Lỗi khi tìm ANSIBLE trong findAll(): " + e.getMessage());
+                }
 
-                if (clusterServers.isEmpty()) {
+                // Bước 2: Nếu không có ANSIBLE, tìm MASTER trong AVAILABLE servers
+                if (controllerServer == null) {
+                    List<com.example.AutoDeployApp.entity.Server> allClusterServers = serverService.findByClusterStatus("AVAILABLE");
+                    controllerServer = allClusterServers.stream()
+                            .filter(server -> "MASTER".equals(server.getRole()))
+                            .findFirst()
+                            .orElse(null);
+                }
+
+                if (controllerServer == null) {
+                    String errorMsg = "Không tìm thấy controller server (ANSIBLE hoặc MASTER). " +
+                            "Đã kiểm tra: findAll() cho ANSIBLE và findByClusterStatus('AVAILABLE') cho MASTER.";
+                    System.out.println("DEBUG: " + errorMsg);
                     sendMessage(session,
-                            "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER server trong cluster\"}");
+                            String.format("{\"type\":\"error\",\"message\":\"%s\"}", errorMsg));
                     return;
                 }
 
-                // Lấy mật khẩu sudo của MASTER
-                com.example.AutoDeployApp.entity.Server masterServer = clusterServers.get(0);
-                String masterSudoPassword = sudoPasswords.get(masterServer.getHost());
+                // Lấy mật khẩu sudo của controller server
+                String controllerSudoPassword = sudoPasswords.get(controllerServer.getHost());
 
                 // Kiểm tra sudo NOPASSWD trước khi yêu cầu mật khẩu
                 boolean needsPassword = true;
                 try {
-                    String pem = serverService.resolveServerPrivateKeyPem(masterServer.getId());
+                    String pem = serverService.resolveServerPrivateKeyPem(controllerServer.getId());
                     if (pem != null && !pem.isBlank()) {
                         String checkSudoCmd = "sudo -l 2>/dev/null | grep -q 'NOPASSWD' && echo 'HAS_NOPASSWD' || echo 'NO_NOPASSWD'";
                         String sudoCheckResult = serverService.execCommandWithKey(
-                                masterServer.getHost(),
-                                masterServer.getPort() != null ? masterServer.getPort() : 22,
-                                masterServer.getUsername(),
+                                controllerServer.getHost(),
+                                controllerServer.getPort() != null ? controllerServer.getPort() : 22,
+                                controllerServer.getUsername(),
                                 pem,
                                 checkSudoCmd,
                                 5000);
                         if (sudoCheckResult != null && sudoCheckResult.contains("HAS_NOPASSWD")) {
                             needsPassword = false;
-                            masterSudoPassword = null; // Không cần mật khẩu
+                            controllerSudoPassword = null; // Không cần mật khẩu
                         }
                     }
                 } catch (Exception e) {
                     // Nếu không kiểm tra được sudo NOPASSWD thì tiếp tục với logic cũ
                 }
 
-                if (needsPassword && (masterSudoPassword == null || masterSudoPassword.trim().isEmpty())) {
+                String controllerRole = controllerServer.getRole();
+                String roleDisplay = "ANSIBLE".equals(controllerRole) ? "ANSIBLE Controller" : "MASTER Controller";
+
+                if (needsPassword && (controllerSudoPassword == null || controllerSudoPassword.trim().isEmpty())) {
                     sendMessage(session, String.format(
-                            "{\"type\":\"error\",\"message\":\"Cần mật khẩu sudo cho MASTER server: %s\"}",
-                            masterServer.getHost()));
+                            "{\"type\":\"error\",\"message\":\"Cần mật khẩu sudo cho %s: %s\"}",
+                            roleDisplay, controllerServer.getHost()));
                     return;
                 }
 
-                String action = Boolean.TRUE.equals(isUninstall) ? "gỡ cài đặt" : "cài đặt";
+                String action;
+                if (Boolean.TRUE.equals(isUninstall)) {
+                    action = "gỡ cài đặt";
+                } else if (Boolean.TRUE.equals(isReinstall)) {
+                    action = "cài đặt lại";
+                } else {
+                    action = "cài đặt";
+                }
                 sendMessage(session, String.format(
-                        "{\"type\":\"info\",\"message\":\"Bắt đầu %s Ansible trên MASTER: %s\"}",
-                        action, masterServer.getHost()));
+                        "{\"type\":\"info\",\"message\":\"Bắt đầu %s Ansible trên %s: %s\"}",
+                        action, roleDisplay, controllerServer.getHost()));
 
-                // Thực hiện thao tác trên MASTER server
-                com.example.AutoDeployApp.entity.Server server = clusterServers.get(0);
+                // Thực hiện thao tác trên controller server
                 String progress = "(1/1)";
 
-                String serverAction = Boolean.TRUE.equals(isUninstall) ? "gỡ cài đặt" : "cài đặt";
+                String serverAction = action;
                 sendMessage(session, String.format(
-                        "{\"type\":\"server_start\",\"server\":\"%s\",\"progress\":\"%s\",\"message\":\"Bắt đầu %s Ansible trên MASTER %s\"}",
-                        server.getHost(), progress, serverAction, server.getHost()));
+                        "{\"type\":\"server_start\",\"server\":\"%s\",\"progress\":\"%s\",\"message\":\"Bắt đầu %s Ansible trên %s %s\"}",
+                        controllerServer.getHost(), progress, serverAction, roleDisplay, controllerServer.getHost()));
 
                 try {
                     String result;
                     if (Boolean.TRUE.equals(isUninstall)) {
-                        result = uninstallAnsibleOnServerWithOutput(session, server, masterSudoPassword);
+                        // Gỡ cài đặt Ansible
+                        result = uninstallAnsibleOnServerWithOutput(session, controllerServer, controllerSudoPassword);
+                    } else if (Boolean.TRUE.equals(isReinstall)) {
+                        // Cài đặt lại Ansible
+                        result = reinstallAnsibleOnServerWithOutput(session, controllerServer, controllerSudoPassword);
                     } else {
-                        result = installAnsibleOnServerWithOutput(session, server, masterSudoPassword);
+                        // Cài đặt mới
+                        result = installAnsibleOnServerWithOutput(session, controllerServer, controllerSudoPassword);
                     }
 
                     // Tạo thông điệp thành công an toàn bằng Jackson
                     try {
                         java.util.Map<String, Object> successMessage = new java.util.HashMap<>();
                         successMessage.put("type", "server_success");
-                        successMessage.put("server", server.getHost());
-                        successMessage.put("message", "✅ " + server.getHost() + ": " + result);
+                        successMessage.put("server", controllerServer.getHost());
+                        successMessage.put("message", "✅ " + controllerServer.getHost() + ": " + result);
 
                         String jsonMessage = new com.fasterxml.jackson.databind.ObjectMapper()
                                 .writeValueAsString(successMessage);
@@ -222,15 +249,15 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         sendMessage(session,
                                 String.format(
                                         "{\"type\":\"server_success\",\"server\":\"%s\",\"message\":\"✅ %s: %s\"}",
-                                        server.getHost(), server.getHost(), escapeJsonString(result)));
+                                        controllerServer.getHost(), controllerServer.getHost(), escapeJsonString(result)));
                     }
                 } catch (Exception e) {
                     System.out
-                            .println("ERROR: Installation failed for " + server.getHost() + ": " + e.getMessage());
+                            .println("ERROR: Installation failed for " + controllerServer.getHost() + ": " + e.getMessage());
                     e.printStackTrace();
                     sendMessage(session,
                             String.format("{\"type\":\"server_error\",\"server\":\"%s\",\"message\":\"❌ %s: %s\"}",
-                                    server.getHost(), server.getHost(), e.getMessage()));
+                                    controllerServer.getHost(), controllerServer.getHost(), e.getMessage()));
                     // Gửi message complete với success = false
                     try {
                         java.util.Map<String, Object> completeMessage = new java.util.HashMap<>();
@@ -238,6 +265,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         completeMessage.put("success", false);
                         if (Boolean.TRUE.equals(isUninstall)) {
                             completeMessage.put("message", "❌ Gỡ cài đặt Ansible thất bại: " + e.getMessage());
+                        } else if (Boolean.TRUE.equals(isReinstall)) {
+                            completeMessage.put("message", "❌ Cài đặt lại Ansible thất bại: " + e.getMessage());
                         } else {
                             completeMessage.put("message", "❌ Cài đặt Ansible thất bại: " + e.getMessage());
                         }
@@ -249,6 +278,10 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         if (Boolean.TRUE.equals(isUninstall)) {
                             sendMessage(session,
                                     String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Gỡ cài đặt Ansible thất bại: %s\"}",
+                                            escapeJsonString(e.getMessage())));
+                        } else if (Boolean.TRUE.equals(isReinstall)) {
+                            sendMessage(session,
+                                    String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Cài đặt lại Ansible thất bại: %s\"}",
                                             escapeJsonString(e.getMessage())));
                         } else {
                             sendMessage(session,
@@ -266,6 +299,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     completeMessage.put("success", true);
                     if (Boolean.TRUE.equals(isUninstall)) {
                         completeMessage.put("message", "🎉 Hoàn thành gỡ cài đặt Ansible!");
+                    } else if (Boolean.TRUE.equals(isReinstall)) {
+                        completeMessage.put("message", "🎉 Hoàn thành cài đặt lại Ansible!");
                     } else {
                         completeMessage.put("message", "🎉 Hoàn thành cài đặt Ansible!");
                     }
@@ -278,6 +313,9 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     if (Boolean.TRUE.equals(isUninstall)) {
                         sendMessage(session,
                                 "{\"type\":\"complete\",\"success\":true,\"message\":\"🎉 Hoàn thành gỡ cài đặt Ansible!\"}");
+                    } else if (Boolean.TRUE.equals(isReinstall)) {
+                        sendMessage(session,
+                                "{\"type\":\"complete\",\"success\":true,\"message\":\"🎉 Hoàn thành cài đặt lại Ansible!\"}");
                     } else {
                         sendMessage(session,
                                 "{\"type\":\"complete\",\"success\":true,\"message\":\"🎉 Hoàn thành cài đặt Ansible!\"}");
@@ -296,6 +334,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     completeMessage.put("success", false);
                     if (Boolean.TRUE.equals(isUninstall)) {
                         completeMessage.put("message", "❌ Gỡ cài đặt Ansible thất bại: " + e.getMessage());
+                    } else if (Boolean.TRUE.equals(isReinstall)) {
+                        completeMessage.put("message", "❌ Cài đặt lại Ansible thất bại: " + e.getMessage());
                     } else {
                         completeMessage.put("message", "❌ Cài đặt Ansible thất bại: " + e.getMessage());
                     }
@@ -309,6 +349,10 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         if (Boolean.TRUE.equals(isUninstall)) {
                             sendMessage(session,
                                     String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Gỡ cài đặt Ansible thất bại: %s\"}",
+                                            escapeJsonString(e.getMessage())));
+                        } else if (Boolean.TRUE.equals(isReinstall)) {
+                            sendMessage(session,
+                                    String.format("{\"type\":\"complete\",\"success\":false,\"message\":\"❌ Cài đặt lại Ansible thất bại: %s\"}",
                                             escapeJsonString(e.getMessage())));
                         } else {
                             sendMessage(session,
@@ -324,7 +368,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
     }
 
     // ================= Nhóm thao tác khởi tạo nhanh (Realtime) =================
-    private void streamInitAll(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
+    private void streamInitAll(WebSocketSession session, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
                 // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -385,26 +429,38 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 }
                 StringBuilder hosts = new StringBuilder();
                 hosts.append("[master]\n");
+                int onlineMasterCount = 0;
                 for (var s : servers) {
-                    if ("MASTER".equals(s.getRole())) {
+                    // Chỉ thêm server online vào inventory (servers đã có clusterStatus=AVAILABLE, chỉ cần kiểm tra status=ONLINE)
+                    if ("MASTER".equals(s.getRole()) && s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE) {
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
                                 .append(" ansible_host=").append(s.getHost())
                                 .append(" ansible_user=").append(s.getUsername() != null ? s.getUsername() : "root");
                         if (s.getPort() != null) hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
+                        onlineMasterCount++;
                     }
                 }
+                if (onlineMasterCount == 0) {
+                    sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Không có MASTER server nào online để thêm vào inventory\"}"));
+                }
                 hosts.append("\n[workers]\n");
+                int onlineWorkerCount = 0;
                 for (var s : servers) {
-                    if ("WORKER".equals(s.getRole())) {
+                    // Chỉ thêm server online vào inventory (servers đã có clusterStatus=AVAILABLE, chỉ cần kiểm tra status=ONLINE)
+                    if ("WORKER".equals(s.getRole()) && s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE) {
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
                                 .append(" ansible_host=").append(s.getHost())
                                 .append(" ansible_user=").append(s.getUsername() != null ? s.getUsername() : "root");
                         if (s.getPort() != null) hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
+                        onlineWorkerCount++;
                     }
+                }
+                if (onlineWorkerCount == 0) {
+                    sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Không có WORKER server nào online để thêm vào inventory\"}"));
                 }
                 hosts.append("\n[all:vars]\n")
                         .append("ansible_python_interpreter=/usr/bin/python3\n")
@@ -450,8 +506,28 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
                 // 4) Ping inventory
                 sendMessage(session, String.format("{\"type\":\"info\",\"message\":\"Bước 4/4: Kiểm tra kết nối Ansible (ping)...\"}"));
-                String pingCmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'";
-                executeCommandWithTerminalOutput(session, target, pingCmd, sudoPassword, 30000);
+                
+                // Kiểm tra hosts file có tồn tại và có nội dung không
+                String checkHostsCmd = "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo EMPTY'";
+                String hostsCheck = executeCommandWithTerminalOutput(session, target, checkHostsCmd, sudoPassword, 5000);
+                if (hostsCheck == null || !hostsCheck.contains("OK")) {
+                    sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Hosts file không tồn tại hoặc rỗng. Bỏ qua bước ping.\"}"));
+                } else {
+                    // Ping tất cả các máy trong hosts file (chỉ bao gồm máy có clusterStatus=AVAILABLE + status=ONLINE)
+                    // Sử dụng -T 10 để giảm timeout xuống 10 giây cho mỗi máy (giảm thời gian chờ khi có nhiều máy offline)
+                    // Sử dụng || true để bỏ qua lỗi và tiếp tục (ansible sẽ tự động bỏ qua máy không kết nối được)
+                    String pingCmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts -T 10 || true'";
+                    // Timeout tổng: 10 giây/máy * số máy + buffer, nhưng với nhiều máy offline có thể lâu hơn
+                    // Ước tính: 10 máy offline = 100 giây, nhưng ansible chạy song song nên nhanh hơn
+                    try {
+                        executeCommandWithTerminalOutput(session, target, pingCmd, sudoPassword, 120000);
+                        sendMessage(session, String.format("{\"type\":\"info\",\"message\":\"Ping hoàn tất. Các máy offline đã được bỏ qua.\"}"));
+                    } catch (Exception pingError) {
+                        // Nếu ping thất bại hoàn toàn, vẫn tiếp tục (có thể một số máy offline)
+                        sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Một số máy có thể offline hoặc không thể ping được: %s\"}", 
+                                escapeJsonString(pingError.getMessage())));
+                    }
+                }
 
                 // Complete
                 sendMessage(session, String.format(
@@ -464,7 +540,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
             }
         });
     }
-    private void streamInitStructure(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
+    private void streamInitStructure(WebSocketSession session, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
                 // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -500,7 +576,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         });
     }
 
-    private void streamInitConfig(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
+    private void streamInitConfig(WebSocketSession session, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
                 // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -548,11 +624,14 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 }
 
                 // Sinh nội dung hosts dựa trên CSDL với nhóm [master], [worker], [all:vars]
+                // Chỉ thêm servers online vào inventory
                 StringBuilder hosts = new StringBuilder();
 
                 hosts.append("[master]\n");
+                int onlineMasterCount = 0;
                 for (var s : servers) {
-                    if ("MASTER".equals(s.getRole())) {
+                    // Chỉ thêm server online vào inventory
+                    if ("MASTER".equals(s.getRole()) && s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE) {
                         // Dùng hostname làm inventory_hostname (không có thì dùng IP tạm)
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
@@ -561,12 +640,18 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         if (s.getPort() != null)
                             hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
+                        onlineMasterCount++;
                     }
+                }
+                if (onlineMasterCount == 0) {
+                    sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Không có MASTER server nào online để thêm vào inventory\"}"));
                 }
 
                 hosts.append("\n[workers]\n");
+                int onlineWorkerCount = 0;
                 for (var s : servers) {
-                    if ("WORKER".equals(s.getRole())) {
+                    // Chỉ thêm server online vào inventory (servers đã có clusterStatus=AVAILABLE, chỉ cần kiểm tra status=ONLINE)
+                    if ("WORKER".equals(s.getRole()) && s.getStatus() == com.example.AutoDeployApp.entity.Server.ServerStatus.ONLINE) {
                         String hostname = s.getUsername() != null ? s.getUsername() : s.getHost();
                         hosts.append(hostname)
                                 .append(" ansible_host=").append(s.getHost())
@@ -574,7 +659,11 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                         if (s.getPort() != null)
                             hosts.append(" ansible_ssh_port=").append(s.getPort());
                         hosts.append("\n");
+                        onlineWorkerCount++;
                     }
+                }
+                if (onlineWorkerCount == 0) {
+                    sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Không có WORKER server nào online để thêm vào inventory\"}"));
                 }
 
                 hosts.append("\n[all:vars]\n")
@@ -604,7 +693,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         });
     }
 
-    private void streamInitSshKey(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
+    private void streamInitSshKey(WebSocketSession session, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
                 // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -820,9 +909,10 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         return "'" + s.replace("'", "'\\''") + "'";
     }
 
-    private void streamInitPing(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
+    private void streamInitPing(WebSocketSession session, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
+                // Chỉ ping các máy có clusterStatus = "AVAILABLE" (đã được thêm vào hosts file)
                 // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
                 var servers = serverService.findByClusterStatus("AVAILABLE");
                 com.example.AutoDeployApp.entity.Server target = pickTarget(servers, host, true);
@@ -830,12 +920,31 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     sendMessage(session, "{\"type\":\"error\",\"message\":\"Không tìm thấy MASTER trong cluster\"}");
                     return;
                 }
-                String pingCmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts || true'";
-                // Dùng sudoPassword làm phương án dự phòng cho mật khẩu SSH (không bọc sudo cho lệnh này)
-                executeCommandWithTerminalOutput(session, target, pingCmd,
-                        sudoPassword, 30000);
-                sendMessage(session, String.format("{\"type\":\"complete\",\"message\":\"Ping hoàn tất trên %s\"}",
-                        target.getHost()));
+                
+                // Kiểm tra hosts file có tồn tại và có nội dung không
+                String checkHostsCmd = "bash -lc '[ -s /etc/ansible/hosts ] && echo OK || echo EMPTY'";
+                String hostsCheck = executeCommandWithTerminalOutput(session, target, checkHostsCmd, sudoPassword, 5000);
+                if (hostsCheck == null || !hostsCheck.contains("OK")) {
+                    sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Hosts file không tồn tại hoặc rỗng. Vui lòng chạy khởi tạo config trước.\"}"));
+                    return;
+                }
+                
+                sendMessage(session, String.format("{\"type\":\"info\",\"message\":\"Đang ping tất cả máy trong hosts file...\"}"));
+                
+                // Ping tất cả các máy trong hosts file (ansible sẽ tự động ping tất cả và bỏ qua máy offline)
+                // Sử dụng -T 10 để giảm timeout xuống 10 giây cho mỗi máy (giảm thời gian chờ khi có nhiều máy offline)
+                // Sử dụng || true để bỏ qua lỗi và tiếp tục (ansible sẽ tự động bỏ qua máy không kết nối được)
+                String pingCmd = "bash -lc 'ansible all -m ping -i /etc/ansible/hosts -T 10 || true'";
+                // Timeout tổng: 10 giây/máy * số máy + buffer, nhưng với nhiều máy offline có thể lâu hơn
+                // Ước tính: 10 máy offline = 100 giây, nhưng ansible chạy song song nên nhanh hơn
+                try {
+                    executeCommandWithTerminalOutput(session, target, pingCmd, sudoPassword, 30000);
+                    sendMessage(session, String.format("{\"type\":\"complete\",\"message\":\"Ping hoàn tất.\"}"));
+                } catch (Exception pingError) {
+                    // Nếu ping thất bại hoàn toàn, vẫn tiếp tục (có thể một số máy offline)
+                    sendMessage(session, String.format("{\"type\":\"warning\",\"message\":\"Ping hoàn tất với một số lỗi. Các máy offline đã được bỏ qua: %s\"}", 
+                            escapeJsonString(pingError.getMessage())));
+                }
             } catch (Exception e) {
                 sendMessage(session,
                         String.format("{\"type\":\"error\",\"message\":\"%s\"}", escapeJsonString(e.getMessage())));
@@ -843,7 +952,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         });
     }
 
-    private void streamReadAnsibleConfig(WebSocketSession session, Long clusterId, String host, String sudoPassword) {
+    private void streamReadAnsibleConfig(WebSocketSession session, String host, String sudoPassword) {
         CompletableFuture.runAsync(() -> {
             try {
                 // Với 1 cluster duy nhất, luôn sử dụng servers có clusterStatus = "AVAILABLE"
@@ -953,7 +1062,7 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         });
     }
 
-    private void streamSaveAnsibleConfig(WebSocketSession session, Long clusterId, String host,
+    private void streamSaveAnsibleConfig(WebSocketSession session, String host,
             String sudoPassword, String cfgContent, String hostsContent, String varsContent) {
         CompletableFuture.runAsync(() -> {
             try {
@@ -1156,14 +1265,18 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
 
     private com.example.AutoDeployApp.entity.Server pickTarget(
             java.util.List<com.example.AutoDeployApp.entity.Server> servers, String host, boolean preferMaster) {
+        // Lưu ý: Máy ANSIBLE có thể có clusterStatus != "AVAILABLE" vì không phải K8s node
         if (servers == null || servers.isEmpty())
             return null;
+        
+        // Nếu có host cụ thể, tìm theo host trước
         if (host != null && !host.isBlank()) {
             for (var s : servers) {
                 if (host.equals(s.getHost()))
                     return s;
             }
         }
+        
         if (preferMaster) {
             // Bước 1: Tìm ANSIBLE trong tất cả servers trước (vì máy ANSIBLE không nằm trong cụm)
             try {
@@ -1188,6 +1301,8 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                     return s;
             }
         }
+        
+        // Nếu không tìm thấy controller, trả về server đầu tiên
         return servers.get(0);
     }
 
@@ -1221,10 +1336,10 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
         executeCommandWithTerminalOutput(session, server, "apt install -y python3 python3-pip python3-venv",
                 sudoPassword, 30000);
 
-        // Bước 3: cài Ansible
+        // Bước 3: cài Ansible (pip sẽ tự động upgrade nếu đã cài)
         sendMessage(session, String
                 .format("{\"type\":\"step\",\"server\":\"%s\",\"step\":3,\"message\":\"Cài đặt Ansible...\"}", host));
-        executeCommandWithTerminalOutput(session, server, "pip3 install ansible", sudoPassword, 60000);
+        executeCommandWithTerminalOutput(session, server, "pip3 install --upgrade ansible", sudoPassword, 60000);
 
         // Bước 4: kiểm tra lại kết quả cài đặt
         sendMessage(session, String
@@ -1233,6 +1348,35 @@ public class AnsibleWebSocketHandler extends TextWebSocketHandler {
                 10000);
 
         return "Ansible installed successfully: " + checkResult;
+    }
+
+    /**
+     * Cài đặt lại Ansible trên một server với real-time output
+     * Chỉ upgrade Ansible mà không cần gỡ cài đặt trước
+     * Giả định Ansible đã được cài đặt trước đó
+     */
+    private String reinstallAnsibleOnServerWithOutput(WebSocketSession session,
+            com.example.AutoDeployApp.entity.Server server, String sudoPassword) throws Exception {
+        String host = server.getHost();
+
+        // Bước 1: Cập nhật pip để đảm bảo có phiên bản mới nhất
+        sendMessage(session, String.format(
+                "{\"type\":\"step\",\"server\":\"%s\",\"step\":1,\"message\":\"Cập nhật pip...\"}", host));
+        executeCommandWithTerminalOutput(session, server, "pip3 install --upgrade pip", sudoPassword, 30000);
+
+        // Bước 2: Cài đặt lại/upgrade Ansible (pip3 install --upgrade sẽ tự động upgrade)
+        sendMessage(session, String.format(
+                "{\"type\":\"step\",\"server\":\"%s\",\"step\":2,\"message\":\"Cài đặt lại/nâng cấp Ansible...\"}", host));
+        executeCommandWithTerminalOutput(session, server, "pip3 install --upgrade ansible", sudoPassword, 60000);
+
+        // Bước 3: Kiểm tra lại kết quả cài đặt
+        sendMessage(session, String.format(
+                "{\"type\":\"step\",\"server\":\"%s\",\"step\":3,\"message\":\"Kiểm tra phiên bản Ansible sau khi cài đặt lại...\"}",
+                host));
+        String checkResult = executeCommandWithTerminalOutput(session, server, "ansible --version", sudoPassword,
+                10000);
+
+        return "Ansible reinstalled successfully: " + checkResult;
     }
 
     /**

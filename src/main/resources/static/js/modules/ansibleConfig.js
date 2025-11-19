@@ -3,7 +3,6 @@
 	'use strict';
 
 	// Trạng thái module
-	let currentClusterId = null;
 	let ansibleStatusRequestToken = 0; // Token để track request hiện tại, tránh race condition
 
 	// Hàm hỗ trợ: Escape HTML để tránh XSS
@@ -15,14 +14,14 @@
 	}
 
 	// Đọc cấu hình Ansible
-	async function readAnsibleConfig(clusterId) {
-		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
+	async function readAnsibleConfig() {
+		// API backend không cần clusterId (single cluster architecture)
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
 			console.error('ApiClient chưa sẵn sàng. Đang chờ load...');
 			return new Promise((resolve) => {
-				setTimeout(() => resolve(readAnsibleConfig(clusterId)), 100);
+				setTimeout(() => resolve(readAnsibleConfig()), 100);
 			});
 		}
 
@@ -36,14 +35,14 @@
 	}
 
 	// Lưu cấu hình Ansible
-	async function saveAnsibleConfig(clusterId, cfg, hosts, vars, sudoPassword = '') {
-		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
+	async function saveAnsibleConfig(cfg, hosts, vars, sudoPassword = '') {
+		// API backend không cần clusterId (single cluster architecture)
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
 			console.error('ApiClient chưa sẵn sàng. Đang chờ load...');
 			return new Promise((resolve) => {
-				setTimeout(() => resolve(saveAnsibleConfig(clusterId, cfg, hosts, vars, sudoPassword)), 100);
+				setTimeout(() => resolve(saveAnsibleConfig(cfg, hosts, vars, sudoPassword)), 100);
 			});
 		}
 
@@ -75,14 +74,14 @@
 	}
 
 	// Kiểm tra (verify) cấu hình Ansible
-	async function verifyAnsibleConfig(clusterId) {
-		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
+	async function verifyAnsibleConfig() {
+		// API backend không cần clusterId (single cluster architecture)
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
 			console.error('ApiClient chưa sẵn sàng. Đang chờ load...');
 			return new Promise((resolve) => {
-				setTimeout(() => resolve(verifyAnsibleConfig(clusterId)), 100);
+				setTimeout(() => resolve(verifyAnsibleConfig()), 100);
 			});
 		}
 
@@ -96,14 +95,14 @@
 	}
 
 	// Rollback cấu hình Ansible
-	async function rollbackAnsibleConfig(clusterId) {
-		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
+	async function rollbackAnsibleConfig() {
+		// API backend không cần clusterId (single cluster architecture)
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
 			console.error('ApiClient chưa sẵn sàng. Đang chờ load...');
 			return new Promise((resolve) => {
-				setTimeout(() => resolve(rollbackAnsibleConfig(clusterId)), 100);
+				setTimeout(() => resolve(rollbackAnsibleConfig()), 100);
 			});
 		}
 
@@ -117,14 +116,14 @@
 	}
 
 	// Kiểm tra sudo NOPASSWD
-	async function checkSudoNopasswd(clusterId, host = null) {
-		// clusterId không còn cần thiết cho API nhưng giữ lại để tương thích ngược
+	async function checkSudoNopasswd(host = null) {
+		// API backend không cần clusterId (single cluster architecture)
 
 		// Đảm bảo ApiClient đã được load
 		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
 			console.error('ApiClient chưa sẵn sàng. Đang chờ load...');
 			return new Promise((resolve) => {
-				setTimeout(() => resolve(checkSudoNopasswd(clusterId, host)), 100);
+				setTimeout(() => resolve(checkSudoNopasswd(host)), 100);
 			});
 		}
 
@@ -141,51 +140,10 @@
 	}
 
 	// Kiểm tra trạng thái Ansible
-	async function checkAnsibleStatus(clusterId) {
-		// Validate và lấy cluster ID từ nhiều nguồn (optional vì API không cần clusterId trong path)
-		let targetClusterId = clusterId;
-		if (!targetClusterId) {
-			targetClusterId = window.currentClusterId || currentClusterId;
-		}
-		
-		// Nếu không có clusterId, lấy từ cluster API (với hệ thống chỉ có 1 cluster)
-		if (!targetClusterId) {
-			try {
-				const clusterResponse = await window.ApiClient.get('/admin/cluster/api').catch(() => null);
-				if (clusterResponse && clusterResponse.id) {
-					targetClusterId = clusterResponse.id;
-				} else {
-					targetClusterId = 1; // Default cho hệ thống chỉ có 1 cluster
-				}
-			} catch (err) {
-				targetClusterId = 1; // Fallback
-			}
-		}
-
-		// Validate cluster ID là số hợp lệ
-		let id = typeof targetClusterId === 'number' ? targetClusterId : parseInt(targetClusterId, 10);
-		if (isNaN(id) || id <= 0) {
-			console.warn('checkAnsibleStatus: Invalid clusterId, using default 1:', targetClusterId);
-			id = 1;
-		}
-
+	// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
+	async function checkAnsibleStatus() {
 		// Tăng token để đánh dấu request mới (hủy request cũ nếu có)
 		ansibleStatusRequestToken++;
-
-		// Clear dữ liệu cũ trước khi kiểm tra cluster mới
-		if (currentClusterId !== null && currentClusterId !== id) {
-			// Clear status display
-			const statusDisplay = document.getElementById('ansible-status-display');
-			if (statusDisplay) {
-				statusDisplay.innerHTML = '';
-				statusDisplay.classList.add('d-none');
-			}
-			// Reset summary badges
-			setAnsibleSummaryBadges({ state: 'unknown' });
-		}
-
-		// Set currentClusterId ngay từ đầu để tránh race condition
-		currentClusterId = id;
 
 		const checkBtn = document.getElementById('cd-check-ansible');
 		const statusDisplay = document.getElementById('ansible-status-display');
@@ -200,7 +158,7 @@
 				checkBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang kiểm tra...';
 			}
 
-			// Lấy thông tin cluster detail để có master node (sử dụng id đã validate)
+			// Lấy thông tin cluster detail để có master node (sử dụng clusterStatus = "AVAILABLE" để xác định cluster)
 			let clusterDetail = null;
 			let masterNode = null;
 			try {
@@ -212,22 +170,12 @@
 				throw err; // Re-throw để xử lý ở catch block
 			}
 
-			// Gọi API kiểm tra trạng thái Ansible (không cần clusterId trong path - backend tự động lấy cluster duy nhất)
+			// Gọi API kiểm tra trạng thái Ansible (sử dụng clusterStatus = "AVAILABLE" để xác định cluster)
 			const ansibleStatus = await window.ApiClient.get('/admin/cluster/ansible-status');
 			
 			// Kiểm tra nếu request này đã bị hủy bởi request mới hơn
 			if (requestToken !== ansibleStatusRequestToken) {
 				return; // Bỏ qua response này vì đã có request mới hơn
-			}
-			
-			// Validate cluster ID trong response
-			if (ansibleStatus.clusterId && ansibleStatus.clusterId !== id) {
-				throw new Error('Cluster ID trong response không khớp. Có thể đang xem cluster khác.');
-			}
-			
-			// Validate currentClusterId vẫn là id (tránh bị thay đổi bởi request khác)
-			if (currentClusterId !== id) {
-				currentClusterId = id;
 			}
 			
 			// Xác định controller node từ nhiều nguồn (ưu tiên ANSIBLE, sau đó MASTER)
@@ -275,13 +223,12 @@
 				controllerRole = 'MASTER'; // Default
 			}
 
-			// Lưu controllerHost và clusterId vào ansibleStatus để sử dụng sau
+			// Lưu controllerHost vào ansibleStatus để sử dụng sau
 			if (controllerHost) {
 				ansibleStatus.masterInfo = controllerHost;
 				ansibleStatus.masterHost = controllerHost; // Giữ tên cũ để tương thích
 				ansibleStatus.controllerHost = controllerHost; // Tên mới
 				ansibleStatus.controllerRole = controllerRole || 'MASTER';
-				ansibleStatus.clusterId = id; // Đảm bảo clusterId được lưu
 			}
 
 			// Hiển thị thông tin đang kiểm tra controller node (nếu có)
@@ -300,8 +247,8 @@
 				return; // Bỏ qua update vì đã có request mới hơn
 			}
 
-			// Update summary badges (truyền clusterId để đảm bảo đúng cluster)
-			updateAnsibleSummary(ansibleStatus, id);
+			// Update summary badges
+			updateAnsibleSummary(ansibleStatus);
 
 		} catch (error) {
 			// Kiểm tra nếu request này đã bị hủy bởi request mới hơn
@@ -359,7 +306,7 @@
 	}
 
 	// Update Ansible summary badges
-	function updateAnsibleSummary(ansibleStatus, expectedClusterId = null) {
+	function updateAnsibleSummary(ansibleStatus) {
 		const statusDisplay = document.getElementById('ansible-status-display');
 		const badgeInstall = document.getElementById('ansible-summary-install');
 		const badgeVersion = document.getElementById('ansible-summary-version');
@@ -376,28 +323,6 @@
 		if (!ansibleStatus) {
 			setAnsibleSummaryBadges({ state: 'error', message: 'Không nhận được phản hồi từ server.' });
 			return;
-		}
-
-		// Sử dụng expectedClusterId nếu được truyền vào, nếu không thì dùng currentClusterId
-		const targetClusterId = expectedClusterId !== null ? expectedClusterId : currentClusterId;
-
-		// Validate cluster ID trong ansibleStatus khớp với targetClusterId
-		if (ansibleStatus.clusterId && targetClusterId && ansibleStatus.clusterId !== targetClusterId) {
-			setAnsibleSummaryBadges({ state: 'unknown' });
-			if (statusDisplay) {
-				statusDisplay.innerHTML = `
-					<div class="alert alert-warning">
-						<i class="bi bi-exclamation-triangle"></i> Dữ liệu Ansible không khớp với cluster hiện tại. Vui lòng kiểm tra lại.
-					</div>
-				`;
-				statusDisplay.classList.remove('d-none');
-			}
-			return;
-		}
-
-		// Đảm bảo currentClusterId được cập nhật nếu có expectedClusterId
-		if (expectedClusterId !== null && expectedClusterId !== currentClusterId) {
-			currentClusterId = expectedClusterId;
 		}
 
 		// Xử lý controller offline case
@@ -580,21 +505,61 @@
 	}
 
 	// Hiển thị modal cài đặt Ansible cho server
-	async function showAnsibleInstallModalForServer(clusterId, targetHost, isReinstall, isUninstall = false) {
-		if (!clusterId || !targetHost) {
-			window.showAlert('error', 'Cluster ID và server host là bắt buộc');
+	async function showAnsibleInstallModalForServer(targetHost, isReinstall, isUninstall = false) {
+		if (!targetHost) {
+			window.showAlert('error', 'Server host là bắt buộc');
 			return;
 		}
-
+		
 		try {
-			// Lấy thông tin cluster (với 1 cluster duy nhất, dùng endpoint không có clusterId)
+			// Lấy thông tin cluster (sử dụng clusterStatus = "AVAILABLE" để xác định cluster)
 			const clusterDetail = await window.ApiClient.get('/admin/cluster/api');
 
-			// Tìm server cần cài đặt
-			const targetServer = clusterDetail.nodes?.find(node => node.ip === targetHost);
+			// Tìm server cần cài đặt trong cluster nodes trước
+			let targetServer = clusterDetail.nodes?.find(node => node.ip === targetHost);
+			
+			// Nếu không tìm thấy trong cluster nodes, có thể là ANSIBLE server
+			// Tạo object server từ thông tin đã có (từ ansibleStatus hoặc từ badge)
 			if (!targetServer) {
-				window.showAlert('error', `Không tìm thấy server: ${targetHost}`);
-				return;
+				let role = 'MASTER'; // Default
+				let status = 'ONLINE'; // Default
+				
+				// Thử lấy thông tin từ ansibleStatus nếu có (từ checkAnsibleStatus)
+				try {
+					// Kiểm tra xem có ansibleStatus trong window hoặc từ ansibleStatus response
+					const ansibleStatusResponse = await window.ApiClient.get('/admin/cluster/ansible-status');
+					if (ansibleStatusResponse && ansibleStatusResponse.ansibleStatus) {
+						const serverStatus = ansibleStatusResponse.ansibleStatus[targetHost];
+						if (serverStatus) {
+							role = serverStatus.role || role;
+							status = serverStatus.installed ? 'ONLINE' : 'OFFLINE';
+						}
+					}
+				} catch (e) {
+					// Nếu không lấy được từ API, fallback về badge
+					const badgeMaster = document.getElementById('ansible-summary-master');
+					if (badgeMaster && badgeMaster.textContent) {
+						const badgeText = badgeMaster.textContent;
+						if (badgeText.includes('ANSIBLE')) {
+							role = 'ANSIBLE';
+						} else if (badgeText.includes('MASTER')) {
+							role = 'MASTER';
+						}
+					}
+				}
+				
+				// Tạo object server giả định từ thông tin đã có
+				targetServer = {
+					ip: targetHost,
+					host: targetHost,
+					role: role,
+					status: status,
+					id: null, // Không có ID vì không tìm thấy trong cluster
+					port: 22,
+					username: 'root' // Default
+				};
+				
+				console.log(`Không tìm thấy server ${targetHost} trong cluster nodes, sử dụng thông tin giả định với role: ${role}`);
 			}
 
 			// Kiểm tra sudo NOPASSWD cho server này
@@ -609,7 +574,7 @@
 			let statusMessage = '';
 
 			try {
-				const sudoCheckData = await window.AnsibleConfigModule.checkSudoNopasswd(clusterId, targetHost);
+				const sudoCheckData = await window.AnsibleConfigModule.checkSudoNopasswd(targetHost);
 				if (sudoCheckData && sudoCheckData.success && sudoCheckData.hasNopasswd) {
 					needsPassword = false;
 					statusMessage = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Sudo NOPASSWD</span>';
@@ -678,7 +643,6 @@
 			window.currentTargetServer = targetServer;
 			window.isReinstallMode = isReinstall;
 			window.isUninstallMode = isUninstall;
-			window.currentAnsibleInstallClusterId = clusterId;
 
 			// Show modal
 			const modalElement = document.getElementById('ansibleInstallModal');
@@ -702,35 +666,17 @@
 
 	// Cài đặt Ansible trên server
 	async function installAnsibleOnServer(serverHost) {
-		if (!currentClusterId) {
-			window.showAlert('error', 'Không tìm thấy cluster ID. Vui lòng chọn cluster trước.');
-			return;
-		}
-
-		// Mở modal cài đặt
-		await showAnsibleInstallModalForServer(currentClusterId, serverHost, false, false);
+		await showAnsibleInstallModalForServer(serverHost, false, false);
 	}
 
 	// Cài đặt lại Ansible trên server
 	async function reinstallAnsibleOnServer(serverHost) {
-		if (!currentClusterId) {
-			window.showAlert('error', 'Không tìm thấy cluster ID. Vui lòng chọn cluster trước.');
-			return;
-		}
-
-		// Mở modal cài đặt lại
-		await showAnsibleInstallModalForServer(currentClusterId, serverHost, true, false);
+		await showAnsibleInstallModalForServer(serverHost, true, false);
 	}
 
 	// Gỡ cài đặt Ansible trên server
 	async function uninstallAnsibleOnServer(serverHost) {
-		if (!currentClusterId) {
-			window.showAlert('error', 'Không tìm thấy cluster ID. Vui lòng chọn cluster trước.');
-			return;
-		}
-
-		// Mở modal gỡ cài đặt
-		await showAnsibleInstallModalForServer(currentClusterId, serverHost, false, true);
+		await showAnsibleInstallModalForServer(serverHost, false, true);
 	}
 
 	// Export module để sử dụng từ bên ngoài
@@ -745,19 +691,17 @@
 		setAnsibleSummaryBadges,
 		installAnsibleOnServer,
 		reinstallAnsibleOnServer,
-		uninstallAnsibleOnServer,
-		setCurrentClusterId: (id) => { currentClusterId = id; },
-		getCurrentClusterId: () => currentClusterId
+		uninstallAnsibleOnServer
 	};
 
 	// Tương thích ngược: expose các hàm global
-	window.readAnsibleConfig = (clusterId) => window.AnsibleConfigModule.readAnsibleConfig(clusterId);
-	window.saveAnsibleConfig = (clusterId, cfg, hosts, vars, sudoPassword) => 
-		window.AnsibleConfigModule.saveAnsibleConfig(clusterId, cfg, hosts, vars, sudoPassword);
-	window.verifyAnsibleConfig = (clusterId) => window.AnsibleConfigModule.verifyAnsibleConfig(clusterId);
-	window.rollbackAnsibleConfig = (clusterId) => window.AnsibleConfigModule.rollbackAnsibleConfig(clusterId);
-	window.checkSudoNopasswd = (clusterId, host) => window.AnsibleConfigModule.checkSudoNopasswd(clusterId, host);
-	window.checkAnsibleStatus = (clusterId) => window.AnsibleConfigModule.checkAnsibleStatus(clusterId);
+	window.readAnsibleConfig = () => window.AnsibleConfigModule.readAnsibleConfig();
+	window.saveAnsibleConfig = (cfg, hosts, vars, sudoPassword) => 
+		window.AnsibleConfigModule.saveAnsibleConfig(cfg, hosts, vars, sudoPassword);
+	window.verifyAnsibleConfig = () => window.AnsibleConfigModule.verifyAnsibleConfig();
+	window.rollbackAnsibleConfig = () => window.AnsibleConfigModule.rollbackAnsibleConfig();
+	window.checkSudoNopasswd = (host) => window.AnsibleConfigModule.checkSudoNopasswd(host);
+	window.checkAnsibleStatus = () => window.AnsibleConfigModule.checkAnsibleStatus();
 	window.updateAnsibleSummary = (status) => window.AnsibleConfigModule.updateAnsibleSummary(status);
 	window.setAnsibleSummaryBadges = (status) => window.AnsibleConfigModule.setAnsibleSummaryBadges(status);
 	window.installAnsibleOnServer = (serverHost) => window.AnsibleConfigModule.installAnsibleOnServer(serverHost);
@@ -805,13 +749,9 @@
 		if (initStructureBtn && !initStructureBtn.dataset.bound) {
 			initStructureBtn.dataset.bound = '1';
 			initStructureBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				appendInitLog('📁 Bắt đầu tạo cấu trúc thư mục Ansible...');
 				if (window.AnsibleWebSocketModule) {
-					window.AnsibleWebSocketModule.runInitActionWS('init_structure', currentClusterId, {
+					window.AnsibleWebSocketModule.runInitActionWS('init_structure', {
 						onLog: appendInitLog,
 						onLogBlock: appendInitLogBlock
 					});
@@ -826,13 +766,9 @@
 		if (initConfigBtn && !initConfigBtn.dataset.bound) {
 			initConfigBtn.dataset.bound = '1';
 			initConfigBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				appendInitLog('📝 Bắt đầu ghi cấu hình mặc định (ansible.cfg và hosts)...');
 				if (window.AnsibleWebSocketModule) {
-					window.AnsibleWebSocketModule.runInitActionWS('init_config', currentClusterId, {
+					window.AnsibleWebSocketModule.runInitActionWS('init_config', {
 						onLog: appendInitLog,
 						onLogBlock: appendInitLogBlock
 					});
@@ -847,13 +783,9 @@
 		if (initSshKeyBtn && !initSshKeyBtn.dataset.bound) {
 			initSshKeyBtn.dataset.bound = '1';
 			initSshKeyBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				appendInitLog('🔑 Bắt đầu tạo và phân phối SSH key từ controller...');
 				if (window.AnsibleWebSocketModule) {
-					window.AnsibleWebSocketModule.runInitActionWS('init_sshkey', currentClusterId, {
+					window.AnsibleWebSocketModule.runInitActionWS('init_sshkey', {
 						onLog: appendInitLog,
 						onLogBlock: appendInitLogBlock
 					});
@@ -868,13 +800,9 @@
 		if (initPingBtn && !initPingBtn.dataset.bound) {
 			initPingBtn.dataset.bound = '1';
 			initPingBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				appendInitLog('📡 Bắt đầu ping các nodes...');
 				if (window.AnsibleWebSocketModule) {
-					window.AnsibleWebSocketModule.runInitActionWS('init_ping', currentClusterId, {
+					window.AnsibleWebSocketModule.runInitActionWS('init_ping', {
 						onLog: appendInitLog,
 						onLogBlock: appendInitLogBlock,
 						needSudo: false
@@ -890,10 +818,6 @@
 		if (initAllBtn && !initAllBtn.dataset.bound) {
 			initAllBtn.dataset.bound = '1';
 			initAllBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				appendInitLog('⚡ Bắt đầu khởi tạo Ansible (tất cả 4 bước)...');
 				if (window.AnsibleWebSocketModule) {
 					// Chạy lần lượt 4 bước
@@ -909,7 +833,7 @@
 						appendInitLog(`\n━━━ Bước ${i + 1}/4: ${step.name} ━━━`);
 						await new Promise((resolve) => {
 							let completed = false;
-							window.AnsibleWebSocketModule.runInitActionWS(step.action, currentClusterId, {
+							window.AnsibleWebSocketModule.runInitActionWS(step.action, {
 								onLog: (line) => {
 									appendInitLog(line);
 									// Kiểm tra nếu có thông báo hoàn thành
@@ -988,35 +912,16 @@
 
 	// Bind event handlers cho Ansible Config Modal buttons
 	function bindAnsibleConfigButtons() {
-		// Update cluster name và load config khi modal mở
+		// Load config khi modal mở
 		const configModal = document.getElementById('ansibleConfigModal');
 		if (configModal) {
 			configModal.addEventListener('show.bs.modal', async () => {
-				const clusterNameEl = document.getElementById('current-cluster-name');
-				if (!currentClusterId) {
-					if (clusterNameEl) {
-						clusterNameEl.textContent = 'Chưa chọn cluster';
-					}
-					window.showAlert('warning', 'Vui lòng chọn cluster trước khi mở cấu hình Ansible');
-					return;
-				}
-
-				if (clusterNameEl) {
-					// Lấy tên cluster từ DOM hoặc API
-					const cdNameEl = document.getElementById('cd-name');
-					if (cdNameEl && cdNameEl.textContent.trim()) {
-						clusterNameEl.textContent = cdNameEl.textContent.trim();
-					} else {
-						clusterNameEl.textContent = `Cluster #${currentClusterId}`;
-					}
-				}
-
 				// Update status panel
 				updateConfigStatus('loading', 'Đang tải cấu hình...');
 
 				// Tự động load config khi mở modal
 				try {
-					const data = await readAnsibleConfig(currentClusterId);
+					const data = await readAnsibleConfig();
 					if (data && data.success) {
 						const cfgEditor = document.getElementById('ansible-cfg-editor');
 						const inventoryEditor = document.getElementById('ansible-inventory-editor');
@@ -1062,15 +967,11 @@
 		if (reloadBtn && !reloadBtn.dataset.bound) {
 			reloadBtn.dataset.bound = '1';
 			reloadBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				if (window.AnsibleConfigModule && window.AnsibleConfigModule.readAnsibleConfig) {
 					reloadBtn.disabled = true;
 					reloadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải...';
 					try {
-						const data = await window.AnsibleConfigModule.readAnsibleConfig(currentClusterId);
+						const data = await window.AnsibleConfigModule.readAnsibleConfig();
 						if (data && data.success) {
 							// Update editors
 							const cfgEditor = document.getElementById('ansible-cfg-editor');
@@ -1104,15 +1005,11 @@
 		if (verifyBtn && !verifyBtn.dataset.bound) {
 			verifyBtn.dataset.bound = '1';
 			verifyBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				if (window.AnsibleConfigModule && window.AnsibleConfigModule.verifyAnsibleConfig) {
 					verifyBtn.disabled = true;
 					verifyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xác minh...';
 					try {
-						const result = await window.AnsibleConfigModule.verifyAnsibleConfig(currentClusterId);
+						const result = await window.AnsibleConfigModule.verifyAnsibleConfig();
 						if (result && result.success) {
 							window.showAlert('success', 'Cấu hình Ansible hợp lệ!');
 							// Update status panel
@@ -1144,10 +1041,6 @@
 		if (rollbackBtn && !rollbackBtn.dataset.bound) {
 			rollbackBtn.dataset.bound = '1';
 			rollbackBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
 				if (!confirm('Bạn có chắc chắn muốn rollback cấu hình Ansible về phiên bản trước đó?')) {
 					return;
 				}
@@ -1155,12 +1048,12 @@
 					rollbackBtn.disabled = true;
 					rollbackBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang rollback...';
 					try {
-						const result = await window.AnsibleConfigModule.rollbackAnsibleConfig(currentClusterId);
+						const result = await window.AnsibleConfigModule.rollbackAnsibleConfig();
 						if (result && result.success) {
 							window.showAlert('success', 'Đã rollback cấu hình Ansible');
 							// Reload config
 							if (window.AnsibleConfigModule && window.AnsibleConfigModule.readAnsibleConfig) {
-								const data = await window.AnsibleConfigModule.readAnsibleConfig(currentClusterId);
+								const data = await window.AnsibleConfigModule.readAnsibleConfig();
 								if (data && data.success) {
 									const cfgEditor = document.getElementById('ansible-cfg-editor');
 									const inventoryEditor = document.getElementById('ansible-inventory-editor');
@@ -1187,11 +1080,6 @@
 		if (saveBtn && !saveBtn.dataset.bound) {
 			saveBtn.dataset.bound = '1';
 			saveBtn.addEventListener('click', async () => {
-				if (!currentClusterId) {
-					window.showAlert('error', 'Chưa chọn cluster');
-					return;
-				}
-				
 				const cfgEditor = document.getElementById('ansible-cfg-editor');
 				const inventoryEditor = document.getElementById('ansible-inventory-editor');
 				const varsEditor = document.getElementById('ansible-vars-editor');
@@ -1211,7 +1099,7 @@
 					saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang lưu...';
 					try {
 						const result = await window.AnsibleConfigModule.saveAnsibleConfig(
-							currentClusterId, cfg, hosts, vars, sudoPassword
+							cfg, hosts, vars, sudoPassword
 						);
 						if (result && result.success) {
 							window.showAlert('success', 'Đã lưu cấu hình Ansible');
@@ -1258,13 +1146,12 @@
 					return;
 				}
 
-				const clusterId = window.currentAnsibleInstallClusterId || currentClusterId;
 				const targetServer = window.currentTargetServer;
 				const isReinstall = window.isReinstallMode || false;
 				const isUninstall = window.isUninstallMode || false;
 
-				if (!clusterId || !targetServer) {
-					window.showAlert('error', 'Thông tin cluster hoặc server không hợp lệ.');
+				if (!targetServer) {
+					window.showAlert('error', 'Thông tin server không hợp lệ.');
 					return;
 				}
 
@@ -1278,6 +1165,7 @@
 				if (consoleEl) consoleEl.innerHTML = '';
 
 				// Kết nối WebSocket và gửi lệnh sau khi WebSocket mở
+				// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 				if (window.AnsibleWebSocketModule) {
 					// Lưu thông tin để gửi sau khi WebSocket mở
 					const installOptions = {
@@ -1287,7 +1175,7 @@
 						isUninstall: isUninstall
 					};
 
-					window.AnsibleWebSocketModule.connectAnsibleWebSocket(clusterId, {
+					window.AnsibleWebSocketModule.connectAnsibleWebSocket({
 						onLogMessage: (type, message) => {
 							if (consoleEl) {
 								const color = type === 'error' ? 'text-danger' : 
@@ -1321,7 +1209,7 @@
 															isReinstall ? 'Cài đặt lại Ansible thành công!' : 
 															'Cài đặt Ansible thành công!');
 								// Reload status
-								setTimeout(() => checkAnsibleStatus(clusterId), 2000);
+								setTimeout(() => checkAnsibleStatus(), 2000);
 							} else {
 								window.showAlert('error', message || 'Thao tác thất bại');
 							}
@@ -1346,13 +1234,6 @@
 		if (completeBtn && !completeBtn.dataset.bound) {
 			completeBtn.dataset.bound = '1';
 			completeBtn.addEventListener('click', async () => {
-				// Lấy cluster ID hiện tại
-				const clusterId = window.currentClusterId || currentClusterId;
-				if (!clusterId) {
-					window.showAlert('warning', 'Không tìm thấy cluster ID. Vui lòng chọn cluster trước.');
-					return;
-				}
-
 				// Đóng modal trước
 				const modal = bootstrap.Modal.getInstance(document.getElementById('ansibleInstallModal'));
 				if (modal) {
@@ -1365,24 +1246,25 @@
 				try {
 					// Kiểm tra trạng thái Ansible
 					if (window.checkAnsibleStatus && typeof window.checkAnsibleStatus === 'function') {
-						await window.checkAnsibleStatus(clusterId);
+						await window.checkAnsibleStatus();
 					} else if (window.AnsibleConfigModule && window.AnsibleConfigModule.checkAnsibleStatus) {
-						await window.AnsibleConfigModule.checkAnsibleStatus(clusterId);
+						await window.AnsibleConfigModule.checkAnsibleStatus();
 					} else {
 						window.showAlert('error', 'Function checkAnsibleStatus không khả dụng. Vui lòng tải lại trang.');
 						return;
 					}
 
 					// Reload cluster detail để cập nhật UI (nếu đang ở trang cluster detail)
-					if (window.showClusterDetail && typeof window.showClusterDetail === 'function') {
-						// Delay một chút để đảm bảo status đã được cập nhật
-						setTimeout(() => {
-							window.showClusterDetail(clusterId);
-						}, 1000);
-					} else if (window.K8sClustersModule && window.K8sClustersModule.showClusterDetail) {
-						setTimeout(() => {
-							window.K8sClustersModule.showClusterDetail(clusterId);
-						}, 1000);
+					// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
+						if (window.showClusterDetail && typeof window.showClusterDetail === 'function') {
+							// Delay một chút để đảm bảo status đã được cập nhật
+							setTimeout(() => {
+							window.showClusterDetail();
+							}, 1000);
+						} else if (window.K8sClustersModule && window.K8sClustersModule.showClusterDetail) {
+							setTimeout(() => {
+							window.K8sClustersModule.showClusterDetail();
+							}, 1000);
 					}
 				} catch (err) {
 					console.error('Error checking Ansible status:', err);

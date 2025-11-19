@@ -1,55 +1,9 @@
 // Playbook Manager - Quản lý playbook và template K8s
 
-function getClusterId() {
-	let cid = window.currentClusterId;
-	if (!cid) {
-		try {
-			const params = new URLSearchParams(window.location.search || '');
-			const fromUrl = params.get('clusterId');
-			if (fromUrl) {
-				window.currentClusterId = fromUrl;
-				cid = fromUrl;
-			}
-		} catch (_) { }
-	}
-	return cid;
-}
-// Load playbook cho cluster hiện tại (optional override)
-async function loadPlaybooks(clusterIdOverride) {
-	let cid = clusterIdOverride || getClusterId();
-	if (!cid) {
-		console.error('No cluster selected');
-		const playbookList = document.getElementById('playbook-list');
-		if (playbookList) {
-			playbookList.innerHTML = '<div class="list-group-item text-center text-warning">Chưa chọn cluster. Vui lòng chọn cluster trước.</div>';
-		}
-		return;
-	}
-
-	// Validate và parse clusterId thành số
+// Load playbook cho cluster hiện tại
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
+async function loadPlaybooks() {
 	try {
-		cid = typeof cid === 'string' ? parseInt(cid, 10) : Number(cid);
-		if (isNaN(cid) || cid <= 0) {
-			throw new Error(`Cluster ID không hợp lệ: ${clusterIdOverride || getClusterId()}`);
-		}
-	} catch (err) {
-		console.error('Invalid cluster ID:', err);
-		const playbookList = document.getElementById('playbook-list');
-		if (playbookList) {
-			playbookList.innerHTML = `<div class="list-group-item text-center text-danger">
-      <i class="bi bi-exclamation-triangle me-2"></i>
-      Cluster ID không hợp lệ: ${clusterIdOverride || getClusterId()}
-      </div>`;
-		}
-		return;
-	}
-
-	try {
-		// Lưu lại override nếu có
-		if (clusterIdOverride) {
-			window.currentClusterId = cid;
-		}
-		
 		const response = await fetch(`/api/ansible-playbook/list`);
 		
 		// Handle error response với message từ server nếu có
@@ -144,9 +98,9 @@ async function loadPlaybooks(clusterIdOverride) {
 }
 
 // Tải nội dung playbook
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 window.loadPlaybook = async function (filename) {
-	const cid = getClusterId();
-	if (!cid || !filename) return;
+	if (!filename) return;
 
 	try {
 		const response = await fetch(`/api/ansible-playbook/read?filename=${encodeURIComponent(filename)}`);
@@ -181,9 +135,8 @@ window.loadPlaybook = async function (filename) {
 };
 
 // Lưu playbook
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 window.savePlaybook = async function () {
-	const cid = getClusterId();
-	if (!cid) return;
 
 	const filename = document.getElementById('playbook-filename')?.value;
 	const content = document.getElementById('playbook-editor')?.value;
@@ -217,9 +170,9 @@ window.savePlaybook = async function () {
 };
 
 // Xóa playbook
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 window.deletePlaybook = async function (filename) {
-	const cid = getClusterId();
-	if (!cid || !filename) return;
+	if (!filename) return;
 
 	if (!confirm(`Xóa playbook "${filename}"?`)) return;
 
@@ -248,9 +201,9 @@ window.deletePlaybook = async function (filename) {
 };
 
 // Thực thi playbook
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 window.executePlaybook = async function (filename, extraVars = '') {
-	const cid = getClusterId();
-	if (!cid || !filename) return;
+	if (!filename) return;
 
 	try {
 		// Hiển thị thực thi và ẩn nội dung
@@ -478,12 +431,8 @@ async function monitorPlaybookExecution(taskId) {
 }
 
 // Kiểm tra xem playbook có tồn tại không
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 async function checkPlaybookExists(filename) {
-	const cid = getClusterId();
-	if (!cid) {
-		console.log('Không tìm thấy ID cluster');
-		return false;
-	}
 
 	try {
 		const response = await fetch(`/api/ansible-playbook/list`);
@@ -506,9 +455,9 @@ async function checkPlaybookExists(filename) {
 }
 
 // Tải lên playbook
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 window.uploadPlaybook = async function (file) {
-	const cid = getClusterId();
-	if (!cid || !file) return;
+	if (!file) return;
 
 	try {
 		// Kiểm tra xem file đã tồn tại chưa
@@ -555,10 +504,8 @@ window.uploadPlaybook = async function (file) {
 };
 
 // Tạo playbook K8s từ template
+// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
 window.generateK8sPlaybookFromTemplate = async function (template) {
-	if (!getClusterId()) {
-		throw new Error('Vui lòng chọn cluster trước');
-	}
 
 	const templates = {
 		'01-update-hosts-hostname': `---
@@ -2137,11 +2084,9 @@ window.generateK8sPlaybookFromTemplate = async function (template) {
 		console.log('User confirmed overwrite');
 	}
 
-	// Thay thế cluster_id trong nội dung playbook nếu có
+	// Sử dụng clusterStatus = "AVAILABLE" để xác định cluster thay vì clusterId
+	// Không cần thay thế cluster_id trong playbook nữa vì không sử dụng clusterId
 	let finalPlaybookContent = playbookContent;
-	if (getClusterId() && playbookContent.includes('{{ cluster_id | default(1) }}')) {
-		finalPlaybookContent = playbookContent.replace('{{ cluster_id | default(1) }}', getClusterId());
-	}
 
 	try {
 		const result = await fetch(`/api/ansible-playbook/save`, {
@@ -2241,10 +2186,7 @@ window.refreshPlaybooks = async function () {
 	}
 };
 
-// Đặt ID cluster hiện tại
-window.setCurrentClusterId = function (clusterId) {
-	window.currentClusterId = clusterId;
-};
+// Không cần setCurrentClusterId nữa vì sử dụng clusterStatus = "AVAILABLE" để xác định cluster
 
 // Export loadPlaybooks để có thể gọi từ k8sClusters.js
 window.loadPlaybooks = loadPlaybooks;
