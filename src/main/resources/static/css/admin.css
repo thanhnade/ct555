@@ -600,6 +600,58 @@ body.modal-open {
   background: #F2F2F2;
 }
 
+/* Table workloads - cho phép text wrap cho các cột dài */
+.table-workloads td,
+.table-workloads th {
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  vertical-align: middle;
+}
+
+/* Các cột có thể xuống dòng */
+.table-workloads td:nth-child(1), /* Namespace */
+.table-workloads th:nth-child(1) {
+  max-width: 150px;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.table-workloads td:nth-child(2), /* Tên */
+.table-workloads th:nth-child(2) {
+  max-width: 200px;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.table-workloads td:nth-child(5), /* Image */
+.table-workloads th:nth-child(5) {
+  max-width: 350px;
+  white-space: normal;
+  word-break: break-all;
+  font-size: 0.875rem;
+}
+
+/* Cột Actions - không wrap */
+.table-workloads td:last-child,
+.table-workloads th:last-child {
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+/* Cải thiện hover effect cho table rows */
+.table-workloads tbody tr:hover {
+  background-color: #f8f9fa;
+  cursor: pointer;
+}
+
+/* Badge styling trong table */
+.table-workloads .badge {
+  font-size: 0.75rem;
+  padding: 0.25em 0.5em;
+  font-weight: 500;
+}
+
 /* Sticky header */
 .table-fixed thead th {
   position: sticky;

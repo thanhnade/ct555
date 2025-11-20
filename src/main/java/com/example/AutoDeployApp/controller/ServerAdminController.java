@@ -164,26 +164,8 @@ public class ServerAdminController {
                 // Nếu không kết nối được, vẫn lưu session nhưng không thêm vào CONNECTED
                 session.setAttribute("CONNECTED_SERVERS", connected);
             }
-
-            // Lưu mật khẩu plaintext vào session cache để dùng cho SSH tự động
-            Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-            java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
-            if (pwAttr instanceof java.util.Map<?, ?> map) {
-                for (var e : map.entrySet()) {
-                    Long key = null;
-                    if (e.getKey() instanceof Number n)
-                        key = n.longValue();
-                    else if (e.getKey() instanceof String str)
-                        try {
-                            key = Long.parseLong(str);
-                        } catch (Exception ignored) {
-                        }
-                    if (key != null && e.getValue() instanceof String sv)
-                        pwCache.put(key, sv);
-                }
-            }
-            pwCache.put(s.getId(), password != null ? password : "");
-            session.setAttribute("SERVER_PW_CACHE", pwCache);
+            // SECURITY: Không lưu password trong session để tránh rủi ro bảo mật
+            // Password chỉ được sử dụng trong request hiện tại và không được lưu trữ
         }
         return ResponseEntity.ok(Map.of("id", s.getId()));
     }
@@ -230,35 +212,12 @@ public class ServerAdminController {
         }
         // Determine authType: use KEY if sshKeyId is provided, otherwise PASSWORD
         Server.AuthType authType = (sshKeyId != null && sshKeyId >= 0) ? Server.AuthType.KEY : Server.AuthType.PASSWORD;
-        // Fallback: nếu không truyền mật khẩu, lấy từ session cache để cho phép sửa
-        // nhanh ở "Servers đang kết nối"
-        if (password == null || password.isBlank()) {
-            var session = request.getSession(false);
-            if (session != null) {
-                Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-                if (pwAttr instanceof java.util.Map<?, ?> map) {
-                    for (var e : map.entrySet()) {
-                        Long key = null;
-                        if (e.getKey() instanceof Number n)
-                            key = n.longValue();
-                        else if (e.getKey() instanceof String str)
-                            try {
-                                key = Long.parseLong(str);
-                            } catch (Exception ignored) {
-                            }
-                        if (key != null && key.equals(id) && e.getValue() instanceof String sv) {
-                            password = sv;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        // SECURITY: Không đọc password từ session. Password phải được cung cấp trong request body nếu cần.
+        // Nếu không có password và không có SSH key, sẽ yêu cầu password trong request.
         Server s = serverService.update(id, host, port, username, password, role, status, clusterStatus, authType,
                 sshKeyId);
 
-        // Sau khi cập nhật và xác thực thành công, đưa máy vào CONNECTED_SERVERS để UI
-        // hiển thị ở danh sách đang kết nối
+        // Sau khi cập nhật, xử lý CONNECTED_SERVERS dựa trên status
         var session = request.getSession();
         synchronized (session) {
             Object attr = session.getAttribute("CONNECTED_SERVERS");
@@ -274,32 +233,22 @@ public class ServerAdminController {
                         }
                 }
             }
-            if (s.getStatus() == Server.ServerStatus.ONLINE) {
-                connected.add(s.getId());
+            
+            // Xử lý DISABLED: ngắt kết nối ngay lập tức
+            if (s.getStatus() == Server.ServerStatus.DISABLED) {
+                // DISABLED = ngắt kết nối: remove khỏi CONNECTED_SERVERS
+                connected.remove(s.getId());
+            } else if (s.getStatus() == Server.ServerStatus.ONLINE) {
+                // ONLINE: có thể thêm vào CONNECTED_SERVERS nếu đã kết nối thành công
+                // (nhưng không tự động add, phải qua SSH connection test)
+                // Giữ nguyên connected nếu đã có, không tự động add
+            } else {
+                // OFFLINE: remove khỏi CONNECTED_SERVERS
+                connected.remove(s.getId());
             }
+            
             session.setAttribute("CONNECTED_SERVERS", connected);
-
-            // Nếu có mật khẩu gửi lên (để fallback sau này), lưu vào SERVER_PW_CACHE
-            if (password != null && !password.isBlank()) {
-                Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-                java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
-                if (pwAttr instanceof java.util.Map<?, ?> map) {
-                    for (var e : map.entrySet()) {
-                        Long key = null;
-                        if (e.getKey() instanceof Number n)
-                            key = n.longValue();
-                        else if (e.getKey() instanceof String str)
-                            try {
-                                key = Long.parseLong(str);
-                            } catch (Exception ignored) {
-                            }
-                        if (key != null && e.getValue() instanceof String sv)
-                            pwCache.put(key, sv);
-                    }
-                }
-                pwCache.put(s.getId(), password);
-                session.setAttribute("SERVER_PW_CACHE", pwCache);
-            }
+            // SECURITY: Không lưu password trong session để tránh rủi ro bảo mật
         }
 
         return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name()));
@@ -336,29 +285,11 @@ public class ServerAdminController {
     }
 
     @PostMapping("/check-status")
-    public List<Map<String, Object>> checkStatusAll(HttpServletRequest request) {
+    public Map<String, Object> checkStatusAll(HttpServletRequest request) {
         var session = request.getSession();
 
         // 1) Ping tất cả server trong DB để cập nhật ONLINE/OFFLINE
         var allUpdated = serverService.checkAllStatuses(2000);
-
-        // Xây map mật khẩu từ session cache
-        java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
-        Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-        if (pwAttr instanceof java.util.Map<?, ?> map) {
-            for (var e : map.entrySet()) {
-                Long key = null;
-                if (e.getKey() instanceof Number n)
-                    key = n.longValue();
-                else if (e.getKey() instanceof String str)
-                    try {
-                        key = Long.parseLong(str);
-                    } catch (Exception ignored) {
-                    }
-                if (key != null && e.getValue() instanceof String sv)
-                    pwCache.put(key, sv);
-            }
-        }
 
         // Lọc server theo user hiện tại
         Long userId = null;
@@ -369,23 +300,87 @@ public class ServerAdminController {
             userId = n.longValue();
         var userServers = (userId != null) ? serverService.findAllForUser(userId) : java.util.List.<Server>of();
 
-        // 2) CONNECTED_SERVERS: ưu tiên thử SSH bằng KEY; nếu thất bại thì fallback mật
-        // khẩu. Thử cho tất cả server của user (không phụ thuộc ping ONLINE/OFFLINE)
+        // 2) CONNECTED_SERVERS: chỉ thử SSH bằng KEY (không sử dụng password từ session)
+        // SECURITY: Không đọc password từ session để tránh rủi ro bảo mật
+        
+        // Đọc danh sách đã connected từ session trước đó
+        Object existingConnectedAttr = session.getAttribute("CONNECTED_SERVERS");
+        java.util.LinkedHashSet<Long> existingConnected = new java.util.LinkedHashSet<>();
+        if (existingConnectedAttr instanceof java.util.Set<?> set) {
+            for (Object o : set) {
+                if (o instanceof Number n)
+                    existingConnected.add(n.longValue());
+                else if (o instanceof String str)
+                    try {
+                        existingConnected.add(Long.parseLong(str));
+                    } catch (Exception ignored) {
+                    }
+            }
+        }
+        
         java.util.LinkedHashSet<Long> connected = new java.util.LinkedHashSet<>();
+        int connectedCount = 0;
+        int onlineCount = 0;
+        int offlineCount = 0;
+        int skippedCount = 0; // Đếm số máy đã connected và vẫn online (skip SSH test)
+        
         for (var s : userServers) {
-            String pw = pwCache.get(s.getId());
-            boolean ok = serverService.tryConnectPreferKey(s, pw, 3000);
-            if (ok)
+            // Đếm ONLINE/OFFLINE/DISABLED
+            if (s.getStatus() == Server.ServerStatus.ONLINE) {
+                onlineCount++;
+            } else if (s.getStatus() == Server.ServerStatus.DISABLED) {
+                // DISABLED servers: không đếm vào online/offline, không thử SSH connection
+                continue; // Skip SSH connection cho DISABLED servers
+            } else {
+                offlineCount++;
+            }
+            
+            // DISABLED servers: chỉ check status (ping) nhưng không thử SSH connection
+            if (s.getStatus() == Server.ServerStatus.DISABLED) {
+                continue; // Skip SSH connection
+            }
+            
+            // Tối ưu: Nếu máy đã connected và vẫn online, không cần thử SSH lại
+            boolean alreadyConnected = existingConnected.contains(s.getId());
+            boolean isOnline = s.getStatus() == Server.ServerStatus.ONLINE;
+            
+            if (alreadyConnected && isOnline) {
+                // Máy đã connected và vẫn online → giữ nguyên trạng thái connected
                 connected.add(s.getId());
+                connectedCount++;
+                skippedCount++;
+            } else {
+                // Máy chưa connected hoặc đã offline → thử SSH connection
+                boolean ok = serverService.tryConnectPreferKey(s, null, 3000);
+                if (ok) {
+                    connected.add(s.getId());
+                    connectedCount++;
+                }
+                // Nếu máy đã offline, tự động remove khỏi connected (không add vào connected)
+            }
         }
         session.setAttribute("CONNECTED_SERVERS", connected);
 
-        // Trả về danh sách trạng thái (có thể dùng UI để tham khảo)
-        return allUpdated.stream().map(s -> Map.<String, Object>of(
-                "id", s.getId(),
-                "host", s.getHost(),
-                "status", s.getStatus().name()))
+        // Trả về danh sách trạng thái và thống kê
+        var serversList = allUpdated.stream()
+                .filter(s -> userServers.stream().anyMatch(us -> us.getId().equals(s.getId())))
+                .map(s -> Map.<String, Object>of(
+                        "id", s.getId(),
+                        "host", s.getHost(),
+                        "status", s.getStatus().name()))
                 .toList();
+        
+        return Map.of(
+                "servers", serversList,
+                "stats", Map.of(
+                        "total", userServers.size(),
+                        "online", onlineCount,
+                        "offline", offlineCount,
+                        "connected", connectedCount,
+                        "failed", userServers.size() - connectedCount,
+                        "skipped", skippedCount // Số máy đã connected và vẫn online (không cần SSH lại)
+                )
+        );
     }
 
     @GetMapping("/connected")
@@ -414,47 +409,129 @@ public class ServerAdminController {
     @PostMapping("/{id}/reconnect")
     public ResponseEntity<?> reconnect(@PathVariable Long id, @RequestBody Map<String, String> body,
             HttpServletRequest request) {
-        String password = body.get("password");
-        Server s = serverService.reconnect(id, password);
-        var session = request.getSession();
-        synchronized (session) {
-            Object attr = session.getAttribute("CONNECTED_SERVERS");
-            java.util.Set<Long> connected = new java.util.LinkedHashSet<>();
-            if (attr instanceof java.util.Set<?> set) {
-                for (Object o : set) {
-                    if (o instanceof Number n)
-                        connected.add(n.longValue());
-                    else if (o instanceof String str)
-                        try {
-                            connected.add(Long.parseLong(str));
-                        } catch (Exception ignored) {
+        try {
+            String password = body.get("password"); // Password là optional, chỉ cần nếu không có SSH key
+            
+            // Get server before reconnect to check if SSH key exists
+            Server serverBefore = serverService.findById(id);
+            boolean hadSshKeyBefore = serverBefore.getSshKey() != null;
+            boolean connectedWithKey = false;
+            
+            // Ưu tiên thử SSH key trước nếu có
+            if (hadSshKeyBefore) {
+                String pem = serverService.resolveServerPrivateKeyPem(id);
+                if (pem != null && !pem.isBlank()) {
+                    boolean canConnect = serverService.testSshWithKey(
+                            serverBefore.getHost(), 
+                            serverBefore.getPort() != null ? serverBefore.getPort() : 22,
+                            serverBefore.getUsername(), 
+                            pem, 
+                            5000);
+                    if (canConnect) {
+                        // Kết nối thành công bằng SSH key
+                        connectedWithKey = true;
+                        // Update status to ONLINE
+                        serverBefore.setStatus(Server.ServerStatus.ONLINE);
+                        serverService.update(id, null, null, null, null, null, Server.ServerStatus.ONLINE, null, null, null);
+                        
+                        // Update CONNECTED_SERVERS session
+                        var session = request.getSession();
+                        synchronized (session) {
+                            Object attr = session.getAttribute("CONNECTED_SERVERS");
+                            java.util.Set<Long> connected = new java.util.LinkedHashSet<>();
+                            if (attr instanceof java.util.Set<?> set) {
+                                for (Object o : set) {
+                                    if (o instanceof Number n)
+                                        connected.add(n.longValue());
+                                    else if (o instanceof String str)
+                                        try {
+                                            connected.add(Long.parseLong(str));
+                                        } catch (Exception ignored) {
+                                        }
+                                }
+                            }
+                            connected.add(id);
+                            session.setAttribute("CONNECTED_SERVERS", connected);
                         }
+                        
+                        // Build response
+                        java.util.Map<String, Object> response = new java.util.LinkedHashMap<>();
+                        response.put("id", id);
+                        response.put("status", "ONLINE");
+                        response.put("sshKeyGenerated", false);
+                        response.put("hasSshKey", true);
+                        response.put("connectedWithKey", true);
+                        response.put("message", "Đã reconnect thành công bằng SSH key. Server đã được kích hoạt lại.");
+                        
+                        return ResponseEntity.ok(response);
+                    }
                 }
             }
-            connected.add(s.getId());
-            session.setAttribute("CONNECTED_SERVERS", connected);
-
-            // Lưu mật khẩu vào session cache khi đã SSH thành công
-            Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-            java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
-            if (pwAttr instanceof java.util.Map<?, ?> map) {
-                for (var e : map.entrySet()) {
-                    Long key = null;
-                    if (e.getKey() instanceof Number n)
-                        key = n.longValue();
-                    else if (e.getKey() instanceof String str)
-                        try {
-                            key = Long.parseLong(str);
-                        } catch (Exception ignored) {
-                        }
-                    if (key != null && e.getValue() instanceof String sv)
-                        pwCache.put(key, sv);
-                }
+            
+            // Nếu không có SSH key hoặc SSH key không hoạt động, yêu cầu password
+            if (password == null || password.isBlank()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "VALIDATION_ERROR", 
+                                "message", hadSshKeyBefore 
+                                    ? "SSH key không hoạt động. Vui lòng nhập password để reconnect."
+                                    : "Password không được để trống (server chưa có SSH key)"));
             }
-            pwCache.put(s.getId(), password != null ? password : "");
-            session.setAttribute("SERVER_PW_CACHE", pwCache);
+            
+            // Perform reconnect với password
+            Server s = serverService.reconnect(id, password);
+            
+            // Check if SSH key was generated
+            boolean sshKeyGenerated = !hadSshKeyBefore && s.getSshKey() != null;
+            
+            // Update CONNECTED_SERVERS session
+            var session = request.getSession();
+            synchronized (session) {
+                Object attr = session.getAttribute("CONNECTED_SERVERS");
+                java.util.Set<Long> connected = new java.util.LinkedHashSet<>();
+                if (attr instanceof java.util.Set<?> set) {
+                    for (Object o : set) {
+                        if (o instanceof Number n)
+                            connected.add(n.longValue());
+                        else if (o instanceof String str)
+                            try {
+                                connected.add(Long.parseLong(str));
+                            } catch (Exception ignored) {
+                            }
+                    }
+                }
+                connected.add(s.getId());
+                session.setAttribute("CONNECTED_SERVERS", connected);
+                // SECURITY: Không lưu password trong session để tránh rủi ro bảo mật
+            }
+            
+            // Build response message
+            String message;
+            if (sshKeyGenerated) {
+                message = "Đã reconnect thành công bằng password và tự động generate SSH key. Server giờ có thể sử dụng SSH key cho các operations.";
+            } else if (hadSshKeyBefore) {
+                message = "Đã reconnect thành công bằng password. Server đã có SSH key từ trước (nhưng SSH key không hoạt động, đã dùng password).";
+            } else {
+                message = "Đã reconnect thành công bằng password nhưng không thể generate SSH key. Vui lòng thử lại hoặc kiểm tra quyền truy cập.";
+            }
+            
+            java.util.Map<String, Object> response = new java.util.LinkedHashMap<>();
+            response.put("id", s.getId());
+            response.put("status", s.getStatus().name());
+            response.put("sshKeyGenerated", sshKeyGenerated);
+            response.put("hasSshKey", s.getSshKey() != null);
+            response.put("connectedWithKey", false);
+            response.put("message", message);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "CONNECTION_ERROR", "message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "INTERNAL_ERROR", 
+                            "message", "Lỗi khi reconnect server: " + e.getMessage()));
         }
-        return ResponseEntity.ok(Map.of("id", s.getId(), "status", s.getStatus().name()));
     }
 
     @PostMapping("/{id}/test-key")
@@ -503,47 +580,131 @@ public class ServerAdminController {
         }
     }
 
-    @PostMapping("/{id}/disconnect")
-    public ResponseEntity<?> disconnect(@PathVariable Long id, HttpServletRequest request) {
-        var session = request.getSession(false);
-        if (session != null) {
-            synchronized (session) {
+    @PostMapping("/{id}/shutdown")
+    public ResponseEntity<?> shutdown(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            Server s = serverService.findById(id);
+            if (s == null) {
+                return ResponseEntity.notFound().build();
+            }
+            
+            // Kiểm tra server có connected không
+            var session = request.getSession(false);
+            boolean isConnected = false;
+            if (session != null) {
                 Object attr = session.getAttribute("CONNECTED_SERVERS");
                 if (attr instanceof java.util.Set<?> set) {
-                    java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
                     for (Object o : set) {
+                        Long serverId = null;
                         if (o instanceof Number n)
-                            ids.add(n.longValue());
+                            serverId = n.longValue();
                         else if (o instanceof String str)
                             try {
-                                ids.add(Long.parseLong(str));
+                                serverId = Long.parseLong(str);
                             } catch (Exception ignored) {
                             }
+                        if (serverId != null && serverId.equals(id)) {
+                            isConnected = true;
+                            break;
+                        }
                     }
-                    ids.remove(id);
-                    session.setAttribute("CONNECTED_SERVERS", ids);
-                }
-                // Optional: xoá mật khẩu cache cho server này
-                Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-                if (pwAttr instanceof java.util.Map<?, ?> map) {
-                    java.util.LinkedHashMap<Long, String> pwCache = new java.util.LinkedHashMap<>();
-                    for (var e : map.entrySet()) {
-                        Long key = null;
-                        if (e.getKey() instanceof Number n)
-                            key = n.longValue();
-                        else if (e.getKey() instanceof String str)
-                            try {
-                                key = Long.parseLong(str);
-                            } catch (Exception ignored) {
-                            }
-                        if (key != null && !key.equals(id) && e.getValue() instanceof String sv)
-                            pwCache.put(key, sv);
-                    }
-                    session.setAttribute("SERVER_PW_CACHE", pwCache);
                 }
             }
+            
+            if (!isConnected) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "NOT_CONNECTED", 
+                                "message", "Server chưa được kết nối. Vui lòng reconnect trước khi shutdown."));
+            }
+            
+            // Thực hiện shutdown command qua SSH
+            String pem = serverService.resolveServerPrivateKeyPem(id);
+            int port = s.getPort() != null ? s.getPort() : 22;
+            String shutdownCommand = "sudo shutdown -h now || sudo poweroff || sudo systemctl poweroff";
+            
+            String result = null;
+            if (pem != null && !pem.isBlank()) {
+                // Sử dụng SSH key
+                result = serverService.execCommandWithKey(s.getHost(), port, s.getUsername(), pem, shutdownCommand, 10000);
+            } else {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "NO_SSH_KEY", 
+                                "message", "Server không có SSH key. Không thể shutdown."));
+            }
+            
+            // Sau khi shutdown thành công, set status = OFFLINE và remove khỏi CONNECTED_SERVERS
+            s.setStatus(Server.ServerStatus.OFFLINE);
+            serverService.update(id, null, null, null, null, null, Server.ServerStatus.OFFLINE, null, null, null);
+            
+            // Remove khỏi CONNECTED_SERVERS
+            if (session != null) {
+                synchronized (session) {
+                    Object attr = session.getAttribute("CONNECTED_SERVERS");
+                    if (attr instanceof java.util.Set<?> set) {
+                        java.util.LinkedHashSet<Long> connected = new java.util.LinkedHashSet<>();
+                        for (Object o : set) {
+                            if (o instanceof Number n)
+                                connected.add(n.longValue());
+                            else if (o instanceof String str)
+                                try {
+                                    connected.add(Long.parseLong(str));
+                                } catch (Exception ignored) {
+                                }
+                        }
+                        connected.remove(id);
+                        session.setAttribute("CONNECTED_SERVERS", connected);
+                    }
+                }
+            }
+            
+            return ResponseEntity.ok(Map.of(
+                    "id", id,
+                    "status", "OFFLINE",
+                    "message", "Đã gửi lệnh shutdown đến server. Server sẽ tắt sau vài giây.",
+                    "output", result != null ? result : ""
+            ));
+            
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "SHUTDOWN_ERROR", 
+                            "message", "Lỗi khi shutdown server: " + e.getMessage()));
         }
-        return ResponseEntity.ok(Map.of("id", id));
+    }
+
+    @PostMapping("/{id}/disconnect")
+    public ResponseEntity<?> disconnect(@PathVariable Long id, HttpServletRequest request) {
+        // Ngắt kết nối = set status thành DISABLED
+        try {
+            // Set status = DISABLED (ngắt kết nối)
+            // Sử dụng update với chỉ status thay đổi
+            serverService.update(id, null, null, null, null, null, Server.ServerStatus.DISABLED, null, null, null);
+            
+            // Remove khỏi CONNECTED_SERVERS
+            var session = request.getSession(false);
+            if (session != null) {
+                synchronized (session) {
+                    Object attr = session.getAttribute("CONNECTED_SERVERS");
+                    if (attr instanceof java.util.Set<?> set) {
+                        java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+                        for (Object o : set) {
+                            if (o instanceof Number n)
+                                ids.add(n.longValue());
+                            else if (o instanceof String str)
+                                try {
+                                    ids.add(Long.parseLong(str));
+                                } catch (Exception ignored) {
+                                }
+                        }
+                        ids.remove(id);
+                        session.setAttribute("CONNECTED_SERVERS", ids);
+                    }
+                    // SECURITY: Không còn lưu password trong session nên không cần xóa cache
+                }
+            }
+            return ResponseEntity.ok(Map.of("id", id, "status", "DISABLED"));
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @GetMapping("/metrics")
@@ -562,28 +723,11 @@ public class ServerAdminController {
             userId = n.longValue();
         var servers = (userId != null) ? serverService.findAllForUser(userId) : java.util.List.<Server>of();
 
-        // Lấy password cache
-        java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
-        Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-        if (pwAttr instanceof java.util.Map<?, ?> map) {
-            for (var e : map.entrySet()) {
-                Long key = null;
-                if (e.getKey() instanceof Number n)
-                    key = n.longValue();
-                else if (e.getKey() instanceof String str)
-                    try {
-                        key = Long.parseLong(str);
-                    } catch (Exception ignored) {
-                    }
-                if (key != null && e.getValue() instanceof String sv)
-                    pwCache.put(key, sv);
-            }
-        }
-
+        // SECURITY: Không đọc password từ session. Chỉ sử dụng SSH key để lấy metrics.
         // Lấy metrics cho tất cả servers song song (parallel processing)
         java.util.List<CompletableFuture<java.util.Map.Entry<Long, Map<String, Object>>>> futures = servers.stream()
                 .map(s -> {
-                    CompletableFuture<Map<String, Object>> metricsFuture = getServerMetricsAsync(s, pwCache.get(s.getId()));
+                    CompletableFuture<Map<String, Object>> metricsFuture = getServerMetricsAsync(s, null);
                     return metricsFuture.<java.util.Map.Entry<Long, Map<String, Object>>>thenApply(metrics -> {
                         Map<String, Object> result = metrics != null ? metrics
                                 : Map.of("cpuCores", "-", "ramTotal", "-", "diskTotal", "-");
@@ -652,20 +796,8 @@ public class ServerAdminController {
                 }
             }
 
-            // Fallback về password
-            if (fallbackPassword != null && !fallbackPassword.isBlank()) {
-                try {
-                    String output = serverService.execCommand(s.getHost(), port, s.getUsername(), fallbackPassword,
-                            COMBINED_METRICS_COMMAND, 5000);
-                    if (output != null && !output.isBlank()) {
-                        return parseCombinedMetricsOutput(output);
-                    }
-                } catch (Exception e) {
-                    System.err.println("Password auth failed for " + s.getHost() + ": " + e.getMessage());
-                }
-            }
-
-            // Trả về giá trị mặc định nếu tất cả phương thức đều thất bại
+            // SECURITY: Không sử dụng password fallback. Chỉ sử dụng SSH key.
+            // Trả về giá trị mặc định nếu SSH key không hoạt động
             return Map.of("cpuCores", "-", "ramTotal", "-", "diskTotal", "-");
         }, executorService)
                 .orTimeout(15, TimeUnit.SECONDS)
@@ -712,18 +844,9 @@ public class ServerAdminController {
         try {
             Server s = serverService.findById(id);
             
-            // Lấy password cache để kết nối server
-            String fallbackPassword = null;
-            Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-            if (pwAttr instanceof java.util.Map<?, ?> map) {
-                Object pw = map.get(id);
-                if (pw instanceof String str) {
-                    fallbackPassword = str;
-                }
-            }
-
+            // SECURITY: Không đọc password từ session. Chỉ sử dụng SSH key để lấy metrics.
             // Lấy metrics mới từ server
-            Map<String, Object> metrics = getServerMetricsAsync(s, fallbackPassword).get(20, TimeUnit.SECONDS);
+            Map<String, Object> metrics = getServerMetricsAsync(s, null).get(20, TimeUnit.SECONDS);
             
             if (metrics == null) {
                 return ResponseEntity.ok(Map.of("ok", false, "message", "Không thể lấy metrics từ server"));
@@ -768,28 +891,11 @@ public class ServerAdminController {
             userId = n.longValue();
         var servers = (userId != null) ? serverService.findAllForUser(userId) : java.util.List.<Server>of();
 
-        // Lấy password cache
-        java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
-        Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-        if (pwAttr instanceof java.util.Map<?, ?> map) {
-            for (var e : map.entrySet()) {
-                Long key = null;
-                if (e.getKey() instanceof Number n)
-                    key = n.longValue();
-                else if (e.getKey() instanceof String str)
-                    try {
-                        key = Long.parseLong(str);
-                    } catch (Exception ignored) {
-                    }
-                if (key != null && e.getValue() instanceof String sv)
-                    pwCache.put(key, sv);
-            }
-        }
-
+        // SECURITY: Không đọc password từ session. Chỉ sử dụng SSH key để lấy metrics.
         // Cập nhật metrics cho tất cả servers song song
         java.util.List<CompletableFuture<Map<String, Object>>> futures = servers.stream()
                 .map(s -> {
-                    CompletableFuture<Map<String, Object>> metricsFuture = getServerMetricsAsync(s, pwCache.get(s.getId()));
+                    CompletableFuture<Map<String, Object>> metricsFuture = getServerMetricsAsync(s, null);
                     return metricsFuture.<Map<String, Object>>thenApply(metrics -> {
                         if (metrics != null) {
                             try {

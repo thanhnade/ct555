@@ -215,12 +215,12 @@ public class ServerService {
         }
         if (role != null)
             s.setRole(role);
-        // Xử lý clusterStatus: null hoặc empty để set UNAVAILABLE, hoặc giá trị cụ thể
+        // Xử lý clusterStatus: chỉ cập nhật nếu được cung cấp giá trị cụ thể
+        // Nếu clusterStatus = null → giữ nguyên giá trị hiện tại (không thay đổi)
         if (clusterStatus != null && !clusterStatus.isBlank()) {
             s.setClusterStatus(clusterStatus);
-            } else {
-            s.setClusterStatus("UNAVAILABLE");
         }
+        // Nếu clusterStatus = null, không thay đổi clusterStatus hiện tại
         // Cập nhật trạng thái: nếu vừa xác thực (do có thay đổi kết nối hoặc có mật
         // khẩu mới)
         if (connectionFieldChanged || suppliedNewPassword || keyWorked || usedPassword) {
@@ -489,6 +489,21 @@ public class ServerService {
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (Server s : servers) {
             futures.add(CompletableFuture.runAsync(() -> {
+                // DISABLED servers: chỉ check status (ping) nhưng giữ nguyên DISABLED
+                if (s.getStatus() == Server.ServerStatus.DISABLED) {
+                    // Vẫn ping để check nhưng không thay đổi status
+                    try (Socket socket = new Socket()) {
+                        InetSocketAddress addr = new InetSocketAddress(
+                                s.getHost(), s.getPort() != null ? s.getPort() : 22);
+                        socket.connect(addr, timeoutMs);
+                        // Giữ nguyên DISABLED, không đổi thành ONLINE
+                    } catch (Exception ignored) {
+                        // Giữ nguyên DISABLED, không đổi thành OFFLINE
+                    }
+                    return; // Skip update status
+                }
+                
+                // ONLINE/OFFLINE servers: ping và cập nhật status
                 boolean online = false;
                 try (Socket socket = new Socket()) {
                     InetSocketAddress addr = new InetSocketAddress(
@@ -516,6 +531,14 @@ public class ServerService {
         return servers;
     }
 
+    /**
+     * Reconnect to server and optionally generate SSH key if not exists
+     * 
+     * @param id Server ID
+     * @param rawPassword Password for SSH connection
+     * @return Server object with updated status
+     * @throws IllegalArgumentException if SSH connection fails
+     */
     @Transactional
     public Server reconnect(Long id, String rawPassword) {
         Server s = serverRepository.findById(id).orElseThrow();
@@ -527,6 +550,8 @@ public class ServerService {
         s.setPassword(passwordEncoder.encode(rawPassword));
         s.setStatus(Server.ServerStatus.ONLINE);
         s = serverRepository.saveAndFlush(s);
+        
+        // Generate SSH key if not exists
         if (s.getSshKey() == null) {
             try {
                 SshKey created = generateAndInstallSshKey(s.getHost(), s.getPort() != null ? s.getPort() : 22,
@@ -537,9 +562,12 @@ public class ServerService {
                     s.setSshKey(created);
                     s = serverRepository.saveAndFlush(s);
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // Log error but don't fail the reconnect operation
+                System.err.println("Failed to generate SSH key for server " + s.getId() + ": " + e.getMessage());
             }
         }
+        
         return s;
     }
 

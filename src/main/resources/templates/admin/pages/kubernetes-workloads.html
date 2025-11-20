@@ -4,7 +4,7 @@
     <div class="page-title-row">
       <div>
         <div class="page-title">📦 Workloads</div>
-        <div class="page-subtitle">Danh sách workloads (Deployments, StatefulSets, DaemonSets) trong cụm Kubernetes.</div>
+        <div class="page-subtitle">Danh sách workloads (Deployments, StatefulSets, DaemonSets, CronJobs, Jobs, Pods) trong cụm Kubernetes.</div>
       </div>
       <div style="display: flex; gap: 8px; align-items: center;">
         <button class="btn" id="workloads-reload">🔄 Làm mới</button>
@@ -23,6 +23,9 @@
             <option value="deployment">Deployment</option>
             <option value="statefulset">StatefulSet</option>
             <option value="daemonset">DaemonSet</option>
+            <option value="cronjob">CronJob</option>
+            <option value="job">Job</option>
+            <option value="pod">Pod</option>
           </select>
           <select class="form-control" style="width: 150px; font-size: 13px;" id="workloads-namespace-filter">
             <option value="">Tất cả namespace</option>
@@ -47,23 +50,44 @@
             DaemonSets (<span id="daemonsets-count">0</span>)
           </button>
         </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="cronjobs-tab" data-bs-toggle="tab" data-bs-target="#cronjobs" type="button" role="tab">
+            CronJobs (<span id="cronjobs-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="jobs-tab" data-bs-toggle="tab" data-bs-target="#jobs" type="button" role="tab">
+            Jobs (<span id="jobs-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="pods-tab" data-bs-toggle="tab" data-bs-target="#pods" type="button" role="tab">
+            Pods (<span id="pods-count">0</span>)
+          </button>
+        </li>
       </ul>
 
       <!-- Tab Content -->
       <div class="tab-content" id="workloads-tab-content">
         <!-- Deployments Tab -->
         <div class="tab-pane fade" id="deployments" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">Deployments</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-deployments" title="Làm mới Deployments">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
           <div class="table-responsive">
-            <table class="table">
+            <table class="table table-workloads">
               <thead>
                 <tr>
-                  <th>Namespace</th>
-                  <th>Tên</th>
-                  <th>Ready</th>
-                  <th>Up-to-date</th>
-                  <th>Available</th>
-                  <th>Age</th>
-                  <th>Actions</th>
+                  <th style="min-width: 120px;">Namespace</th>
+                  <th style="min-width: 150px;">Tên</th>
+                  <th style="min-width: 100px; white-space: nowrap;">Replicas</th>
+                  <th style="min-width: 120px; white-space: nowrap;">Rollout Status</th>
+                  <th style="min-width: 200px;">Image</th>
+                  <th style="min-width: 80px;">Age</th>
+                  <th style="min-width: 200px; white-space: nowrap;">Actions</th>
                 </tr>
               </thead>
               <tbody id="deployments-tbody">
@@ -79,20 +103,29 @@
 
         <!-- StatefulSets Tab -->
         <div class="tab-pane fade" id="statefulsets" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">StatefulSets</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-statefulsets" title="Làm mới StatefulSets">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
           <div class="table-responsive">
-            <table class="table">
+            <table class="table table-workloads">
               <thead>
                 <tr>
                   <th>Namespace</th>
                   <th>Tên</th>
-                  <th>Ready</th>
+                  <th>Replicas</th>
+                  <th>Pods</th>
+                  <th>PVCs</th>
+                  <th>Update Status</th>
                   <th>Age</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="statefulsets-tbody">
                 <tr>
-                  <td colspan="5" class="text-center text-muted py-3">
+                  <td colspan="8" class="text-center text-muted py-3">
                     <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
                   </td>
                 </tr>
@@ -103,24 +136,127 @@
 
         <!-- DaemonSets Tab -->
         <div class="tab-pane fade" id="daemonsets" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">DaemonSets</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-daemonsets" title="Làm mới DaemonSets">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
           <div class="table-responsive">
-            <table class="table">
+            <table class="table table-workloads">
               <thead>
                 <tr>
                   <th>Namespace</th>
                   <th>Tên</th>
-                  <th>Desired</th>
-                  <th>Current</th>
-                  <th>Ready</th>
-                  <th>Up-to-date</th>
-                  <th>Available</th>
+                  <th>Pods/Node</th>
+                  <th>Image</th>
+                  <th>Rollout Status</th>
                   <th>Age</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="daemonsets-tbody">
                 <tr>
-                  <td colspan="9" class="text-center text-muted py-3">
+                  <td colspan="7" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CronJobs Tab -->
+        <div class="tab-pane fade" id="cronjobs" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">CronJobs</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-cronjobs" title="Làm mới CronJobs">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-workloads">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Tên</th>
+                  <th>Schedule</th>
+                  <th>Trạng thái</th>
+                  <th>Job History</th>
+                  <th>History Limits</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="cronjobs-tbody">
+                <tr>
+                  <td colspan="8" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Jobs Tab -->
+        <div class="tab-pane fade" id="jobs" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">Jobs</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-jobs" title="Làm mới Jobs">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-workloads">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Tên</th>
+                  <th>Số Pod</th>
+                  <th>Trạng thái</th>
+                  <th>Thời gian</th>
+                  <th>Retry Config</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="jobs-tbody">
+                <tr>
+                  <td colspan="8" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Pods Tab -->
+        <div class="tab-pane fade" id="pods" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">Pods</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-pods" title="Làm mới Pods">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-workloads">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Tên</th>
+                  <th>Trạng thái</th>
+                  <th>Image</th>
+                  <th>Node</th>
+                  <th>IP</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="pods-tbody">
+                <tr>
+                  <td colspan="8" class="text-center text-muted py-3">
                     <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
                   </td>
                 </tr>

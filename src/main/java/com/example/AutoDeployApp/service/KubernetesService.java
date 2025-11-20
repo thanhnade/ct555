@@ -3,11 +3,6 @@ package com.example.AutoDeployApp.service;
 import io.fabric8.kubernetes.api.model.*;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
-import io.fabric8.kubernetes.api.model.apps.DeploymentList;
-import io.fabric8.kubernetes.api.model.apps.StatefulSet;
-import io.fabric8.kubernetes.api.model.apps.StatefulSetList;
-import io.fabric8.kubernetes.api.model.apps.DaemonSet;
-import io.fabric8.kubernetes.api.model.apps.DaemonSetList;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressList;
@@ -1637,204 +1632,6 @@ public class KubernetesService {
     // deleteNamespace() already exists at line 731
 
     /**
-     * Lấy pods - nếu namespace là null, trả về tất cả pods trong tất cả namespaces
-     */
-    public PodList getPods(String namespace) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            // Tái sử dụng helper method để kiểm tra namespace
-            if (isNamespaceNotEmpty(namespace)) {
-                return client.pods().inNamespace(namespace).list();
-            } else {
-                return client.pods().inAnyNamespace().list();
-            }
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get pods for namespace: {}", namespace, e);
-            throw new RuntimeException("Failed to get pods: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy pod cụ thể theo tên
-     */
-    public Pod getPod(String namespace, String podName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.pods().inNamespace(namespace).withName(podName).get();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get pod {}/{}: {}", namespace, podName, e.getMessage(), e);
-            throw new RuntimeException("Failed to get pod: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Xóa pod
-     */
-    public void deletePod(String namespace, String podName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.pods().inNamespace(namespace).withName(podName).delete();
-            logger.info("Deleted pod: {}/{}", namespace, podName);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to delete pod {}/{}: {}", namespace, podName, e.getMessage(), e);
-            throw new RuntimeException("Failed to delete pod: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy deployments - nếu namespace là null, trả về tất cả deployments trong
-     * tất cả namespaces
-     */
-    public DeploymentList getDeployments(String namespace) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            // Tái sử dụng helper method để kiểm tra namespace
-            if (isNamespaceNotEmpty(namespace)) {
-                return client.apps().deployments().inNamespace(namespace).list();
-            } else {
-                return client.apps().deployments().inAnyNamespace().list();
-            }
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get deployments for namespace: {}", namespace, e);
-            throw new RuntimeException("Failed to get deployments: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy deployment cụ thể theo tên
-     */
-    public Deployment getDeployment(String namespace, String deploymentName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.apps().deployments().inNamespace(namespace).withName(deploymentName).get();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get deployment {}/{}: {}", namespace, deploymentName, e.getMessage(), e);
-            throw new RuntimeException("Failed to get deployment: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Scale deployment
-     */
-    public void scaleDeployment(String namespace, String deploymentName, int replicas) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.apps().deployments().inNamespace(namespace).withName(deploymentName).scale(replicas);
-            logger.info("Scaled deployment {}/{} to {} replicas", namespace, deploymentName, replicas);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to scale deployment {}/{}: {}", namespace, deploymentName, e.getMessage(), e);
-            throw new RuntimeException("Failed to scale deployment: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Xóa deployment
-     */
-    public void deleteDeployment(String namespace, String deploymentName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.apps().deployments().inNamespace(namespace).withName(deploymentName).delete();
-            logger.info("Deleted deployment: {}/{}", namespace, deploymentName);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to delete deployment {}/{}: {}", namespace, deploymentName, e.getMessage(), e);
-            throw new RuntimeException("Failed to delete deployment: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy statefulsets - nếu namespace là null, trả về tất cả statefulsets trong
-     * tất cả namespaces
-     */
-    public StatefulSetList getStatefulSets(String namespace) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            // Tái sử dụng helper method để kiểm tra namespace
-            if (isNamespaceNotEmpty(namespace)) {
-                return client.apps().statefulSets().inNamespace(namespace).list();
-            } else {
-                return client.apps().statefulSets().inAnyNamespace().list();
-            }
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get statefulsets for namespace: {}", namespace, e);
-            throw new RuntimeException("Failed to get statefulsets: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy statefulset cụ thể theo tên
-     */
-    public StatefulSet getStatefulSet(String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.apps().statefulSets().inNamespace(namespace).withName(name).get();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get statefulset {}/{}: {}", namespace, name, e.getMessage(), e);
-            throw new RuntimeException("Failed to get statefulset: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Scale statefulset
-     */
-    public void scaleStatefulSet(String namespace, String name, int replicas) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.apps().statefulSets().inNamespace(namespace).withName(name).scale(replicas);
-            logger.info("Scaled statefulset {}/{} to {} replicas", namespace, name, replicas);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to scale statefulset {}/{}: {}", namespace, name, e.getMessage(), e);
-            throw new RuntimeException("Failed to scale statefulset: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Xóa statefulset
-     */
-    public void deleteStatefulSet(String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.apps().statefulSets().inNamespace(namespace).withName(name).delete();
-            logger.info("Deleted statefulset: {}/{}", namespace, name);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to delete statefulset {}/{}: {}", namespace, name, e.getMessage(), e);
-            throw new RuntimeException("Failed to delete statefulset: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy daemonsets - nếu namespace là null, trả về tất cả daemonsets trong
-     * tất cả namespaces
-     */
-    public DaemonSetList getDaemonSets(String namespace) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            // Tái sử dụng helper method để kiểm tra namespace
-            if (isNamespaceNotEmpty(namespace)) {
-                return client.apps().daemonSets().inNamespace(namespace).list();
-            } else {
-                return client.apps().daemonSets().inAnyNamespace().list();
-            }
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get daemonsets for namespace: {}", namespace, e);
-            throw new RuntimeException("Failed to get daemonsets: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy daemonset cụ thể theo tên
-     */
-    public DaemonSet getDaemonSet(String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.apps().daemonSets().inNamespace(namespace).withName(name).get();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get daemonset {}/{}: {}", namespace, name, e.getMessage(), e);
-            throw new RuntimeException("Failed to get daemonset: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Xóa daemonset
-     * Lưu ý: DaemonSets không thể scale
-     */
-    public void deleteDaemonSet(String namespace, String name) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.apps().daemonSets().inNamespace(namespace).withName(name).delete();
-            logger.info("Deleted daemonset: {}/{}", namespace, name);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to delete daemonset {}/{}: {}", namespace, name, e.getMessage(), e);
-            throw new RuntimeException("Failed to delete daemonset: " + e.getMessage(), e);
-        }
-    }
-
-    /**
      * Lấy services - nếu namespace là null, trả về tất cả services trong tất cả
      * namespaces
      */
@@ -1919,4 +1716,47 @@ public class KubernetesService {
             throw new RuntimeException("Failed to delete ingress: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * Lấy endpoints - nếu namespace là null, trả về tất cả endpoints trong tất cả namespaces
+     */
+    public EndpointsList getEndpoints(String namespace) {
+        try (KubernetesClient client = getKubernetesClient()) {
+            if (isNamespaceNotEmpty(namespace)) {
+                return client.endpoints().inNamespace(namespace).list();
+            } else {
+                return client.endpoints().inAnyNamespace().list();
+            }
+        } catch (KubernetesClientException e) {
+            logger.error("Failed to get endpoints for namespace: {}", namespace, e);
+            throw new RuntimeException("Failed to get endpoints: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Lấy endpoint cụ thể theo tên
+     */
+    public Endpoints getEndpoint(String namespace, String endpointName) {
+        try (KubernetesClient client = getKubernetesClient()) {
+            return client.endpoints().inNamespace(namespace).withName(endpointName).get();
+        } catch (KubernetesClientException e) {
+            logger.error("Failed to get endpoint {}/{}: {}", namespace, endpointName, e.getMessage(), e);
+            throw new RuntimeException("Failed to get endpoint: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Lấy CoreDNS pods (pods trong namespace kube-system với label k8s-app=kube-dns)
+     */
+    public PodList getCoreDNSPods() {
+        try (KubernetesClient client = getKubernetesClient()) {
+            return client.pods().inNamespace("kube-system")
+                    .withLabel("k8s-app", "kube-dns")
+                    .list();
+        } catch (KubernetesClientException e) {
+            logger.error("Failed to get CoreDNS pods: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to get CoreDNS pods: " + e.getMessage(), e);
+        }
+    }
+
 }

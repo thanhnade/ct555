@@ -49,11 +49,16 @@
 
 			(data || []).forEach(s => {
 				const isConnected = (connectedIds || []).includes(s.id);
-				const statusChip = isConnected
-					? '<span class="chip green">CONNECTED</span>'
-					: (s.status === 'ONLINE' 
-						? '<span class="chip blue">ONLINE</span>' 
-						: '<span class="chip red">OFFLINE</span>');
+				let statusChip = '';
+				if (s.status === 'DISABLED') {
+					statusChip = '<span class="chip" style="background-color: #6c757d; color: white;">DISABLED</span>';
+				} else if (isConnected) {
+					statusChip = '<span class="chip green">CONNECTED</span>';
+				} else if (s.status === 'ONLINE') {
+					statusChip = '<span class="chip blue">ONLINE</span>';
+				} else {
+					statusChip = '<span class="chip red">OFFLINE</span>';
+				}
 				
 				// Get hardware specs from database (saved in server entity)
 				const cpuCores = s.cpuCores || '-';
@@ -94,9 +99,10 @@
 					roleBadge = `<span class="badge bg-secondary">${escapeHtml(role)}</span>`;
 				}
 				
+				// DISABLED servers: có thể reconnect để kích hoạt lại
 				const reconnectOrDisconnect = isConnected
 					? `<button class="btn btn-sm" onclick="window.ServersModule.disconnectServer(${s.id})" title="Ngắt kết nối">🔌</button>`
-					: `<button class="btn btn-sm" onclick="window.ServersModule.openReconnectModal(${s.id})" title="Kết nối lại">🔌</button>`;
+					: `<button class="btn btn-sm" onclick="window.ServersModule.openReconnectModal(${s.id})" title="Kết nối lại">🔌 </button>`;
 				
 				// Create server card with Bootstrap grid column
 				const cardWrapper = document.createElement('div');
@@ -136,6 +142,7 @@
 						<button class="btn btn-sm" onclick="window.ServersModule.editServer(${s.id})" title="Sửa">✏️</button>
 						${reconnectOrDisconnect}
 						${isConnected ? `<button class="btn btn-sm" onclick="window.ServersModule.openTerminal(${s.id}, true)" title="Terminal">💻</button>` : ''}
+						${(isConnected && s.status !== 'DISABLED') ? `<button class="btn btn-sm btn-warning" onclick="window.ServersModule.shutdownServer(${s.id})" title="Shutdown máy chủ">🔴</button>` : ''}
 						<button class="btn btn-sm btn-danger" onclick="window.ServersModule.deleteServer(${s.id})" title="Xóa">🗑️</button>
 					</div>
 				`;
@@ -569,6 +576,27 @@
 			document.getElementById('edit-server-role').value = server.role || 'WORKER';
 			document.getElementById('edit-server-cluster-status').value = server.clusterStatus || 'UNAVAILABLE';
 			document.getElementById('edit-server-status').value = server.status || 'OFFLINE';
+			
+			// Set DISABLED checkbox
+			const disabledCheckbox = document.getElementById('edit-server-disabled');
+			if (disabledCheckbox) {
+				disabledCheckbox.checked = server.status === 'DISABLED';
+			}
+			
+			// Set CONNECTED checkbox (read-only, từ session)
+			const connectedCheckbox = document.getElementById('edit-server-connected');
+			if (connectedCheckbox) {
+				// Lấy danh sách connected từ API
+				window.ApiClient.get('/admin/servers/connected').then(connectedIds => {
+					if (Array.isArray(connectedIds) && connectedIds.includes(server.id)) {
+						connectedCheckbox.checked = true;
+					} else {
+						connectedCheckbox.checked = false;
+					}
+				}).catch(() => {
+					connectedCheckbox.checked = false;
+				});
+			}
 
 			// Clear password
 			document.getElementById('edit-server-password').value = '';
@@ -624,6 +652,13 @@
 		const roleEl = form.querySelector('[name="role"]') || form.elements?.role;
 		const clusterStatusEl = form.querySelector('[name="clusterStatus"]') || form.elements?.clusterStatus;
 		const statusEl = form.querySelector('[name="status"]') || form.elements?.status;
+		const disabledCheckbox = document.getElementById('edit-server-disabled');
+
+		// Xác định status: nếu checkbox DISABLED được check, set status = DISABLED
+		let finalStatus = statusEl?.value || 'OFFLINE';
+		if (disabledCheckbox && disabledCheckbox.checked) {
+			finalStatus = 'DISABLED';
+		}
 
 		const body = {
 			host: (hostEl?.value || '').trim(),
@@ -631,7 +666,7 @@
 			username: (usernameEl?.value || '').trim(),
 			role: (roleEl?.value || 'WORKER').trim(),
 			clusterStatus: (clusterStatusEl?.value || 'UNAVAILABLE').trim(),
-			status: statusEl?.value || 'OFFLINE'
+			status: finalStatus
 		};
 
 		// Only include password if provided
@@ -663,7 +698,12 @@
 			// Close modal
 			closeEditServerPopup();
 
-			window.showAlert('success', 'Đã lưu thay đổi thành công');
+			// Hiển thị thông báo phù hợp
+			if (finalStatus === 'DISABLED') {
+				window.showAlert('success', 'Đã lưu thay đổi thành công. Server đã bị disabled và ngắt kết nối.');
+			} else {
+				window.showAlert('success', 'Đã lưu thay đổi thành công');
+			}
 			await loadServers();
 		} catch (error) {
 			const errorMsg = error.message || 'Lưu server thất bại';
@@ -727,20 +767,10 @@
 
 	// Open reconnect modal
 	async function openReconnectModal(id) {
-		if (!window.ApiClient || typeof window.ApiClient.get !== 'function') {
+		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
 			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
 			return;
 		}
-
-		// Thử check-status trước (có thể tự động connect bằng key nếu có)
-		try {
-			await window.ApiClient.post('/admin/servers/check-status', {});
-			const connected = await window.ApiClient.get('/admin/servers/connected').catch(() => []);
-			if (Array.isArray(connected) && connected.includes(id)) {
-				await loadServers();
-				return;
-			}
-		} catch (_) { /* ignore */ }
 
 		try {
 			const servers = await window.ApiClient.get('/admin/servers');
@@ -749,6 +779,22 @@
 			if (!server) {
 				window.showAlert('error', 'Không tìm thấy server');
 				return;
+			}
+
+			// Ưu tiên thử reconnect bằng SSH key trước (nếu có)
+			// Gọi reconnect endpoint không có password để thử SSH key
+			try {
+				const response = await window.ApiClient.post(`/admin/servers/${id}/reconnect`, {});
+				
+				// Nếu reconnect thành công bằng SSH key
+				if (response && response.connectedWithKey) {
+					window.showAlert('success', response.message || 'Đã reconnect thành công bằng SSH key');
+					await loadServers();
+					return; // Không cần hiển thị modal
+				}
+			} catch (keyError) {
+				// SSH key không hoạt động hoặc không có SSH key, tiếp tục hiển thị modal để nhập password
+				console.debug('SSH key không hoạt động hoặc không có SSH key, yêu cầu password');
 			}
 
 			// Fill form
@@ -817,15 +863,54 @@
 		}
 
 		try {
-			await window.ApiClient.post(`/admin/servers/${id}/reconnect`, { password: password });
+			const response = await window.ApiClient.post(`/admin/servers/${id}/reconnect`, { password: password });
 			
 			// Close modal
 			closeReconnectServerPopup();
 
-			window.showAlert('success', 'Đã kết nối lại thành công');
+			// Display detailed success message based on response
+			let successMessage = 'Đã kết nối lại thành công';
+			let alertType = 'success';
+			
+			if (response && response.message) {
+				successMessage = response.message;
+			} else if (response) {
+				// Build message from response fields
+				if (response.connectedWithKey) {
+					successMessage = '✅ Đã reconnect thành công bằng SSH key. Server đã được kích hoạt lại.';
+				} else if (response.sshKeyGenerated) {
+					successMessage = '✅ Đã kết nối lại thành công bằng password và tự động generate SSH key. Server giờ có thể sử dụng SSH key cho các operations.';
+				} else if (response.hasSshKey) {
+					successMessage = '✅ Đã kết nối lại thành công bằng password. Server đã có SSH key từ trước (nhưng SSH key không hoạt động).';
+				} else {
+					successMessage = '⚠️ Đã kết nối lại thành công bằng password nhưng không thể generate SSH key. Vui lòng thử lại hoặc kiểm tra quyền truy cập.';
+					alertType = 'warning';
+				}
+			}
+			
+			// Nếu server đã chuyển từ DISABLED sang ONLINE, thông báo rõ ràng
+			if (response && response.status === 'ONLINE') {
+				if (!response.connectedWithKey) {
+					successMessage += ' Server đã được kích hoạt lại (chuyển từ DISABLED sang ONLINE).';
+				}
+			}
+			
+			window.showAlert(alertType, successMessage);
 			await loadServers();
 		} catch (error) {
-			const errorMsg = error.message || 'Kết nối lại thất bại';
+			// Handle error response with detailed message
+			// ApiClient throws error with error.body containing the response data
+			let errorMsg = 'Kết nối lại thất bại';
+			if (error.body) {
+				if (error.body.message) {
+					errorMsg = error.body.message;
+				} else if (error.body.error) {
+					errorMsg = error.body.error + (error.body.message ? ': ' + error.body.message : '');
+				}
+			} else if (error.message) {
+				errorMsg = error.message;
+			}
+			
 			showReconnectServerError(errorMsg);
 			window.showAlert('error', errorMsg);
 		} finally {
@@ -896,6 +981,31 @@
 		}
 	}
 
+	// Shutdown server
+	async function shutdownServer(id) {
+		if (!confirm('⚠️ Bạn có chắc chắn muốn shutdown máy chủ này? Máy chủ sẽ tắt ngay lập tức.')) {
+			return;
+		}
+		
+		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
+			window.showAlert('error', 'ApiClient chưa sẵn sàng. Vui lòng thử lại sau.');
+			return;
+		}
+
+		try {
+			const response = await window.ApiClient.post(`/admin/servers/${id}/shutdown`, {});
+			const successMsg = response?.message || `Đã gửi lệnh shutdown đến máy ${id}. Server sẽ tắt sau vài giây.`;
+			window.showAlert('success', successMsg);
+			await loadServers();
+		} catch (e) {
+			let errorMsg = e.message || `Shutdown máy ${id} thất bại`;
+			if (e.body && e.body.message) {
+				errorMsg = e.body.message;
+			}
+			window.showAlert('error', errorMsg);
+		}
+	}
+
 	// Disconnect server
 	async function disconnectServer(id) {
 		if (!window.ApiClient || typeof window.ApiClient.post !== 'function') {
@@ -904,10 +1014,10 @@
 		}
 
 		try {
-			await window.ApiClient.post(`/admin/servers/${id}/disconnect`, {});
+			const response = await window.ApiClient.post(`/admin/servers/${id}/disconnect`, {});
 			const successMsg = (window.I18n && window.I18n.t) 
 				? window.I18n.t('admin.server.disconnect.success') 
-				: `Đã ngắt kết nối máy ${id}`;
+				: `Đã ngắt kết nối máy ${id}. Server đã chuyển sang trạng thái DISABLED.`;
 			window.showAlert('success', successMsg);
 			await loadServers();
 		} catch (e) {
@@ -926,19 +1036,48 @@
 
 		if (btnCheck) {
 			btnCheck.disabled = true;
-			btnCheck.textContent = '⏳ Đang kiểm tra...';
+			btnCheck.textContent = '⏳ Đang kiểm tra và kết nối...';
 		}
 
 		try {
-			await window.ApiClient.post('/admin/servers/check-status', {});
-			window.showAlert('success', 'Đã kiểm tra trạng thái máy chủ');
+			const response = await window.ApiClient.post('/admin/servers/check-status', {});
+			
+			// Parse response để lấy thống kê
+			let stats = null;
+			if (response && response.stats) {
+				stats = response.stats;
+			} else if (response && typeof response === 'object' && 'stats' in response) {
+				stats = response.stats;
+			}
+			
+			// Tạo thông báo chi tiết với thống kê
+			let message = '✅ Đã kiểm tra trạng thái máy chủ';
+			if (stats) {
+				const total = stats.total || 0;
+				const online = stats.online || 0;
+				const offline = stats.offline || 0;
+				const connected = stats.connected || 0;
+				const failed = stats.failed || 0;
+				const skipped = stats.skipped || 0; // Số máy đã connected và vẫn online (không cần SSH lại)
+				
+				message = `📊 <strong>Kết quả kiểm tra:</strong><br>` +
+					`• <strong>Kết nối thành công:</strong> ${connected} máy chủ<br>` +
+					`• <strong>Kết nối thất bại:</strong> ${failed} máy chủ`;
+				
+				// Hiển thị thông tin về số máy đã skip (tối ưu hóa)
+				if (skipped > 0) {
+					message += `<br>• <strong>Đã bỏ qua:</strong> ${skipped} máy chủ (Đã kết nối)`;
+				}
+			}
+			
+			window.showAlert('success', message);
 			await loadServers();
 		} catch (err) {
 			window.showAlert('error', err.message || 'Kiểm tra trạng thái thất bại');
 		} finally {
 			if (btnCheck) {
 				btnCheck.disabled = false;
-				btnCheck.textContent = '🔍 Kiểm tra trạng thái';
+				btnCheck.textContent = '🔍 Kiểm tra và kết nối';
 			}
 		}
 	}
@@ -1438,6 +1577,7 @@
 		editServer,
 		saveEditServer,
 		deleteServer,
+		shutdownServer,
 		disconnectServer,
 		openReconnectModal,
 		saveReconnect,
@@ -1531,19 +1671,20 @@
 		// Wait for ApiClient to be ready before loading servers
 		function waitForApiClient() {
 			if (window.ApiClient && typeof window.ApiClient.get === 'function') {
-				// Load servers initially
-				loadServers();
-				
-				// Auto-connect servers immediately
-				autoConnectServers();
-				
-				// Set up auto-reconnect interval (every 45 seconds)
-				if (autoReconnectInterval) {
-					clearInterval(autoReconnectInterval);
-				}
-				autoReconnectInterval = setInterval(() => {
-					autoConnectServers();
-				}, 45000); // 45 seconds
+			// Load servers initially
+			loadServers();
+			
+			// Auto-connect servers immediately (one-time check)
+			autoConnectServers();
+			
+			// DISABLED: Auto-reconnect interval (was every 45 seconds)
+			// Uncomment below to re-enable auto-reconnect:
+			// if (autoReconnectInterval) {
+			// 	clearInterval(autoReconnectInterval);
+			// }
+			// autoReconnectInterval = setInterval(() => {
+			// 	autoConnectServers();
+			// }, 45000); // 45 seconds
 				
 				// Listen for page events
 				if (window.AdminBus && typeof window.AdminBus.on === 'function') {
@@ -1570,8 +1711,15 @@
 	// Auto-connect servers
 	async function autoConnectServers() {
 		try {
-			await window.ApiClient.post('/admin/servers/check-status', {});
+			const response = await window.ApiClient.post('/admin/servers/check-status', {});
 			await loadServers();
+			
+			// Log thống kê (không hiển thị alert để tránh spam)
+			if (response && response.stats) {
+				const stats = response.stats;
+				console.debug('[servers.js] Auto-connect:', 
+					`${stats.connected || 0}/${stats.total || 0} servers connected`);
+			}
 		} catch (err) {
 			console.debug('[servers.js] Auto-connect servers:', err.message || 'Error');
 		}

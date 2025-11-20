@@ -4,6 +4,7 @@ import com.example.AutoDeployApp.service.ClusterService;
 import com.example.AutoDeployApp.service.ServerService;
 import com.example.AutoDeployApp.service.AnsibleInstallationService;
 import com.example.AutoDeployApp.service.KubernetesService;
+import com.example.AutoDeployApp.service.K8sWorkloadsService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,7 +21,6 @@ import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PreDestroy;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
-import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.DaemonSet;
@@ -46,6 +46,7 @@ public class ClusterAdminController {
     private final ServerService serverService;
     private final AnsibleInstallationService ansibleInstallationService;
     private final KubernetesService kubernetesService;
+    private final K8sWorkloadsService k8sWorkloadsService;
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
 
     // Constants for timeouts and commands
@@ -60,11 +61,13 @@ public class ClusterAdminController {
     private static final String KUBEADM_VERSION_COMMAND = "kubeadm version -o short 2>/dev/null";
 
     public ClusterAdminController(ClusterService clusterService, ServerService serverService,
-            AnsibleInstallationService ansibleInstallationService, KubernetesService kubernetesService) {
+            AnsibleInstallationService ansibleInstallationService, KubernetesService kubernetesService,
+            K8sWorkloadsService k8sWorkloadsService) {
         this.clusterService = clusterService;
         this.serverService = serverService;
         this.ansibleInstallationService = ansibleInstallationService;
         this.kubernetesService = kubernetesService;
+        this.k8sWorkloadsService = k8sWorkloadsService;
     }
 
     @PreDestroy
@@ -254,7 +257,7 @@ public class ClusterAdminController {
             try {
                 deploymentsFuture = CompletableFuture.supplyAsync(() -> {
                     try {
-                        return kubernetesService.getDeployments(null);
+                        return k8sWorkloadsService.getDeployments(null);
                     } catch (Exception e) {
                         logger.debug("Không lấy được Deployments: " + e.getMessage());
                         return null;
@@ -263,7 +266,7 @@ public class ClusterAdminController {
                 
                 statefulSetsFuture = CompletableFuture.supplyAsync(() -> {
                     try {
-                        return kubernetesService.getStatefulSets(null);
+                        return k8sWorkloadsService.getStatefulSets(null);
                     } catch (Exception e) {
                         logger.debug("Không lấy được StatefulSets: " + e.getMessage());
                         return null;
@@ -272,7 +275,7 @@ public class ClusterAdminController {
                 
                 daemonSetsFuture = CompletableFuture.supplyAsync(() -> {
                     try {
-                        return kubernetesService.getDaemonSets(null);
+                        return k8sWorkloadsService.getDaemonSets(null);
                     } catch (Exception e) {
                         logger.debug("Không lấy được DaemonSets: " + e.getMessage());
                         return null;
@@ -363,7 +366,7 @@ public class ClusterAdminController {
             try {
                 podsFuture = CompletableFuture.supplyAsync(() -> {
                     try {
-                        return kubernetesService.getPods(null);
+                        return k8sWorkloadsService.getPods(null);
                     } catch (Exception e) {
                         logger.debug("Không lấy được Pods: " + e.getMessage());
                         return null;
@@ -1023,7 +1026,7 @@ public class ClusterAdminController {
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var podList = kubernetesService.getPods(namespace);
+            var podList = k8sWorkloadsService.getPods(namespace);
             java.util.List<java.util.Map<String, Object>> result = podList.getItems().stream()
                     .map(pod -> parsePodToMap(pod))
                     .filter(pod -> {
@@ -1063,7 +1066,7 @@ public class ClusterAdminController {
             // Lấy tất cả pods một lần (từ tất cả namespaces)
             java.util.Map<String, Integer> podsCountByNamespace = new java.util.HashMap<>();
             try {
-                io.fabric8.kubernetes.api.model.PodList allPods = kubernetesService.getPods(null); // null = lấy tất cả pods
+                io.fabric8.kubernetes.api.model.PodList allPods = k8sWorkloadsService.getPods(null); // null = lấy tất cả pods
                 if (allPods != null && allPods.getItems() != null) {
                     // Group pods theo namespace
                     java.util.Map<String, Integer> tempMap = allPods.getItems().stream()
@@ -1284,118 +1287,7 @@ public class ClusterAdminController {
     }
 
 
-    /**
-     * Liệt kê workloads cho cluster duy nhất (không cần ID)
-     * Deployments/StatefulSets/DaemonSets (sử dụng Fabric8 client)
-     * Supports optional namespace query parameter to filter workloads
-     */
-    @GetMapping("/k8s/workloads")
-    public ResponseEntity<?> listWorkloads(
-            @RequestParam(required = false) String namespace,
-            HttpServletRequest request) {
-        try {
-            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var deployments = kubernetesService.getDeployments(namespace);
-            var statefulSets = kubernetesService.getStatefulSets(namespace);
-            var daemonSets = kubernetesService.getDaemonSets(namespace);
 
-            // Parse Deployments
-            java.util.List<java.util.Map<String, Object>> deploymentList = deployments.getItems().stream()
-                    .map(dep -> parseWorkloadToMap(dep))
-                    .collect(java.util.stream.Collectors.toList());
-
-            // Parse StatefulSets
-            java.util.List<java.util.Map<String, Object>> statefulSetList = statefulSets.getItems().stream()
-                    .map(sts -> parseWorkloadToMap(sts))
-                    .collect(java.util.stream.Collectors.toList());
-
-            // Parse DaemonSets
-            java.util.List<java.util.Map<String, Object>> daemonSetList = daemonSets.getItems().stream()
-                    .map(ds -> parseWorkloadToMap(ds))
-                    .collect(java.util.stream.Collectors.toList());
-
-            return ResponseEntity.ok(Map.of(
-                    "deployments", deploymentList,
-                    "statefulSets", statefulSetList,
-                    "daemonSets", daemonSetList));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                // Trả về danh sách rỗng cho cả 3 loại khi API unavailable
-                return ResponseEntity.status(503).body(Map.of(
-                        "error", "Kubernetes API server unavailable",
-                        "deployments", new java.util.ArrayList<>(),
-                        "statefulSets", new java.util.ArrayList<>(),
-                        "daemonSets", new java.util.ArrayList<>()));
-            }
-            // Trả về danh sách rỗng cho cả 3 loại khi có lỗi khác
-            return ResponseEntity.status(500).body(Map.of(
-                    "error", "Failed to get workloads: " + e.getMessage(),
-                    "deployments", new java.util.ArrayList<>(),
-                    "statefulSets", new java.util.ArrayList<>(),
-                    "daemonSets", new java.util.ArrayList<>()));
-        } catch (Exception e) {
-            // Trả về danh sách rỗng cho cả 3 loại khi có exception
-            return ResponseEntity.status(500).body(Map.of(
-                    "error", e.getMessage(),
-                    "deployments", new java.util.ArrayList<>(),
-                    "statefulSets", new java.util.ArrayList<>(),
-                    "daemonSets", new java.util.ArrayList<>()));
-        }
-    }
-
-    /**
-     * Liệt kê services cho cluster duy nhất (không cần ID)
-     * Supports optional namespace query parameter to filter services
-     */
-    @GetMapping("/k8s/services")
-    public ResponseEntity<?> listServices(
-            @RequestParam(required = false) String namespace,
-            HttpServletRequest request) {
-        try {
-            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var serviceList = kubernetesService.getServices(namespace);
-            java.util.List<java.util.Map<String, Object>> result = serviceList.getItems().stream()
-                    .map(svc -> parseServiceToMap(svc))
-                    .collect(java.util.stream.Collectors.toList());
-            return ResponseEntity.ok(Map.of("services", result));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of(
-                        "error", "Kubernetes API server unavailable",
-                        "services", new java.util.ArrayList<>()));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to get services: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /**
-     * Liệt kê ingress cho cluster duy nhất (không cần ID)
-     * Supports optional namespace query parameter to filter ingress
-     */
-    @GetMapping("/k8s/ingress")
-    public ResponseEntity<?> listIngress(
-            @RequestParam(required = false) String namespace,
-            HttpServletRequest request) {
-        try {
-            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var ingressList = kubernetesService.getIngress(namespace);
-            java.util.List<java.util.Map<String, Object>> result = ingressList.getItems().stream()
-                    .map(ing -> parseIngressToMap(ing))
-                    .collect(java.util.stream.Collectors.toList());
-            return ResponseEntity.ok(Map.of("ingress", result));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of(
-                        "error", "Kubernetes API server unavailable",
-                        "ingress", new java.util.ArrayList<>()));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to get ingress: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
 
     // ===================== K8s Resource Actions
     // (Describe/Delete/Scale)=====================
@@ -1410,7 +1302,7 @@ public class ClusterAdminController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var pod = kubernetesService.getPod(namespace, name);
+            var pod = k8sWorkloadsService.getPod(namespace, name);
             if (pod == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Pod not found: " + name + " in namespace " + namespace));
@@ -1437,131 +1329,6 @@ public class ClusterAdminController {
         }
     }
 
-    /**
-     * Describe Service cho cluster duy nhất (không cần ID)
-     */
-    @GetMapping("/k8s/services/{namespace}/{name}")
-    public ResponseEntity<?> describeService(
-            @PathVariable String namespace,
-            @PathVariable String name,
-            HttpServletRequest request) {
-        try {
-            var service = kubernetesService.getService(namespace, name);
-            if (service == null) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
-            }
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(service);
-            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe service: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /**
-     * Delete Service cho cluster duy nhất (không cần ID) - cấm namespace hệ thống
-     */
-    @DeleteMapping("/k8s/services/{namespace}/{name}")
-    public ResponseEntity<?> deleteService(
-            @PathVariable String namespace,
-            @PathVariable String name,
-            HttpServletRequest request) {
-        try {
-            String nsLower = namespace == null ? "" : namespace.toLowerCase();
-            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Không cho phép xóa Service trong namespace hệ thống"));
-            }
-
-            kubernetesService.deleteService(namespace, name);
-            String output = String.format("service \"%s\" deleted", name);
-            return ResponseEntity.ok(Map.of("success", true, "output", output));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete service: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /**
-     * Describe Ingress cho cluster duy nhất (không cần ID)
-     */
-    @GetMapping("/k8s/ingress/{namespace}/{name}")
-    public ResponseEntity<?> describeIngress(
-            @PathVariable String namespace,
-            @PathVariable String name,
-            HttpServletRequest request) {
-        try {
-            var ingress = kubernetesService.getIngress(namespace, name);
-            if (ingress == null) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
-            }
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(ingress);
-            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe ingress: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /**
-     * Delete Ingress cho cluster duy nhất (không cần ID) - cấm namespace hệ thống
-     */
-    @DeleteMapping("/k8s/ingress/{namespace}/{name}")
-    public ResponseEntity<?> deleteIngress(
-            @PathVariable String namespace,
-            @PathVariable String name,
-            HttpServletRequest request) {
-        try {
-            String nsLower = namespace == null ? "" : namespace.toLowerCase();
-            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Không cho phép xóa Ingress trong namespace hệ thống"));
-            }
-
-            kubernetesService.deleteIngress(namespace, name);
-            String output = String.format("ingress.networking.k8s.io \"%s\" deleted", name);
-            return ResponseEntity.ok(Map.of("success", true, "output", output));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete ingress: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
 
     /**
      * Delete pod cho cluster duy nhất (không cần ID)
@@ -1579,7 +1346,7 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Không cho phép xóa pod trong namespace hệ thống"));
             }
 
-            kubernetesService.deletePod(namespace, name);
+            k8sWorkloadsService.deletePod(namespace, name);
             String output = String.format("pod \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
@@ -1596,207 +1363,6 @@ public class ClusterAdminController {
         }
     }
 
-    /**
-     * Describe workload cho cluster duy nhất (không cần ID)
-     */
-    @GetMapping("/k8s/{type}/{namespace}/{name}")
-    public ResponseEntity<?> describeWorkload(
-            @PathVariable String type,
-            @PathVariable String namespace,
-            @PathVariable String name,
-            HttpServletRequest request) {
-        try {
-            String t = type == null ? "" : type.toLowerCase();
-            if (!(t.equals("deployment") || t.equals("statefulset") || t.equals("daemonset"))) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Loại workload không hợp lệ"));
-            }
-
-            Object workload = null;
-            switch (t) {
-                case "deployment":
-                    workload = kubernetesService.getDeployment(namespace, name);
-                    break;
-                case "statefulset":
-                    workload = kubernetesService.getStatefulSet(namespace, name);
-                    break;
-                case "daemonset":
-                    workload = kubernetesService.getDaemonSet(namespace, name);
-                    break;
-                default:
-                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid workload type: " + type));
-            }
-
-            if (workload == null) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", type + " not found: " + name + " in namespace " + namespace));
-            }
-
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(workload);
-            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", type + " not found: " + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe workload: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    public static class ScaleRequest {
-        public Integer replicas;
-
-        public Integer getReplicas() {
-            return replicas;
-        }
-
-        public void setReplicas(Integer r) {
-            this.replicas = r;
-        }
-    }
-
-    /**
-     * Scale workload cho cluster duy nhất (không cần ID)
-     * Supports Deployment and StatefulSet only
-     */
-    @PostMapping("/k8s/{type}/{namespace}/{name}/scale")
-    public ResponseEntity<?> scaleWorkload(
-            @PathVariable String type,
-            @PathVariable String namespace,
-            @PathVariable String name,
-            @org.springframework.web.bind.annotation.RequestBody ScaleRequest body,
-            HttpServletRequest request) {
-        try {
-            String t = type == null ? "" : type.toLowerCase();
-
-            // Validate workload type
-            if (!(t.equals("deployment") || t.equals("statefulset"))) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Chỉ hỗ trợ scale Deployment/StatefulSet. DaemonSet không thể scale."));
-            }
-
-            // Prevent scaling in system namespaces
-            String nsLower = namespace == null ? "" : namespace.toLowerCase();
-            if (nsLower.equals("kube-system") || nsLower.equals("kube-public") ||
-                    nsLower.equals("kube-node-lease")) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Không cho phép scale trong namespace hệ thống"));
-            }
-
-            // Validate replicas
-            if (body == null || body.replicas == null || body.replicas < 0) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Giá trị replicas không hợp lệ. Phải >= 0"));
-            }
-
-            int replicas = body.replicas;
-
-            // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            switch (t) {
-                case "deployment":
-                    kubernetesService.scaleDeployment(namespace, name, replicas);
-                    break;
-                case "statefulset":
-                    kubernetesService.scaleStatefulSet(namespace, name, replicas);
-                    break;
-                default:
-                    return ResponseEntity.badRequest()
-                            .body(Map.of("error", "Invalid workload type: " + type));
-            }
-
-            return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "type", type,
-                    "namespace", namespace,
-                    "name", name,
-                    "replicas", replicas,
-                    "message", "Scaled " + type + " " + name + " to " + replicas + " replicas"));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error",
-                                "Workload not found: " + type + "/" + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503)
-                        .body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500)
-                    .body(Map.of("error", "Failed to scale workload: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /**
-     * Delete workload cho cluster duy nhất (không cần ID)
-     */
-    @DeleteMapping("/k8s/{type}/{namespace}/{name}")
-    public ResponseEntity<?> deleteWorkload(
-            @PathVariable String type,
-            @PathVariable String namespace,
-            @PathVariable String name,
-            HttpServletRequest request) {
-        try {
-            String t = type == null ? "" : type.toLowerCase();
-            if (!(t.equals("deployment") || t.equals("statefulset") || t.equals("daemonset"))) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Chỉ cho phép xóa Deployment/StatefulSet/DaemonSet"));
-            }
-
-            String nsLower = namespace == null ? "" : namespace.toLowerCase();
-            String nameLower = name == null ? "" : name.toLowerCase();
-            
-            // Cho phép xóa một số workloads đặc biệt ngay cả khi nằm trong namespace hệ thống
-            boolean isAllowedSpecialWorkload = 
-                (nsLower.equals("kube-system") && nameLower.equals("metrics-server")) ||
-                (nsLower.equals("nfs-provisioner") && nameLower.equals("nfs-client-provisioner")) ||
-                (nsLower.equals("default") && nameLower.equals("nfs-client-provisioner"));
-            
-            // Chặn xóa trong namespace hệ thống trừ các workloads đặc biệt được phép
-            if ((nsLower.equals("kube-system") || nsLower.equals("kube-public") || nsLower.equals("kube-node-lease")) 
-                    && !isAllowedSpecialWorkload) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Không cho phép xóa trong namespace hệ thống"));
-            }
-
-            String output;
-            switch (t) {
-                case "deployment":
-                    kubernetesService.deleteDeployment(namespace, name);
-                    output = String.format("deployment.apps \"%s\" deleted", name);
-                    break;
-                case "statefulset":
-                    kubernetesService.deleteStatefulSet(namespace, name);
-                    output = String.format("statefulset.apps \"%s\" deleted", name);
-                    break;
-                case "daemonset":
-                    kubernetesService.deleteDaemonSet(namespace, name);
-                    output = String.format("daemonset.apps \"%s\" deleted", name);
-                    break;
-                default:
-                    return ResponseEntity.badRequest()
-                            .body(Map.of("error", "Invalid workload type: " + type));
-            }
-
-            return ResponseEntity.ok(Map.of("success", true, "output", output));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", type + " not found: " + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to delete workload: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
 
     /**
      * Ghi config mặc định (ansible.cfg, hosts) lên MASTER cho cluster duy nhất (không cần ID)
@@ -2189,6 +1755,22 @@ public class ClusterAdminController {
         int readyCount = 0;
         int totalContainers = 0;
         
+        // Lấy image từ containers
+        String image = "N/A";
+        if (pod.getSpec() != null && pod.getSpec().getContainers() != null
+                && !pod.getSpec().getContainers().isEmpty()) {
+            image = pod.getSpec().getContainers().get(0).getImage();
+            if (image == null || image.isEmpty()) {
+                image = "N/A";
+            }
+        }
+        
+        // Lấy IP
+        String podIP = "";
+        if (pod.getStatus() != null && pod.getStatus().getPodIP() != null) {
+            podIP = pod.getStatus().getPodIP();
+        }
+        
         // Thêm container statuses nếu có
         if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
             java.util.List<Map<String, Object>> containerStatuses = new java.util.ArrayList<>();
@@ -2213,6 +1795,8 @@ public class ClusterAdminController {
         
         // Set ready string format: "ready/total"
         map.put("ready", totalContainers > 0 ? readyCount + "/" + totalContainers : "0/0");
+        map.put("image", image);
+        map.put("podIP", podIP);
 
         return map;
     }
@@ -2234,157 +1818,6 @@ public class ClusterAdminController {
         return "Unknown";
     }
 
-    /**
-     * Parse Service object thành Map format cho API response
-     */
-    private Map<String, Object> parseServiceToMap(io.fabric8.kubernetes.api.model.Service svc) {
-        java.util.Map<String, Object> map = new java.util.HashMap<>();
-        map.put("namespace", svc.getMetadata().getNamespace());
-        map.put("name", svc.getMetadata().getName());
-
-        // Type
-        String type = svc.getSpec() != null && svc.getSpec().getType() != null ? svc.getSpec().getType()
-                : "ClusterIP";
-        map.put("type", type);
-
-        // ClusterIP
-        String clusterIP = svc.getSpec() != null && svc.getSpec().getClusterIP() != null
-                ? svc.getSpec().getClusterIP()
-                : "";
-        map.put("clusterIP", clusterIP);
-
-        // Age
-        String age = "";
-        if (svc.getMetadata() != null && svc.getMetadata().getCreationTimestamp() != null) {
-            age = calculateAge(svc.getMetadata().getCreationTimestamp().toString());
-        }
-        map.put("age", age);
-
-        // External IP
-        String externalIP = "";
-        if (svc.getStatus() != null && svc.getStatus().getLoadBalancer() != null &&
-                svc.getStatus().getLoadBalancer().getIngress() != null &&
-                !svc.getStatus().getLoadBalancer().getIngress().isEmpty()) {
-            var ingress = svc.getStatus().getLoadBalancer().getIngress().get(0);
-            if (ingress.getHostname() != null && !ingress.getHostname().isEmpty()) {
-                externalIP = ingress.getHostname();
-            } else if (ingress.getIp() != null && !ingress.getIp().isEmpty()) {
-                externalIP = ingress.getIp();
-            }
-        }
-        if (externalIP.isEmpty() && "ExternalName".equals(type) &&
-                svc.getSpec() != null && svc.getSpec().getExternalName() != null) {
-            externalIP = svc.getSpec().getExternalName();
-        }
-        if (externalIP.isEmpty() && "LoadBalancer".equals(type)) {
-            externalIP = "<pending>";
-        }
-        map.put("externalIP", externalIP);
-
-        // Ports
-        java.util.List<String> portStrs = new java.util.ArrayList<>();
-        if (svc.getSpec() != null && svc.getSpec().getPorts() != null) {
-            for (var port : svc.getSpec().getPorts()) {
-                int svcPort = port.getPort() != null ? port.getPort() : 0;
-                String protocol = port.getProtocol() != null ? port.getProtocol() : "TCP";
-
-                if (port.getTargetPort() != null) {
-                    int targetPort = 0;
-                    if (port.getTargetPort().getIntVal() != null) {
-                        targetPort = port.getTargetPort().getIntVal();
-                    } else if (port.getTargetPort().getStrVal() != null) {
-                        try {
-                            targetPort = Integer.parseInt(port.getTargetPort().getStrVal());
-                        } catch (NumberFormatException ignored) {
-                            // Giữ nguyên dạng string nếu không phải số
-                            portStrs.add(
-                                    svcPort + ":" + port.getTargetPort().getStrVal() + "/" + protocol);
-                            continue;
-                        }
-                    }
-                    if (targetPort > 0 && svcPort > 0) {
-                        portStrs.add(svcPort + ":" + targetPort + "/" + protocol);
-                    } else if (svcPort > 0) {
-                        portStrs.add(svcPort + "/" + protocol);
-                    }
-                } else if (svcPort > 0) {
-                    portStrs.add(svcPort + "/" + protocol);
-                }
-            }
-        }
-        map.put("ports", String.join(", ", portStrs));
-
-        return map;
-    }
-
-    /**
-     * Parse Ingress object thành Map format cho API response
-     */
-    private Map<String, Object> parseIngressToMap(Ingress ing) {
-        java.util.Map<String, Object> map = new java.util.HashMap<>();
-        map.put("namespace", ing.getMetadata().getNamespace());
-        map.put("name", ing.getMetadata().getName());
-
-        // Ingress Class
-        String ingressClass = ing.getSpec() != null && ing.getSpec().getIngressClassName() != null
-                ? ing.getSpec().getIngressClassName()
-                : "";
-        map.put("class", ingressClass);
-
-        // Age
-        String age = "";
-        if (ing.getMetadata() != null && ing.getMetadata().getCreationTimestamp() != null) {
-            age = calculateAge(ing.getMetadata().getCreationTimestamp().toString());
-        }
-        map.put("age", age);
-
-        // Collect LoadBalancer addresses (hostname/ip)
-        java.util.List<String> addressList = new java.util.ArrayList<>();
-        if (ing.getStatus() != null && ing.getStatus().getLoadBalancer() != null &&
-                ing.getStatus().getLoadBalancer().getIngress() != null) {
-            for (var lbIngress : ing.getStatus().getLoadBalancer().getIngress()) {
-                if (lbIngress == null) {
-                    continue;
-                }
-                if (lbIngress.getHostname() != null && !lbIngress.getHostname().isEmpty()) {
-                    addressList.add(lbIngress.getHostname());
-                } else if (lbIngress.getIp() != null && !lbIngress.getIp().isEmpty()) {
-                    addressList.add(lbIngress.getIp());
-                }
-            }
-        }
-        map.put("address", addressList.isEmpty() ? "" : addressList.get(0)); // backward compatibility
-        map.put("addresses", addressList);
-
-        // Hosts & Ports
-        java.util.List<String> hostList = new java.util.ArrayList<>();
-        if (ing.getSpec() != null && ing.getSpec().getRules() != null) {
-            for (var rule : ing.getSpec().getRules()) {
-                if (rule == null) {
-                    continue;
-                }
-                if (rule.getHost() != null && !rule.getHost().isEmpty()) {
-                    hostList.add(rule.getHost());
-                }
-            }
-        }
-
-        // Determine exposed ports (best-effort: 443 when TLS present, otherwise 80)
-        java.util.List<String> portList = new java.util.ArrayList<>();
-        if (ing.getSpec() != null) {
-            boolean hasTls = ing.getSpec().getTls() != null && !ing.getSpec().getTls().isEmpty();
-            portList.add("80");
-            if (hasTls) {
-                portList.add("443");
-            }
-        }
-
-        map.put("host", hostList.isEmpty() ? "*" : hostList.get(0)); // backward compatibility
-        map.put("hosts", hostList);
-        map.put("ports", portList);
-
-        return map;
-    }
 
     /**
      * Parse memory value to bytes
@@ -2789,30 +2222,13 @@ public class ClusterAdminController {
     }
 
     /**
-     * Trích xuất password cache từ session
+     * SECURITY: Không còn đọc password từ session để tránh rủi ro bảo mật.
+     * Method này trả về empty map để tương thích với code hiện tại.
+     * Các operations sẽ chỉ sử dụng SSH key.
      */
     private java.util.Map<Long, String> getPasswordCache(jakarta.servlet.http.HttpSession session) {
-        java.util.Map<Long, String> pwCache = new java.util.LinkedHashMap<>();
-        if (session != null) {
-            Object pwAttr = session.getAttribute("SERVER_PW_CACHE");
-            if (pwAttr instanceof java.util.Map<?, ?> map) {
-                for (var e : map.entrySet()) {
-                    Long key = null;
-                    if (e.getKey() instanceof Number n)
-                        key = n.longValue();
-                    else if (e.getKey() instanceof String str) {
-                        try {
-                            key = Long.parseLong(str);
-                        } catch (Exception ignored) {
-                            // Bỏ qua các key không hợp lệ
-                        }
-                    }
-                    if (key != null && e.getValue() instanceof String sv)
-                        pwCache.put(key, sv);
-                }
-            }
-        }
-        return pwCache;
+        // SECURITY: Không đọc password từ session
+        return new java.util.LinkedHashMap<>();
     }
 
     /**
@@ -3061,105 +2477,7 @@ public class ClusterAdminController {
         }
     }
 
-    /**
-     * Parse workload (Deployment/StatefulSet/DaemonSet) thành Map chung
-     */
-    private Map<String, Object> parseWorkloadToMap(Object workload) {
-        java.util.Map<String, Object> map = new java.util.HashMap<>();
-        
-        // Common fields
-        String namespace = "";
-        String name = "";
-        String creationTimestamp = "";
-        
-        if (workload instanceof Deployment dep) {
-            namespace = dep.getMetadata() != null ? dep.getMetadata().getNamespace() : "";
-            name = dep.getMetadata() != null ? dep.getMetadata().getName() : "";
-            if (dep.getMetadata() != null && dep.getMetadata().getCreationTimestamp() != null) {
-                creationTimestamp = dep.getMetadata().getCreationTimestamp().toString();
-            }
-            
-            int ready = dep.getStatus() != null && dep.getStatus().getReadyReplicas() != null
-                    ? dep.getStatus().getReadyReplicas()
-                    : 0;
-            int replicas = dep.getSpec() != null && dep.getSpec().getReplicas() != null
-                    ? dep.getSpec().getReplicas()
-                    : 0;
-            int updated = dep.getStatus() != null && dep.getStatus().getUpdatedReplicas() != null
-                    ? dep.getStatus().getUpdatedReplicas()
-                    : 0;
-            int available = dep.getStatus() != null && dep.getStatus().getAvailableReplicas() != null
-                    ? dep.getStatus().getAvailableReplicas()
-                    : 0;
-            
-            map.put("namespace", namespace);
-            map.put("name", name);
-            map.put("ready", ready);
-            map.put("desired", replicas);
-            map.put("replicas", replicas);
-            map.put("updated", updated);
-            map.put("available", available);
-            map.put("age", calculateAge(creationTimestamp));
-            return map;
-        }
-        if (workload instanceof StatefulSet sts) {
-            namespace = sts.getMetadata() != null ? sts.getMetadata().getNamespace() : "";
-            name = sts.getMetadata() != null ? sts.getMetadata().getName() : "";
-            if (sts.getMetadata() != null && sts.getMetadata().getCreationTimestamp() != null) {
-                creationTimestamp = sts.getMetadata().getCreationTimestamp().toString();
-            }
-            
-            int ready = sts.getStatus() != null && sts.getStatus().getReadyReplicas() != null
-                    ? sts.getStatus().getReadyReplicas()
-                    : 0;
-            int replicas = sts.getSpec() != null && sts.getSpec().getReplicas() != null
-                    ? sts.getSpec().getReplicas()
-                    : 0;
-            
-            map.put("namespace", namespace);
-            map.put("name", name);
-            map.put("ready", ready);
-            map.put("desired", replicas);
-            map.put("replicas", replicas);
-            map.put("age", calculateAge(creationTimestamp));
-            return map;
-        }
-        if (workload instanceof DaemonSet ds) {
-            namespace = ds.getMetadata() != null ? ds.getMetadata().getNamespace() : "";
-            name = ds.getMetadata() != null ? ds.getMetadata().getName() : "";
-            if (ds.getMetadata() != null && ds.getMetadata().getCreationTimestamp() != null) {
-                creationTimestamp = ds.getMetadata().getCreationTimestamp().toString();
-            }
-            
-            int ready = ds.getStatus() != null && ds.getStatus().getNumberReady() != null
-                    ? ds.getStatus().getNumberReady()
-                    : 0;
-            int desired = ds.getStatus() != null && ds.getStatus().getDesiredNumberScheduled() != null
-                    ? ds.getStatus().getDesiredNumberScheduled()
-                    : 0;
-            int current = ds.getStatus() != null && ds.getStatus().getCurrentNumberScheduled() != null
-                    ? ds.getStatus().getCurrentNumberScheduled()
-                    : 0;
-            int updated = ds.getStatus() != null && ds.getStatus().getUpdatedNumberScheduled() != null
-                    ? ds.getStatus().getUpdatedNumberScheduled()
-                    : 0;
-            int available = ds.getStatus() != null && ds.getStatus().getNumberAvailable() != null
-                    ? ds.getStatus().getNumberAvailable()
-                    : 0;
-            
-            map.put("namespace", namespace);
-            map.put("name", name);
-            map.put("ready", ready);
-            map.put("desired", desired);
-            map.put("current", current);
-            map.put("updated", updated);
-            map.put("available", available);
-            map.put("age", calculateAge(creationTimestamp));
-            return map;
-        }
-        throw new IllegalArgumentException(
-                "Unsupported workload type: " + (workload != null ? workload.getClass() : "null"));
-    }
+
 
     /**
      * Chuyển đối tượng K8s sang YAML (dùng cho export/describe)

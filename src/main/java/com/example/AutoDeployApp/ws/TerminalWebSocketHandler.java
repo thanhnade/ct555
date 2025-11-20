@@ -350,25 +350,12 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         return null;
     }
 
+    /**
+     * SECURITY: Không còn đọc password từ session để tránh rủi ro bảo mật.
+     * WebSocket operations sẽ chỉ sử dụng SSH key.
+     */
     private String getPasswordFromSessionCache(WebSocketSession ws, Long serverId) {
-        Object pwAttr = ws.getAttributes().get("SERVER_PW_CACHE");
-        if (pwAttr instanceof Map<?, ?> map) {
-            for (var entry : map.entrySet()) {
-                Long key = null;
-                if (entry.getKey() instanceof Number n) {
-                    key = n.longValue();
-                } else if (entry.getKey() instanceof String sKey) {
-                    try {
-                        key = Long.parseLong(sKey);
-                    } catch (NumberFormatException ignored) {
-                        // Nếu không parse được thì bỏ qua phần tử tiếp theo
-                    }
-                }
-                if (key != null && key.equals(serverId) && entry.getValue() instanceof String password) {
-                    return password;
-                }
-            }
-        }
+        // SECURITY: Không đọc password từ session
         return null;
     }
 

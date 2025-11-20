@@ -1,0 +1,201 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes Service Discovery Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">🌐 Service Discovery</div>
+        <div class="page-subtitle">Quản lý Service Discovery trong cụm Kubernetes (Services, Endpoints, CoreDNS, Ingress).</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="service-discovery-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Filters Section -->
+    <div class="table-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0; font-weight: 600;">Danh sách Service Discovery</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="service-discovery-search"
+            placeholder="🔍 Tìm kiếm...">
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="service-discovery-namespace-filter">
+            <option value="">Tất cả namespace</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Tabs for Service Discovery Types -->
+      <ul class="nav nav-tabs mb-3" id="service-discovery-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="services-tab" data-bs-toggle="tab" data-bs-target="#services" type="button" role="tab">
+            Services (<span id="services-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="endpoints-tab" data-bs-toggle="tab" data-bs-target="#endpoints" type="button" role="tab">
+            Endpoints (<span id="endpoints-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="coredns-tab" data-bs-toggle="tab" data-bs-target="#coredns" type="button" role="tab">
+            CoreDNS (<span id="coredns-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="ingress-tab" data-bs-toggle="tab" data-bs-target="#ingress" type="button" role="tab">
+            Ingress (<span id="ingress-count">0</span>)
+          </button>
+        </li>
+      </ul>
+
+      <!-- Tab Content -->
+      <div class="tab-content" id="service-discovery-tab-content">
+        <!-- Services Tab -->
+        <div class="tab-pane fade show active" id="services" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">Services</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-services" title="Làm mới Services">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-workloads">
+              <thead>
+                <tr>
+                  <th style="max-width: 150px;">Namespace</th>
+                  <th style="max-width: 200px;">Tên</th>
+                  <th>Type</th>
+                  <th>Cluster IP</th>
+                  <th>External IP</th>
+                  <th>NodePort</th>
+                  <th style="max-width: 300px;">Port Mapping</th>
+                  <th style="max-width: 200px;">Selectors</th>
+                  <th>Status</th>
+                  <th>Age</th>
+                  <th style="min-width: 100px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="services-tbody">
+                <tr>
+                  <td colspan="11" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Endpoints Tab -->
+        <div class="tab-pane fade" id="endpoints" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">Endpoints</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-endpoints" title="Làm mới Endpoints">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-workloads">
+              <thead>
+                <tr>
+                  <th style="max-width: 150px;">Namespace</th>
+                  <th style="max-width: 200px;">Tên</th>
+                  <th style="max-width: 300px;">Pod IPs</th>
+                  <th>Số lượng</th>
+                  <th>Trạng thái</th>
+                  <th>Service</th>
+                  <th>Ports</th>
+                  <th>Age</th>
+                  <th style="min-width: 100px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="endpoints-tbody">
+                <tr>
+                  <td colspan="9" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CoreDNS Tab -->
+        <div class="tab-pane fade" id="coredns" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">CoreDNS</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-coredns" title="Làm mới CoreDNS">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-workloads">
+              <thead>
+                <tr>
+                  <th style="max-width: 150px;">Namespace</th>
+                  <th style="max-width: 200px;">Tên</th>
+                  <th>Pods</th>
+                  <th>IP</th>
+                  <th style="max-width: 300px;">DNS Domain</th>
+                  <th>DNS Status</th>
+                  <th style="max-width: 250px;">DNS Mapping</th>
+                  <th>Status</th>
+                  <th>Age</th>
+                  <th style="min-width: 100px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="coredns-tbody">
+                <tr>
+                  <td colspan="10" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Ingress Tab -->
+        <div class="tab-pane fade" id="ingress" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">Ingress</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-ingress" title="Làm mới Ingress">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-workloads">
+              <thead>
+                <tr>
+                  <th style="max-width: 150px;">Namespace</th>
+                  <th style="max-width: 200px;">Tên</th>
+                  <th>Controller</th>
+                  <th style="max-width: 250px;">Hostnames</th>
+                  <th style="max-width: 300px;">Paths & Backends</th>
+                  <th>TLS/SSL</th>
+                  <th style="max-width: 200px;">LoadBalancer IP</th>
+                  <th>Ports</th>
+                  <th>Age</th>
+                  <th style="min-width: 100px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="ingress-tbody">
+                <tr>
+                  <td colspan="10" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- K8s Modals -->
+  <div th:replace="admin/fragments/k8s-modals :: k8s-modals"></div>
+</div>
+<script src="/js/modules/k8sHelpers.js"></script>
+<script src="/js/modules/k8sServiceDiscovery.js"></script>
+

@@ -7,6 +7,7 @@ import com.example.AutoDeployApp.service.ApplicationService;
 import com.example.AutoDeployApp.service.ClusterService;
 import com.example.AutoDeployApp.entity.Server;
 import com.example.AutoDeployApp.service.KubernetesService;
+import com.example.AutoDeployApp.service.K8sWorkloadsService;
 import com.example.AutoDeployApp.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,13 +32,16 @@ public class AdminController {
     private final UserService userService;
     private final ApplicationService applicationService;
     private final KubernetesService kubernetesService;
+    private final K8sWorkloadsService k8sWorkloadsService;
     private final ClusterService clusterService;
 
     public AdminController(UserService userService, ApplicationService applicationService,
-            KubernetesService kubernetesService, ClusterService clusterService) {
+            KubernetesService kubernetesService, K8sWorkloadsService k8sWorkloadsService,
+            ClusterService clusterService) {
         this.userService = userService;
         this.applicationService = applicationService;
         this.kubernetesService = kubernetesService;
+        this.k8sWorkloadsService = k8sWorkloadsService;
         this.clusterService = clusterService;
     }
 
@@ -777,7 +781,7 @@ public class AdminController {
                                 "message", "Ứng dụng chưa được triển khai đầy đủ để scale"));
             }
 
-            kubernetesService.scaleDeployment(namespace, deploymentName, replicas);
+            k8sWorkloadsService.scaleDeployment(namespace, deploymentName, replicas);
 
             application.setReplicas(replicas);
             if (replicas == 0) {

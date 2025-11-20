@@ -10,7 +10,7 @@
     </div>
       <div class="d-flex gap-2">
         <button class="btn" id="refresh-servers-btn">🔄 Làm mới</button>
-        <button class="btn" id="check-status-btn">🔍 Kiểm tra trạng thái</button>
+        <button class="btn" id="check-status-btn">🔍 Kiểm tra và kết nối</button>
         <button class="btn btn-success" id="refresh-all-metrics-btn">📊 Cập nhật Metrics tất cả</button>
         <button class="btn btn-primary" id="add-server-btn" onclick="window.ServersModule.openAddServerModal()">+ Thêm Server</button>
       </div>
@@ -150,8 +150,23 @@
                   <select id="edit-server-status" name="status" class="form-control">
                     <option value="ONLINE">ONLINE</option>
                     <option value="OFFLINE">OFFLINE</option>
+                    <option value="DISABLED">DISABLED</option>
                   </select>
-                  <small class="form-hint">Trạng thái server</small>
+                  <small class="form-hint">Trạng thái server (DISABLED: ngắt kết nối, chỉ check status, không kết nối SSH)</small>
+                </div>
+                <div class="form-group">
+                  <label>
+                    <input type="checkbox" id="edit-server-disabled" name="disabled" class="form-check-input">
+                    Disabled (Ngắt kết nối)
+                  </label>
+                  <small class="form-hint d-block">Server bị disabled sẽ ngắt kết nối ngay lập tức và không thử SSH connection</small>
+                </div>
+                <div class="form-group">
+                  <label>
+                    <input type="checkbox" id="edit-server-connected" name="connected" class="form-check-input" disabled>
+                    Connected
+                  </label>
+                  <small class="form-hint d-block">Trạng thái kết nối SSH (chỉ đọc, tự động cập nhật)</small>
                 </div>
               </div>
               <div id="edit-server-error" class="form-error d-none mt-3"></div>
@@ -188,7 +203,9 @@
                 <label>Password <span class="text-danger">*</span></label>
                 <input type="password" id="reconnect-server-password" name="password" placeholder="Nhập mật khẩu SSH" required 
                        autocomplete="current-password" class="form-control">
-                <small class="form-hint">Nhập mật khẩu để kết nối lại (SSH key không khả dụng)</small>
+                <small class="form-hint">
+                  Hệ thống sẽ ưu tiên thử SSH key trước. Chỉ cần nhập mật khẩu nếu server chưa có SSH key hoặc SSH key không hoạt động. Nếu server chưa có SSH key, hệ thống sẽ tự động generate SSH key (RSA 2048) và cài đặt vào server.
+                </small>
             </div>
               <div id="reconnect-server-error" class="form-error d-none mt-3"></div>
             </form>

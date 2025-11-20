@@ -7,7 +7,7 @@ import jakarta.persistence.*;
 public class Server {
 
     public enum ServerStatus {
-        ONLINE, OFFLINE
+        ONLINE, OFFLINE, DISABLED
     }
 
     public enum AuthType {

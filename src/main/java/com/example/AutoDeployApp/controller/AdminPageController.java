@@ -92,7 +92,7 @@ public class AdminPageController {
 
 	@GetMapping({"/k8s/workloads/deployments", "/kubernetes/workloads/deployments"})
 	public String kubernetesDeploymentsPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Kubernetes Deployments");
+		model.addAttribute("pageTitle", "Kubernetes Workloads");
 		model.addAttribute("username", getUsernameFromSession(request));
 		model.addAttribute("defaultTab", "deployments");
 		return "admin/pages/kubernetes-workloads";
@@ -100,7 +100,7 @@ public class AdminPageController {
 
 	@GetMapping({"/k8s/workloads/statefulsets", "/kubernetes/workloads/statefulsets"})
 	public String kubernetesStatefulSetsPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Kubernetes StatefulSets");
+		model.addAttribute("pageTitle", "Kubernetes Workloads");
 		model.addAttribute("username", getUsernameFromSession(request));
 		model.addAttribute("defaultTab", "statefulsets");
 		return "admin/pages/kubernetes-workloads";
@@ -108,24 +108,78 @@ public class AdminPageController {
 
 	@GetMapping({"/k8s/workloads/daemonsets", "/kubernetes/workloads/daemonsets"})
 	public String kubernetesDaemonSetsPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Kubernetes DaemonSets");
+		model.addAttribute("pageTitle", "Kubernetes Workloads");
 		model.addAttribute("username", getUsernameFromSession(request));
 		model.addAttribute("defaultTab", "daemonsets");
 		return "admin/pages/kubernetes-workloads";
 	}
 
+	@GetMapping({"/k8s/workloads/cronjobs", "/kubernetes/workloads/cronjobs"})
+	public String kubernetesCronJobsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Workloads");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "cronjobs");
+		return "admin/pages/kubernetes-workloads";
+	}
+
+	@GetMapping({"/k8s/workloads/jobs", "/kubernetes/workloads/jobs"})
+	public String kubernetesJobsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Workloads");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "jobs");
+		return "admin/pages/kubernetes-workloads";
+	}
+
+	@GetMapping({"/k8s/workloads/pods", "/kubernetes/workloads/pods"})
+	public String kubernetesWorkloadsPodsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Workloads");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "pods");
+		return "admin/pages/kubernetes-workloads";
+	}
+
+	@GetMapping({"/k8s/service-discovery", "/kubernetes/service-discovery"})
+	public String kubernetesServiceDiscoveryPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Service Discovery");
+		model.addAttribute("username", getUsernameFromSession(request));
+		// Default tab
+		model.addAttribute("defaultTab", "services");
+		return "admin/pages/kubernetes-service-discovery";
+	}
+
+	// Redirect old routes to new Service Discovery page with appropriate tab
+	// Redirect tất cả các routes cũ đến trang Service Discovery mới
 	@GetMapping({"/k8s/services", "/kubernetes/services"})
 	public String kubernetesServicesPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Kubernetes Services");
+		model.addAttribute("pageTitle", "Kubernetes Service Discovery");
 		model.addAttribute("username", getUsernameFromSession(request));
-		return "admin/pages/kubernetes-services";
+		model.addAttribute("defaultTab", "services");
+		return "admin/pages/kubernetes-service-discovery";
 	}
 
 	@GetMapping({"/k8s/ingress", "/kubernetes/ingress"})
 	public String kubernetesIngressPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Kubernetes Ingress");
+		model.addAttribute("pageTitle", "Kubernetes Service Discovery");
 		model.addAttribute("username", getUsernameFromSession(request));
-		return "admin/pages/kubernetes-ingress";
+		model.addAttribute("defaultTab", "ingress");
+		return "admin/pages/kubernetes-service-discovery";
+	}
+
+	// Redirect các routes riêng lẻ cũ đến Service Discovery
+	@GetMapping("/kubernetes/services")
+	public String kubernetesServicesOldPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Service Discovery");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "services");
+		return "admin/pages/kubernetes-service-discovery";
+	}
+
+	@GetMapping("/kubernetes/ingress")
+	public String kubernetesIngressOldPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Service Discovery");
+		model.addAttribute("username", getUsernameFromSession(request));
+		model.addAttribute("defaultTab", "ingress");
+		return "admin/pages/kubernetes-service-discovery";
 	}
 
 	@GetMapping({"/k8s/namespaces", "/kubernetes/namespaces"})
@@ -133,13 +187,6 @@ public class AdminPageController {
 		model.addAttribute("pageTitle", "Kubernetes Namespaces");
 		model.addAttribute("username", getUsernameFromSession(request));
 		return "admin/pages/kubernetes-namespaces";
-	}
-
-	@GetMapping({"/k8s/pods", "/kubernetes/pods"})
-	public String kubernetesPodsPage(Model model, HttpServletRequest request) {
-		model.addAttribute("pageTitle", "Kubernetes Pods");
-		model.addAttribute("username", getUsernameFromSession(request));
-		return "admin/pages/kubernetes-pods";
 	}
 
 	@GetMapping("/deployments")
