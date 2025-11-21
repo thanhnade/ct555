@@ -33,6 +33,145 @@
       </div>
     </div>
 
+    <!-- Namespace Detail Modal -->
+    <div class="modal fade" id="namespace-detail-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div>
+              <h5 class="modal-title">
+                📁 Namespace: <span id="namespace-detail-title">-</span>
+              </h5>
+              <div class="text-muted small">Thông tin metadata, labels, finalizers và YAML manifest.</div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-3" id="namespace-detail-tabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#namespace-overview" type="button" role="tab">
+                  Tổng quan
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#namespace-labels-tab" type="button" role="tab">
+                  Labels & Annotations
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#namespace-finalizers-tab" type="button" role="tab">
+                  Finalizers & Conditions
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#namespace-yaml-tab" type="button" role="tab">
+                  YAML
+                </button>
+              </li>
+            </ul>
+
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="namespace-overview" role="tabpanel">
+                <div class="row g-3 mb-3">
+                  <div class="col-6 col-md-3">
+                    <div class="border rounded p-3 h-100">
+                      <div class="text-muted small text-uppercase">Trạng thái</div>
+                      <div class="fw-semibold mt-1" id="namespace-detail-status">-</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="border rounded p-3 h-100">
+                      <div class="text-muted small text-uppercase">Pods</div>
+                      <div class="fw-semibold mt-1" id="namespace-detail-pods">-</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="border rounded p-3 h-100">
+                      <div class="text-muted small text-uppercase">CPU</div>
+                      <div class="fw-semibold mt-1" id="namespace-detail-cpu">-</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="border rounded p-3 h-100">
+                      <div class="text-muted small text-uppercase">RAM</div>
+                      <div class="fw-semibold mt-1" id="namespace-detail-ram">-</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-header py-2">
+                    <span class="fw-bold small text-uppercase">Metadata</span>
+                  </div>
+                  <div class="card-body small" id="namespace-detail-basic">
+                    <div class="text-center py-3 text-muted">
+                      <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tab-pane fade" id="namespace-labels-tab" role="tabpanel">
+                <div class="card">
+                  <div class="card-body small">
+                    <div class="fw-semibold text-uppercase small mb-2">Labels</div>
+                    <div id="namespace-detail-labels" class="d-flex flex-wrap gap-1">
+                      <span class="text-muted">Đang tải...</span>
+                    </div>
+                    <hr class="text-muted my-3">
+                    <div class="fw-semibold text-uppercase small mb-2">Annotations</div>
+                    <div id="namespace-detail-annotations" class="text-break">
+                      <span class="text-muted">Đang tải...</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tab-pane fade" id="namespace-finalizers-tab" role="tabpanel">
+                <div class="card">
+                  <div class="card-body small">
+                    <div class="row g-3">
+                      <div class="col-lg-6">
+                        <div class="fw-semibold text-uppercase small mb-2">Finalizers</div>
+                        <div id="namespace-detail-finalizers">
+                          <span class="text-muted">Đang tải...</span>
+                        </div>
+                      </div>
+                      <div class="col-lg-6">
+                        <div class="fw-semibold text-uppercase small mb-2">Conditions</div>
+                        <div id="namespace-detail-conditions">
+                          <span class="text-muted">Đang tải...</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tab-pane fade" id="namespace-yaml-tab" role="tabpanel">
+                <div class="card">
+                  <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <div>
+                      <span class="fw-bold small text-uppercase">Namespace YAML</span>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="namespace-detail-yaml-copy-btn">
+                      <i class="bi bi-clipboard"></i> Copy
+                    </button>
+                  </div>
+                  <div class="card-body">
+                    <pre id="namespace-detail-yaml" class="bg-dark text-light p-3 rounded small" style="max-height: 50vh; white-space: pre-wrap;">Chọn tab YAML để tải manifest...</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <div class="text-muted small me-auto" id="namespace-detail-last-updated"></div>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Scale Workload Modal -->
     <div class="modal fade" id="scale-workload-modal" tabindex="-1" aria-labelledby="scale-workload-modalLabel" aria-hidden="true">
       <div class="modal-dialog modal-dialog-scrollable">

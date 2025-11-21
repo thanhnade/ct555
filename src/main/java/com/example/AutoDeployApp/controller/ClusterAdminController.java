@@ -1217,11 +1217,11 @@ public class ClusterAdminController {
     @GetMapping("/k8s/namespaces/{name}")
     public ResponseEntity<?> describeNamespace(HttpServletRequest request,
             @PathVariable String name) {
-        return describeNamespaceInternal(name);
+        return describeNamespaceInternal(name, request);
     }
 
 
-    private ResponseEntity<?> describeNamespaceInternal(String name) {
+    private ResponseEntity<?> describeNamespaceInternal(String name, HttpServletRequest request) {
         try {
             var namespace = kubernetesService.getNamespace(name);
             if (namespace == null) {
@@ -1229,7 +1229,13 @@ public class ClusterAdminController {
                         .body(Map.of("error", "Namespace not found: " + name));
             }
 
-            // Convert to JSON (có thể thêm YAML conversion nếu cần)
+            String formatParam = request != null ? request.getParameter("format") : null;
+            if (formatParam != null && formatParam.equalsIgnoreCase("yaml")) {
+                String yamlOutput = convertToYaml(namespace);
+                return ResponseEntity.ok(Map.of("output", yamlOutput, "format", "yaml"));
+            }
+
+            // Convert to JSON
             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(namespace);
             return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
