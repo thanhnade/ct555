@@ -4,23 +4,29 @@
   <!-- K8s Output Modal (for describe operations) -->
   <div th:fragment="k8s-modals">
     <div class="modal fade" id="k8s-output-modal" tabindex="-1" aria-labelledby="k8s-output-modalLabel" aria-hidden="true">
-      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
-        <div class="modal-content d-flex flex-column" style="max-height: 85vh;">
-          <div class="modal-header flex-shrink-0">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
             <h5 class="modal-title" id="k8s-output-modalLabel">
-              ℹ️ <span id="k8s-output-title">Chi tiết Kubernetes Resource</span>
+              ℹ️ <span id="k8s-output-title">Kubernetes Output</span>
             </h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
-          <div class="modal-body p-0 flex-grow-1 overflow-hidden" style="min-height: 300px; max-height: calc(85vh - 120px);">
-            <pre class="bg-dark text-light p-3 mb-0 h-100 overflow-auto font-monospace small" style="white-space: pre; word-wrap: normal;"><code id="k8s-output-content" class="d-block" style="white-space: pre; word-wrap: normal;"></code></pre>
+          <div class="modal-body">
+            <div class="d-flex justify-content-end gap-2 mb-3">
+              <button class="btn btn-sm btn-outline-primary" id="k8s-output-copy-btn">
+                <i class="bi bi-clipboard"></i> Copy
+              </button>
+              <button class="btn btn-sm btn-outline-secondary" id="k8s-output-download-btn">
+                <i class="bi bi-download"></i> Download
+              </button>
+            </div>
+            <pre class="bg-dark text-light p-3 rounded h-100 overflow-auto font-monospace small" style="max-height: 70vh; white-space: pre; word-break: break-word;">
+<code id="k8s-output-content" class="d-block" style="white-space: pre; word-break: break-word;"></code></pre>
           </div>
-          <div class="modal-footer flex-shrink-0">
+          <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-              ✖️ Đóng
-            </button>
-            <button type="button" class="btn btn-outline-primary" id="k8s-output-copy-btn">
-              📋 Sao chép
+              Đóng
             </button>
           </div>
         </div>
@@ -63,6 +69,394 @@
             <button type="button" class="btn btn-primary" id="scale-workload-confirm-btn">
               ✅ Xác nhận Scale
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Deployment Detail Modal -->
+    <div class="modal fade" id="deployment-detail-modal" tabindex="-1" aria-labelledby="deployment-detail-modalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="deployment-detail-modalLabel">
+              📦 Deployment: <span id="deployment-detail-name">-</span>
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <!-- Tabs -->
+            <ul class="nav nav-tabs mb-3" id="deployment-detail-tabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="deployment-basic-tab" data-bs-toggle="tab" data-bs-target="#deployment-basic" type="button" role="tab">
+                  Basic Info
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="deployment-replicas-tab" data-bs-toggle="tab" data-bs-target="#deployment-replicas" type="button" role="tab">
+                  Replicas
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="deployment-resources-tab" data-bs-toggle="tab" data-bs-target="#deployment-resources" type="button" role="tab">
+                  Resource Usage
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="deployment-events-tab" data-bs-toggle="tab" data-bs-target="#deployment-events" type="button" role="tab">
+                  Events
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="deployment-pods-tab" data-bs-toggle="tab" data-bs-target="#deployment-pods" type="button" role="tab">
+                  Pods
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="deployment-yaml-tab" data-bs-toggle="tab" data-bs-target="#deployment-yaml" type="button" role="tab">
+                  YAML
+                </button>
+              </li>
+            </ul>
+
+            <!-- Tab Content -->
+            <div class="tab-content" id="deployment-detail-tab-content">
+              <!-- Basic Info Tab -->
+              <div class="tab-pane fade show active" id="deployment-basic" role="tabpanel">
+                <div id="deployment-basic-content">
+                  <div class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </div>
+                </div>
+              </div>
+
+              <!-- Replicas Tab -->
+              <div class="tab-pane fade" id="deployment-replicas" role="tabpanel">
+                <div id="deployment-replicas-content">
+                  <div class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </div>
+                </div>
+              </div>
+
+              <!-- Resource Usage Tab -->
+              <div class="tab-pane fade" id="deployment-resources" role="tabpanel">
+                <div id="deployment-resources-content">
+                  <div class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </div>
+                </div>
+              </div>
+
+              <!-- Events Tab -->
+              <div class="tab-pane fade" id="deployment-events" role="tabpanel">
+                <div id="deployment-events-content">
+                  <div class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </div>
+                </div>
+              </div>
+
+              <!-- Pods Tab -->
+              <div class="tab-pane fade" id="deployment-pods" role="tabpanel">
+                <div id="deployment-pods-content">
+                  <div class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </div>
+                </div>
+              </div>
+
+              <!-- YAML Tab -->
+              <div class="tab-pane fade" id="deployment-yaml" role="tabpanel">
+                <div id="deployment-yaml-content">
+                  <div class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- StatefulSet Detail Modal -->
+    <div class="modal fade" id="statefulset-detail-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">🧱 StatefulSet: <span id="statefulset-detail-name">-</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-3" id="statefulset-detail-tabs" role="tablist">
+              <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#statefulset-info">Info</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#statefulset-identity">Identity</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#statefulset-volumes">Volume Claim</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#statefulset-events">Events</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#statefulset-yaml">YAML</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="statefulset-info">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="statefulset-identity">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="statefulset-volumes">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="statefulset-events">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="statefulset-yaml">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DaemonSet Detail Modal -->
+    <div class="modal fade" id="daemonset-detail-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">⚙️ DaemonSet: <span id="daemonset-detail-name">-</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-3">
+              <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#daemonset-info">Info</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#daemonset-pods">Pods by Node</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#daemonset-events">Events</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#daemonset-yaml">YAML</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="daemonset-info">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="daemonset-pods">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="daemonset-events">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="daemonset-yaml">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Job Detail Modal -->
+    <div class="modal fade" id="job-detail-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">🧩 Job: <span id="job-detail-name">-</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-3">
+              <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#job-info">Info</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#job-pods">Pods</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#job-logs">Logs</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#job-events">Events</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#job-yaml">YAML</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="job-info">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="job-pods">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="job-logs">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="job-events">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="job-yaml">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CronJob Detail Modal -->
+    <div class="modal fade" id="cronjob-detail-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">⏱ CronJob: <span id="cronjob-detail-name">-</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-3">
+              <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#cronjob-info">Info</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#cronjob-jobs">Recent Jobs</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#cronjob-events">Events</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#cronjob-yaml">YAML</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="cronjob-info">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="cronjob-jobs">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="cronjob-events">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="cronjob-yaml">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pod Detail Modal -->
+    <div class="modal fade" id="pod-detail-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">🟢 Pod: <span id="pod-detail-name">-</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-3">
+              <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#pod-info">Info</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#pod-containers">Containers</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#pod-logs">Logs</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#pod-events">Events</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#pod-yaml">YAML</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="pod-info">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="pod-containers">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="pod-logs">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="pod-events">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+              <div class="tab-pane fade" id="pod-yaml">
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pod Logs Modal -->
+    <div class="modal fade" id="pod-logs-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">📜 Pod Logs: <span id="pod-logs-title">-</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-2 align-items-end mb-3">
+              <div class="col-md-4">
+                <label class="form-label small">Container</label>
+                <select id="pod-logs-container-select" class="form-select form-select-sm">
+                  <option value="">Đang tải...</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Tail lines</label>
+                <select id="pod-logs-tail-select" class="form-select form-select-sm">
+                  <option value="200">200</option>
+                  <option value="500" selected>500</option>
+                  <option value="1000">1000</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Search</label>
+                <input type="text" id="pod-logs-search-input" class="form-control form-control-sm" placeholder="Từ khóa...">
+              </div>
+              <div class="col-md-2 text-md-end">
+                <button class="btn btn-sm btn-outline-secondary w-100" id="pod-logs-refresh-btn">
+                  <i class="bi bi-arrow-repeat"></i> Làm mới
+                </button>
+              </div>
+            </div>
+            <div class="text-muted small mb-2" id="pod-logs-status">Đang tải...</div>
+            <pre id="pod-logs-output" class="bg-dark text-light p-3 rounded font-monospace small" style="max-height: 60vh; white-space: pre; word-break: break-word;">Chưa có dữ liệu</pre>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pod Exec Modal -->
+    <div class="modal fade" id="pod-exec-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">🖥️ Exec Pod: <span id="pod-exec-title">-</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label small">Container</label>
+              <select id="pod-exec-container-select" class="form-select form-select-sm">
+                <option value="">Đang tải...</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="pod-exec-command-input" class="form-label">Command</label>
+              <input type="text" class="form-control font-monospace" id="pod-exec-command-input" placeholder="Ví dụ: ls -la">
+              <div class="form-text">Lệnh non-interactive sẽ chạy trong container đã chọn.</div>
+            </div>
+            <div class="d-flex gap-2 mb-3">
+              <button class="btn btn-primary" id="pod-exec-run-btn">
+                <i class="bi bi-play-circle"></i> Thực thi
+              </button>
+              <button class="btn btn-outline-secondary" id="pod-exec-clear-btn">
+                <i class="bi bi-x-circle"></i> Xóa
+              </button>
+            </div>
+            <div class="text-muted small mb-2" id="pod-exec-status"></div>
+            <pre id="pod-exec-output" class="bg-dark text-light p-3 rounded font-monospace small" style="max-height: 50vh; white-space: pre-wrap;">Chưa thực thi</pre>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
           </div>
         </div>
       </div>

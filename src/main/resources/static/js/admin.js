@@ -96,6 +96,7 @@
 			'/admin/user': 'page:user',
 			'/admin/server': 'page:server',
 			'/admin/k8s': 'page:k8s',
+			'/admin/kubernetes': 'page:k8s',
 			'/admin/deployments': 'page:deployments'
 		};
 

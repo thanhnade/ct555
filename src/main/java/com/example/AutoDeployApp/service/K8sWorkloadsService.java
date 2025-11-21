@@ -421,6 +421,30 @@ public class K8sWorkloadsService {
     }
 
     /**
+     * Lấy tên headless service của StatefulSet
+     */
+    public String getStatefulSetServiceName(StatefulSet statefulSet) {
+        if (statefulSet == null || statefulSet.getSpec() == null) {
+            return "";
+        }
+        return Optional.ofNullable(statefulSet.getSpec().getServiceName()).orElse("");
+    }
+
+    /**
+     * Lấy danh sách volumeClaimTemplate name của StatefulSet
+     */
+    public List<String> getStatefulSetVolumeTemplates(StatefulSet statefulSet) {
+        if (statefulSet == null || statefulSet.getSpec() == null || statefulSet.getSpec().getVolumeClaimTemplates() == null) {
+            return Collections.emptyList();
+        }
+        return statefulSet.getSpec().getVolumeClaimTemplates()
+                .stream()
+                .map(vct -> vct.getMetadata() != null ? vct.getMetadata().getName() : "")
+                .filter(name -> name != null && !name.isBlank())
+                .collect(Collectors.toList());
+    }
+
+    /**
      * Scale statefulset
      */
     public void scaleStatefulSet(String namespace, String name, int replicas) {

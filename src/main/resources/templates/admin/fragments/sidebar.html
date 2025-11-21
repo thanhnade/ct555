@@ -39,18 +39,7 @@
       <!-- Service Discovery -->
       <a th:href="@{/admin/kubernetes/service-discovery}" onclick="setActiveNav(this)">🌐 Service Discovery</a>
       
-      <!-- Storage -->
-      <div class="dropdown-subgroup">
-        <div class="dropdown-subheader" onclick="toggleDropdown(this)">
-          💾 Storage
-          <span class="arrow">›</span>
-        </div>
-        <div class="dropdown-subcontent">
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">📦 PVC</a>
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">💿 PV</a>
-          <a th:href="@{/admin/kubernetes}" onclick="setActiveNav(this)">🗄️ StorageClass</a>
-        </div>
-      </div>
+      <a th:href="@{/admin/kubernetes/storage}" onclick="setActiveNav(this)">💾 Storage</a>
       
       <!-- Configuration -->
       <div class="dropdown-subgroup">

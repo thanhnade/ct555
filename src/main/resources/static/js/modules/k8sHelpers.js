@@ -73,12 +73,30 @@
         // Cập nhật title và content
         const titleEl = document.getElementById('k8s-output-title');
         if (titleEl) {
-            titleEl.textContent = title || 'Chi tiết Kubernetes Resource';
+            titleEl.textContent = title || 'Kubernetes Output';
         }
         const contentEl = document.getElementById('k8s-output-content');
         if (contentEl) {
-            // Sử dụng textContent để tránh XSS và giữ nguyên định dạng
-            contentEl.textContent = output || '';
+            // Cho phép render HTML khi cần (ví dụ hiển thị nút Logs)
+            contentEl.innerHTML = output || '';
+        }
+
+        // Bind download button
+        const downloadBtn = document.getElementById('k8s-output-download-btn');
+        if (downloadBtn) {
+            const newDownloadBtn = downloadBtn.cloneNode(true);
+            downloadBtn.parentNode.replaceChild(newDownloadBtn, downloadBtn);
+            newDownloadBtn.addEventListener('click', () => {
+                const blob = new Blob([output || ''], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${(title || 'k8s-output').replace(/\s+/g, '-')}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
         }
 
         // Bind copy button

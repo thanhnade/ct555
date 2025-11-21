@@ -1,6 +1,6 @@
 package com.example.AutoDeployApp.controller;
 
-import com.example.AutoDeployApp.service.KubernetesService;
+import com.example.AutoDeployApp.service.K8sServiceDiscoveryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,10 +16,10 @@ import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 @RequestMapping("/admin/cluster")
 public class K8sServiceDiscoveryController {
 
-    private final KubernetesService kubernetesService;
+    private final K8sServiceDiscoveryService serviceDiscoveryService;
 
-    public K8sServiceDiscoveryController(KubernetesService kubernetesService) {
-        this.kubernetesService = kubernetesService;
+    public K8sServiceDiscoveryController(K8sServiceDiscoveryService serviceDiscoveryService) {
+        this.serviceDiscoveryService = serviceDiscoveryService;
     }
 
     // ===================== Services Endpoints =====================
@@ -34,7 +34,7 @@ public class K8sServiceDiscoveryController {
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var serviceList = kubernetesService.getServices(namespace);
+            var serviceList = serviceDiscoveryService.getServices(namespace);
             java.util.List<java.util.Map<String, Object>> result = serviceList.getItems().stream()
                     .map(svc -> parseServiceToMap(svc))
                     .collect(java.util.stream.Collectors.toList());
@@ -60,7 +60,7 @@ public class K8sServiceDiscoveryController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var service = kubernetesService.getService(namespace, name);
+            var service = serviceDiscoveryService.getService(namespace, name);
             if (service == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Service not found: " + name + " in namespace " + namespace));
@@ -97,7 +97,7 @@ public class K8sServiceDiscoveryController {
                         .body(Map.of("error", "Không cho phép xóa Service trong namespace hệ thống"));
             }
 
-            kubernetesService.deleteService(namespace, name);
+            serviceDiscoveryService.deleteService(namespace, name);
             String output = String.format("service \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
@@ -126,7 +126,7 @@ public class K8sServiceDiscoveryController {
             HttpServletRequest request) {
         try {
             // Sử dụng Fabric8 Kubernetes Client thay vì SSH kubectl
-            var ingressList = kubernetesService.getIngress(namespace);
+            var ingressList = serviceDiscoveryService.getIngress(namespace);
             java.util.List<java.util.Map<String, Object>> result = ingressList.getItems().stream()
                     .map(ing -> parseIngressToMap(ing))
                     .collect(java.util.stream.Collectors.toList());
@@ -152,7 +152,7 @@ public class K8sServiceDiscoveryController {
             @PathVariable String name,
             HttpServletRequest request) {
         try {
-            var ingress = kubernetesService.getIngress(namespace, name);
+            var ingress = serviceDiscoveryService.getIngress(namespace, name);
             if (ingress == null) {
                 return ResponseEntity.status(404)
                         .body(Map.of("error", "Ingress not found: " + name + " in namespace " + namespace));
@@ -189,7 +189,7 @@ public class K8sServiceDiscoveryController {
                         .body(Map.of("error", "Không cho phép xóa Ingress trong namespace hệ thống"));
             }
 
-            kubernetesService.deleteIngress(namespace, name);
+            serviceDiscoveryService.deleteIngress(namespace, name);
             String output = String.format("ingress.networking.k8s.io \"%s\" deleted", name);
             return ResponseEntity.ok(Map.of("success", true, "output", output));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
@@ -325,7 +325,7 @@ public class K8sServiceDiscoveryController {
         // Trạng thái expose (kiểm tra xem có endpoints không)
         boolean isExposed = false;
         try {
-            var endpoints = kubernetesService.getEndpoint(svc.getMetadata().getNamespace(), svc.getMetadata().getName());
+            var endpoints = serviceDiscoveryService.getEndpoint(svc.getMetadata().getNamespace(), svc.getMetadata().getName());
             if (endpoints != null && endpoints.getSubsets() != null && !endpoints.getSubsets().isEmpty()) {
                 for (var subset : endpoints.getSubsets()) {
                     if (subset.getAddresses() != null && !subset.getAddresses().isEmpty()) {
@@ -458,262 +458,6 @@ public class K8sServiceDiscoveryController {
             portList.add("443");
         }
         map.put("ports", portList);
-
-        return map;
-    }
-
-    // ===================== Endpoints Endpoints =====================
-
-    /**
-     * Liệt kê endpoints cho cluster duy nhất (không cần ID)
-     * Supports optional namespace query parameter to filter endpoints
-     */
-    @GetMapping("/k8s/endpoints")
-    public ResponseEntity<?> listEndpoints(
-            @RequestParam(required = false) String namespace,
-            HttpServletRequest request) {
-        try {
-            var endpointsList = kubernetesService.getEndpoints(namespace);
-            java.util.List<java.util.Map<String, Object>> result = endpointsList.getItems().stream()
-                    .map(ep -> parseEndpointToMap(ep))
-                    .collect(java.util.stream.Collectors.toList());
-            return ResponseEntity.ok(Map.of("endpoints", result));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of(
-                        "error", "Kubernetes API server unavailable",
-                        "endpoints", new java.util.ArrayList<>()));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to get endpoints: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /**
-     * Describe Endpoint cho cluster duy nhất (không cần ID)
-     */
-    @GetMapping("/k8s/endpoints/{namespace}/{name}")
-    public ResponseEntity<?> describeEndpoint(
-            @PathVariable String namespace,
-            @PathVariable String name,
-            HttpServletRequest request) {
-        try {
-            var endpoint = kubernetesService.getEndpoint(namespace, name);
-            if (endpoint == null) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Endpoint not found: " + name + " in namespace " + namespace));
-            }
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(endpoint);
-            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 404) {
-                return ResponseEntity.status(404)
-                        .body(Map.of("error", "Endpoint not found: " + name + " in namespace " + namespace));
-            }
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of("error", "Kubernetes API server unavailable"));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to describe endpoint: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    // ===================== CoreDNS Endpoints =====================
-
-    /**
-     * Liệt kê CoreDNS pods cho cluster duy nhất
-     */
-    @GetMapping("/k8s/coredns")
-    public ResponseEntity<?> listCoreDNS(
-            HttpServletRequest request) {
-        try {
-            var corednsPods = kubernetesService.getCoreDNSPods();
-            java.util.List<java.util.Map<String, Object>> result = corednsPods.getItems().stream()
-                    .map(pod -> parseCoreDNSToMap(pod))
-                    .collect(java.util.stream.Collectors.toList());
-            return ResponseEntity.ok(Map.of("coredns", result));
-        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            if (e.getCode() == 503 || e.getCode() == 0) {
-                return ResponseEntity.status(503).body(Map.of(
-                        "error", "Kubernetes API server unavailable",
-                        "coredns", new java.util.ArrayList<>()));
-            }
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to get CoreDNS pods: " + e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    // ===================== Helper Methods =====================
-
-    /**
-     * Parse Endpoint object thành Map format cho API response
-     */
-    private Map<String, Object> parseEndpointToMap(io.fabric8.kubernetes.api.model.Endpoints ep) {
-        java.util.Map<String, Object> map = new java.util.HashMap<>();
-        map.put("namespace", ep.getMetadata() != null ? ep.getMetadata().getNamespace() : "");
-        map.put("name", ep.getMetadata() != null ? ep.getMetadata().getName() : "");
-
-        // Age
-        String age = "";
-        if (ep.getMetadata() != null && ep.getMetadata().getCreationTimestamp() != null) {
-            age = calculateAge(ep.getMetadata().getCreationTimestamp().toString());
-        }
-        map.put("age", age);
-
-        // Collect endpoints (Pod IP addresses) và trạng thái
-        java.util.List<String> endpointList = new java.util.ArrayList<>();
-        java.util.List<java.util.Map<String, Object>> endpointDetails = new java.util.ArrayList<>();
-        java.util.List<String> portList = new java.util.ArrayList<>();
-        int readyCount = 0;
-        int notReadyCount = 0;
-
-        if (ep.getSubsets() != null) {
-            for (var subset : ep.getSubsets()) {
-                // Ready addresses
-                if (subset.getAddresses() != null) {
-                    for (var address : subset.getAddresses()) {
-                        if (address.getIp() != null && !address.getIp().isEmpty()) {
-                            endpointList.add(address.getIp());
-                            readyCount++;
-                            
-                            java.util.Map<String, Object> epDetail = new java.util.HashMap<>();
-                            epDetail.put("ip", address.getIp());
-                            epDetail.put("ready", true);
-                            if (address.getTargetRef() != null) {
-                                if (address.getTargetRef().getKind() != null) {
-                                    epDetail.put("kind", address.getTargetRef().getKind());
-                                }
-                                if (address.getTargetRef().getName() != null) {
-                                    epDetail.put("name", address.getTargetRef().getName());
-                                }
-                            }
-                            endpointDetails.add(epDetail);
-                        }
-                    }
-                }
-                
-                // Not ready addresses
-                if (subset.getNotReadyAddresses() != null) {
-                    for (var address : subset.getNotReadyAddresses()) {
-                        if (address.getIp() != null && !address.getIp().isEmpty()) {
-                            endpointList.add(address.getIp() + " (NotReady)");
-                            notReadyCount++;
-                            
-                            java.util.Map<String, Object> epDetail = new java.util.HashMap<>();
-                            epDetail.put("ip", address.getIp());
-                            epDetail.put("ready", false);
-                            if (address.getTargetRef() != null) {
-                                if (address.getTargetRef().getKind() != null) {
-                                    epDetail.put("kind", address.getTargetRef().getKind());
-                                }
-                                if (address.getTargetRef().getName() != null) {
-                                    epDetail.put("name", address.getTargetRef().getName());
-                                }
-                            }
-                            endpointDetails.add(epDetail);
-                        }
-                    }
-                }
-                
-                if (subset.getPorts() != null) {
-                    for (var port : subset.getPorts()) {
-                        int portNum = port.getPort() != null ? port.getPort() : 0;
-                        String protocol = port.getProtocol() != null ? port.getProtocol() : "TCP";
-                        String portName = port.getName() != null ? port.getName() : "";
-                        if (portNum > 0) {
-                            if (!portName.isEmpty()) {
-                                portList.add(portName + ":" + portNum + "/" + protocol);
-                            } else {
-                                portList.add(portNum + "/" + protocol);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        int totalEndpoints = readyCount + notReadyCount;
-        map.put("endpoints", endpointList);
-        map.put("endpointDetails", endpointDetails);
-        map.put("endpointCount", totalEndpoints);
-        map.put("readyCount", readyCount);
-        map.put("notReadyCount", notReadyCount);
-        map.put("ports", portList.isEmpty() ? "-" : String.join(", ", portList));
-        
-        // Liên kết với Service (Endpoint name thường trùng với Service name)
-        map.put("serviceName", ep.getMetadata() != null ? ep.getMetadata().getName() : "");
-        map.put("serviceLink", ep.getMetadata() != null && ep.getMetadata().getNamespace() != null
-                ? ep.getMetadata().getNamespace() + "/" + ep.getMetadata().getName()
-                : "");
-
-        return map;
-    }
-
-    /**
-     * Parse CoreDNS Pod object thành Map format cho API response
-     */
-    private Map<String, Object> parseCoreDNSToMap(io.fabric8.kubernetes.api.model.Pod pod) {
-        java.util.Map<String, Object> map = new java.util.HashMap<>();
-        String namespace = pod.getMetadata() != null ? pod.getMetadata().getNamespace() : "";
-        String name = pod.getMetadata() != null ? pod.getMetadata().getName() : "";
-        map.put("namespace", namespace);
-        map.put("name", name);
-
-        // Age
-        String age = "";
-        if (pod.getMetadata() != null && pod.getMetadata().getCreationTimestamp() != null) {
-            age = calculateAge(pod.getMetadata().getCreationTimestamp().toString());
-        }
-        map.put("age", age);
-
-        // Pod IP
-        String podIP = "";
-        if (pod.getStatus() != null && pod.getStatus().getPodIP() != null) {
-            podIP = pod.getStatus().getPodIP();
-        }
-        map.put("ip", podIP);
-
-        // Status
-        String status = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";
-        map.put("status", status);
-
-        // Pod name (for display)
-        map.put("pods", java.util.List.of(name));
-
-        // Tên miền nội bộ CoreDNS (thường là kube-dns.kube-system.svc.cluster.local)
-        String dnsDomain = "kube-dns." + namespace + ".svc.cluster.local";
-        map.put("dnsDomain", dnsDomain);
-
-        // Khả năng phân giải DNS (kiểm tra pod có ready không)
-        boolean canResolveDNS = "Running".equals(status);
-        if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
-            for (var cs : pod.getStatus().getContainerStatuses()) {
-                if (cs.getReady() != null && cs.getReady()) {
-                    canResolveDNS = true;
-                    break;
-                }
-            }
-        }
-        map.put("canResolveDNS", canResolveDNS);
-        map.put("dnsStatus", canResolveDNS ? "Ready" : "Not Ready");
-
-        // Mapping DNS ↔ Service IP (lấy từ kube-dns service)
-        try {
-            var kubeDnsService = kubernetesService.getService("kube-system", "kube-dns");
-            if (kubeDnsService != null && kubeDnsService.getSpec() != null) {
-                String serviceIP = kubeDnsService.getSpec().getClusterIP();
-                if (serviceIP != null && !serviceIP.isEmpty()) {
-                    map.put("serviceIP", serviceIP);
-                    map.put("dnsMapping", dnsDomain + " → " + serviceIP);
-                }
-            }
-        } catch (Exception e) {
-            // Ignore errors when fetching kube-dns service
-        }
 
         return map;
     }

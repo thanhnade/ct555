@@ -5,7 +5,6 @@ import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressBuilder;
-import io.fabric8.kubernetes.api.model.networking.v1.IngressList;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
@@ -827,13 +826,6 @@ public class KubernetesService {
     }
 
     /**
-     * Helper method: Kiểm tra namespace có giá trị không
-     */
-    private boolean isNamespaceNotEmpty(String namespace) {
-        return namespace != null && !namespace.isEmpty();
-    }
-
-    /**
      * Helper method: Convert memory bytes sang human-readable format (cho capacity)
      * Format: "X.XX Gi" hoặc "X.XX Mi" hoặc "X B"
      */
@@ -1631,132 +1623,5 @@ public class KubernetesService {
 
     // deleteNamespace() already exists at line 731
 
-    /**
-     * Lấy services - nếu namespace là null, trả về tất cả services trong tất cả
-     * namespaces
-     */
-    public ServiceList getServices(String namespace) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            // Tái sử dụng helper method để kiểm tra namespace
-            if (isNamespaceNotEmpty(namespace)) {
-                return client.services().inNamespace(namespace).list();
-            } else {
-                return client.services().inAnyNamespace().list();
-            }
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get services for namespace: {}", namespace, e);
-            throw new RuntimeException("Failed to get services: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy service cụ thể theo tên
-     */
-    public io.fabric8.kubernetes.api.model.Service getService(String namespace, String serviceName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.services().inNamespace(namespace).withName(serviceName).get();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get service {}/{}: {}", namespace, serviceName, e.getMessage(), e);
-            throw new RuntimeException("Failed to get service: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Xóa service
-     */
-    public void deleteService(String namespace, String serviceName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.services().inNamespace(namespace).withName(serviceName).delete();
-            logger.info("Deleted service: {}/{}", namespace, serviceName);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to delete service {}/{}: {}", namespace, serviceName, e.getMessage(), e);
-            throw new RuntimeException("Failed to delete service: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy ingress - nếu namespace là null, trả về tất cả ingress trong tất cả
-     * namespaces
-     */
-    public IngressList getIngress(String namespace) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            // Tái sử dụng helper method để kiểm tra namespace
-            if (isNamespaceNotEmpty(namespace)) {
-                return client.network().v1().ingresses().inNamespace(namespace).list();
-            } else {
-                return client.network().v1().ingresses().inAnyNamespace().list();
-            }
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get ingress for namespace: {}", namespace, e);
-            throw new RuntimeException("Failed to get ingress: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy ingress cụ thể theo tên
-     */
-    public Ingress getIngress(String namespace, String ingressName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.network().v1().ingresses().inNamespace(namespace).withName(ingressName).get();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get ingress {}/{}: {}", namespace, ingressName, e.getMessage(), e);
-            throw new RuntimeException("Failed to get ingress: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Xóa ingress
-     */
-    public void deleteIngress(String namespace, String ingressName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            client.network().v1().ingresses().inNamespace(namespace).withName(ingressName).delete();
-            logger.info("Deleted ingress: {}/{}", namespace, ingressName);
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to delete ingress {}/{}: {}", namespace, ingressName, e.getMessage(), e);
-            throw new RuntimeException("Failed to delete ingress: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy endpoints - nếu namespace là null, trả về tất cả endpoints trong tất cả namespaces
-     */
-    public EndpointsList getEndpoints(String namespace) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            if (isNamespaceNotEmpty(namespace)) {
-                return client.endpoints().inNamespace(namespace).list();
-            } else {
-                return client.endpoints().inAnyNamespace().list();
-            }
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get endpoints for namespace: {}", namespace, e);
-            throw new RuntimeException("Failed to get endpoints: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy endpoint cụ thể theo tên
-     */
-    public Endpoints getEndpoint(String namespace, String endpointName) {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.endpoints().inNamespace(namespace).withName(endpointName).get();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get endpoint {}/{}: {}", namespace, endpointName, e.getMessage(), e);
-            throw new RuntimeException("Failed to get endpoint: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Lấy CoreDNS pods (pods trong namespace kube-system với label k8s-app=kube-dns)
-     */
-    public PodList getCoreDNSPods() {
-        try (KubernetesClient client = getKubernetesClient()) {
-            return client.pods().inNamespace("kube-system")
-                    .withLabel("k8s-app", "kube-dns")
-                    .list();
-        } catch (KubernetesClientException e) {
-            logger.error("Failed to get CoreDNS pods: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to get CoreDNS pods: " + e.getMessage(), e);
-        }
-    }
 
 }

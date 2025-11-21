@@ -4,27 +4,21 @@
 
     let serviceDiscoveryData = {
         services: [],
-        endpoints: [],
-        coredns: [],
         ingress: []
     };
     let filteredData = {
         services: [],
-        endpoints: [],
-        coredns: [],
         ingress: []
     };
     
     // Track which tabs have been loaded
     let loadedTabs = {
         services: false,
-        endpoints: false,
-        coredns: false,
         ingress: false
     };
     
-    // Token để vô hiệu hóa kết quả fetch cũ khi có request mới (tránh race condition)
-    let serviceDiscoveryRequestToken = 0;
+    // Token để vô hiệu hóa kết quả fetch cũ theo từng tab (tránh race condition)
+    const requestTokens = {};
 
     // Helper functions từ k8sHelpers
     function escapeHtml(text) {
@@ -56,17 +50,13 @@
 
     // Helper: Cấu hình endpoint và response key cho từng loại
     const serviceDiscoveryConfig = {
-        services: { endpoint: '/admin/cluster/k8s/services', responseKey: 'services', dataKey: 'services', colspan: 11 },
-        endpoints: { endpoint: '/admin/cluster/k8s/endpoints', responseKey: 'endpoints', dataKey: 'endpoints', colspan: 9 },
-        coredns: { endpoint: '/admin/cluster/k8s/coredns', responseKey: 'coredns', dataKey: 'coredns', colspan: 10 },
+        services: { endpoint: '/admin/cluster/k8s/services', responseKey: 'services', dataKey: 'services', colspan: 6 },
         ingress: { endpoint: '/admin/cluster/k8s/ingress', responseKey: 'ingress', dataKey: 'ingress', colspan: 10 }
     };
 
     // Tab path mapping
     const tabPathMap = {
         services: '/services',
-        endpoints: '/endpoints',
-        coredns: '/coredns',
         ingress: '/ingress'
     };
 
@@ -103,8 +93,13 @@
     }
 
     // Helper: Kiểm tra token có hợp lệ không
-    function isValidToken(token) {
-        return token === serviceDiscoveryRequestToken;
+    function getNextToken(tabName) {
+        requestTokens[tabName] = (requestTokens[tabName] || 0) + 1;
+        return requestTokens[tabName];
+    }
+
+    function isValidToken(tabName, token) {
+        return requestTokens[tabName] === token;
     }
 
     // Load data cho một tab cụ thể
@@ -112,7 +107,7 @@
         const config = serviceDiscoveryConfig[tabName];
         if (!config) return;
 
-        const myToken = ++serviceDiscoveryRequestToken;
+        const myToken = getNextToken(tabName);
         showLoadingState(tabName);
 
         try {
@@ -120,7 +115,7 @@
             const url = namespace ? `${config.endpoint}?namespace=${encodeURIComponent(namespace)}` : config.endpoint;
             const response = await window.ApiClient.get(url);
 
-            if (!isValidToken(myToken)) return;
+            if (!isValidToken(tabName, myToken)) return;
 
             if (response && response[config.responseKey]) {
                 serviceDiscoveryData[config.dataKey] = response[config.responseKey] || [];
@@ -131,7 +126,7 @@
                 applyFilters();
             }
         } catch (error) {
-            if (!isValidToken(myToken)) return;
+            if (!isValidToken(tabName, myToken)) return;
             console.error(`Error loading ${tabName}:`, error);
             handleApiError(error, tabName);
         }
@@ -148,21 +143,21 @@
         const config = serviceDiscoveryConfig[tabName];
         if (!config) return;
 
-        const myToken = ++serviceDiscoveryRequestToken;
+        const myToken = getNextToken(tabName);
 
         try {
             const namespace = document.getElementById('service-discovery-namespace-filter')?.value || '';
             const url = namespace ? `${config.endpoint}?namespace=${encodeURIComponent(namespace)}` : config.endpoint;
             const response = await window.ApiClient.get(url);
 
-            if (!isValidToken(myToken)) return;
+            if (!isValidToken(tabName, myToken)) return;
 
             if (response && response[config.responseKey]) {
                 serviceDiscoveryData[config.dataKey] = response[config.responseKey] || [];
                 applyFilters();
             }
         } catch (error) {
-            if (!isValidToken(myToken)) return;
+            if (!isValidToken(tabName, myToken)) return;
             console.error(`Error reloading ${tabName} silently:`, error);
         }
     }
@@ -263,26 +258,36 @@
         const tbody = document.getElementById('services-tbody');
         if (!tbody) return;
 
+        if (!loadedTabs.services) {
+            return; // keep loading state until data loaded
+        }
+
         const data = filteredData.services || [];
         if (data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted py-3">Không có services</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Không có services</td></tr>';
             return;
         }
 
         tbody.innerHTML = data.map(item => {
             const typeClass = getTypeClass(item.type);
-            const externalIP = item.externalIP || '-';
             const clusterIP = item.clusterIP === 'None' ? '<none>' : (item.clusterIP || '-');
-            const nodePorts = item.nodePorts || '-';
+            const externalIP = item.externalIP || '-';
             const portMapping = item.ports || '-';
+            const endpointCount = item.endpointCount || 0;
+            const readyCount = item.readyCount || 0;
+            const endpointStatus = endpointCount > 0 ? `${readyCount}/${endpointCount} Ready` : 'No endpoints';
+            const endpointStatusClass = readyCount === endpointCount && endpointCount > 0
+                ? 'bg-success'
+                : readyCount > 0
+                    ? 'bg-warning text-dark'
+                    : 'bg-secondary';
             
             // Selectors
             const selectors = item.selectors || {};
-            const selectorStr = Object.keys(selectors).length > 0 
+            const selectorStr = Object.keys(selectors).length > 0
                 ? Object.entries(selectors).map(([k, v]) => `${k}=${v}`).join(', ')
                 : '<none>';
-            
-            // Trạng thái expose
+
             const exposeStatus = item.exposeStatus || 'Unknown';
             const exposeStatusClass = item.isExposed ? 'bg-success' : 'bg-secondary';
             
@@ -293,15 +298,17 @@
             return `
                 <tr>
                     <td><code>${namespace}</code></td>
-                    <td><span class="fw-medium">${name}</span></td>
+                    <td>
+                        <span class="fw-medium">${name}</span>
+                        <div class="text-muted small">ClusterIP: <code>${escapeHtml(clusterIP)}</code></div>
+                        <div class="text-muted small">External: <code>${escapeHtml(externalIP)}</code></div>
+                    </td>
                     <td><span class="badge ${typeClass} small">${escapeHtml(item.type || '-')}</span></td>
-                    <td><code>${escapeHtml(clusterIP)}</code></td>
-                    <td><code>${escapeHtml(externalIP)}</code></td>
-                    <td class="text-muted small">${escapeHtml(nodePorts)}</td>
-                    <td class="text-muted small" style="font-size: 0.75rem;">${escapeHtml(portMapping)}</td>
-                    <td class="text-muted small" style="font-size: 0.75rem;"><code>${escapeHtml(selectorStr)}</code></td>
+                    <td>
+                        <div class="text-muted small" style="font-size: 0.75rem;">${escapeHtml(portMapping)}</div>
+                        <div class="mt-1"><span class="badge ${endpointStatusClass} small">${escapeHtml(endpointStatus)}</span></div>
+                    </td>
                     <td><span class="badge ${exposeStatusClass} small">${escapeHtml(exposeStatus)}</span></td>
-                    <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
                     <td>
                         <div class="d-flex gap-1">
                             <button class="btn btn-sm btn-outline-info" onclick="window.K8sServiceDiscoveryModule.describeService('${namespace}', '${name}')" title="Xem chi tiết">
@@ -317,105 +324,14 @@
         }).join('');
     }
 
-    // Render Endpoints
-    function renderEndpoints() {
-        const tbody = document.getElementById('endpoints-tbody');
-        if (!tbody) return;
-
-        const data = filteredData.endpoints || [];
-        if (data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">Không có endpoints</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = data.map(item => {
-            const namespace = escapeHtml(item.namespace || '');
-            const name = escapeHtml(item.name || '');
-            const endpoints = item.endpoints || [];
-            const endpointsStr = endpoints.length > 0 
-                ? (endpoints.length > 3 ? endpoints.slice(0, 3).join(', ') + '...' : endpoints.join(', '))
-                : '<none>';
-            const endpointCount = item.endpointCount || 0;
-            const readyCount = item.readyCount || 0;
-            const notReadyCount = item.notReadyCount || 0;
-            const statusStr = `${readyCount}/${endpointCount} Ready`;
-            const statusClass = readyCount > 0 ? (readyCount === endpointCount ? 'bg-success' : 'bg-warning text-dark') : 'bg-danger';
-            const serviceLink = item.serviceLink || '';
-            const ports = item.ports || '-';
-
-            return `
-                <tr>
-                    <td><code>${namespace}</code></td>
-                    <td><span class="fw-medium">${name}</span></td>
-                    <td class="text-muted small" style="font-size: 0.75rem;"><code>${escapeHtml(endpointsStr)}</code></td>
-                    <td class="text-center"><span class="badge bg-info text-dark">${endpointCount}</span></td>
-                    <td><span class="badge ${statusClass} small">${statusStr}</span></td>
-                    <td class="text-muted small"><code>${escapeHtml(serviceLink || name)}</code></td>
-                    <td class="text-muted small">${escapeHtml(ports)}</td>
-                    <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
-                    <td>
-                        <div class="d-flex gap-1">
-                            <button class="btn btn-sm btn-outline-info" onclick="window.K8sServiceDiscoveryModule.describeEndpoint('${namespace}', '${name}')" title="Xem chi tiết">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    // Render CoreDNS
-    function renderCoreDNS() {
-        const tbody = document.getElementById('coredns-tbody');
-        if (!tbody) return;
-
-        const data = filteredData.coredns || [];
-        if (data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">Không có CoreDNS pods</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = data.map(item => {
-            const namespace = escapeHtml(item.namespace || '');
-            const name = escapeHtml(item.name || '');
-            const pods = item.pods || [];
-            const podsStr = pods.length > 0 ? pods.join(', ') : '<none>';
-            const ip = item.ip || '-';
-            const status = item.status || 'Unknown';
-            const statusClass = status === 'Running' ? 'bg-success' : status === 'Pending' ? 'bg-warning text-dark' : 'bg-danger';
-            const dnsDomain = item.dnsDomain || '-';
-            const dnsStatus = item.dnsStatus || 'Unknown';
-            const dnsStatusClass = item.canResolveDNS ? 'bg-success' : 'bg-danger';
-            const dnsMapping = item.dnsMapping || (item.serviceIP ? `${dnsDomain} → ${item.serviceIP}` : '-');
-
-            return `
-                <tr>
-                    <td><code>${namespace}</code></td>
-                    <td><span class="fw-medium">${name}</span></td>
-                    <td class="text-muted small">${escapeHtml(podsStr)}</td>
-                    <td><code>${escapeHtml(ip)}</code></td>
-                    <td class="text-muted small" style="font-size: 0.75rem;"><code>${escapeHtml(dnsDomain)}</code></td>
-                    <td><span class="badge ${dnsStatusClass} small">${escapeHtml(dnsStatus)}</span></td>
-                    <td class="text-muted small" style="font-size: 0.75rem;"><code>${escapeHtml(dnsMapping)}</code></td>
-                    <td><span class="badge ${statusClass} small">${escapeHtml(status)}</span></td>
-                    <td class="text-muted small">${escapeHtml(item.age || '-')}</td>
-                    <td>
-                        <div class="d-flex gap-1">
-                            <button class="btn btn-sm btn-outline-info" onclick="window.K8sServiceDiscoveryModule.describePod('${namespace}', '${name}')" title="Xem chi tiết">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    }
-
     // Render Ingress
     function renderIngress() {
         const tbody = document.getElementById('ingress-tbody');
         if (!tbody) return;
+
+        if (!loadedTabs.ingress) {
+            return;
+        }
 
         const data = filteredData.ingress || [];
         if (data.length === 0) {
@@ -481,8 +397,6 @@
     // Render all tabs
     function renderAll() {
         renderServices();
-        renderEndpoints();
-        renderCoreDNS();
         renderIngress();
     }
 
@@ -523,34 +437,6 @@
                 window.showAlert('error', error.message || 'Lỗi xóa service');
             } else {
                 alert('Lỗi: ' + (error.message || 'Lỗi xóa service'));
-            }
-        }
-    }
-
-    // Describe Endpoint
-    async function describeEndpoint(namespace, name) {
-        try {
-            const data = await window.ApiClient.get(`/admin/cluster/k8s/endpoints/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
-            showK8sOutput(`Endpoint ${namespace}/${name}`, data.output || '');
-        } catch (error) {
-            if (window.showAlert) {
-                window.showAlert('error', error.message || 'Lỗi lấy thông tin endpoint');
-            } else {
-                alert('Lỗi: ' + (error.message || 'Lỗi lấy thông tin endpoint'));
-            }
-        }
-    }
-
-    // Describe Pod (for CoreDNS)
-    async function describePod(namespace, name) {
-        try {
-            const data = await window.ApiClient.get(`/admin/cluster/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
-            showK8sOutput(`Pod ${namespace}/${name}`, data.output || '');
-        } catch (error) {
-            if (window.showAlert) {
-                window.showAlert('error', error.message || 'Lỗi lấy thông tin pod');
-            } else {
-                alert('Lỗi: ' + (error.message || 'Lỗi lấy thông tin pod'));
             }
         }
     }
@@ -597,7 +483,7 @@
     }
 
     // Activate tab
-    function activateTab(tabName) {
+    function activateTab(tabName, forceReload = false) {
         const tabButton = document.getElementById(`${tabName}-tab`);
         const tabPane = document.getElementById(tabName);
         if (!tabButton || !tabPane) return;
@@ -615,9 +501,10 @@
         tabPane.classList.add('show', 'active');
 
         // Load data if not loaded
-        if (!loadedTabs[tabName]) {
-            loadTabData(tabName);
+        if (forceReload) {
+            loadedTabs[tabName] = false;
         }
+        loadTabData(tabName);
     }
 
     // Initialize module
@@ -670,14 +557,14 @@
             const tabButton = document.getElementById(`${tabName}-tab`);
             if (tabButton) {
                 tabButton.addEventListener('shown.bs.tab', () => {
-                    activateTab(tabName);
+                    activateTab(tabName, true);
                 });
             }
         });
 
         // Load initial data
         activateTab(defaultTab);
-        loadAllServiceDiscovery();
+        loadAllServiceDiscovery(true);
     }
 
     if (document.readyState === 'loading') {
@@ -692,8 +579,6 @@
         reloadTabData,
         describeService,
         deleteService,
-        describeEndpoint,
-        describePod,
         describeIngress,
         deleteIngress
     };

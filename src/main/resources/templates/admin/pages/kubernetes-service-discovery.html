@@ -4,7 +4,7 @@
     <div class="page-title-row">
       <div>
         <div class="page-title">🌐 Service Discovery</div>
-        <div class="page-subtitle">Quản lý Service Discovery trong cụm Kubernetes (Services, Endpoints, CoreDNS, Ingress).</div>
+        <div class="page-subtitle">Quản lý Service Discovery trong cụm Kubernetes (Services &amp; Ingress).</div>
       </div>
       <div style="display: flex; gap: 8px; align-items: center;">
         <button class="btn" id="service-discovery-reload">🔄 Làm mới</button>
@@ -32,16 +32,6 @@
           </button>
         </li>
         <li class="nav-item" role="presentation">
-          <button class="nav-link" id="endpoints-tab" data-bs-toggle="tab" data-bs-target="#endpoints" type="button" role="tab">
-            Endpoints (<span id="endpoints-count">0</span>)
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="coredns-tab" data-bs-toggle="tab" data-bs-target="#coredns" type="button" role="tab">
-            CoreDNS (<span id="coredns-count">0</span>)
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
           <button class="nav-link" id="ingress-tab" data-bs-toggle="tab" data-bs-target="#ingress" type="button" role="tab">
             Ingress (<span id="ingress-count">0</span>)
           </button>
@@ -63,90 +53,16 @@
               <thead>
                 <tr>
                   <th style="max-width: 150px;">Namespace</th>
-                  <th style="max-width: 200px;">Tên</th>
+                  <th style="max-width: 220px;">Service</th>
                   <th>Type</th>
-                  <th>Cluster IP</th>
-                  <th>External IP</th>
-                  <th>NodePort</th>
-                  <th style="max-width: 300px;">Port Mapping</th>
-                  <th style="max-width: 200px;">Selectors</th>
+                  <th style="max-width: 260px;">Endpoints / Ports</th>
                   <th>Status</th>
-                  <th>Age</th>
-                  <th style="min-width: 100px;">Actions</th>
+                  <th style="min-width: 120px;">Actions</th>
                 </tr>
               </thead>
               <tbody id="services-tbody">
                 <tr>
-                  <td colspan="11" class="text-center text-muted py-3">
-                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Endpoints Tab -->
-        <div class="tab-pane fade" id="endpoints" role="tabpanel">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div style="font-weight: 500; color: #495057;">Endpoints</div>
-            <button class="btn btn-sm btn-outline-secondary" id="reload-endpoints" title="Làm mới Endpoints">
-              <i class="bi bi-arrow-clockwise"></i> Làm mới
-            </button>
-          </div>
-          <div class="table-responsive">
-            <table class="table table-hover table-workloads">
-              <thead>
-                <tr>
-                  <th style="max-width: 150px;">Namespace</th>
-                  <th style="max-width: 200px;">Tên</th>
-                  <th style="max-width: 300px;">Pod IPs</th>
-                  <th>Số lượng</th>
-                  <th>Trạng thái</th>
-                  <th>Service</th>
-                  <th>Ports</th>
-                  <th>Age</th>
-                  <th style="min-width: 100px;">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="endpoints-tbody">
-                <tr>
-                  <td colspan="9" class="text-center text-muted py-3">
-                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- CoreDNS Tab -->
-        <div class="tab-pane fade" id="coredns" role="tabpanel">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div style="font-weight: 500; color: #495057;">CoreDNS</div>
-            <button class="btn btn-sm btn-outline-secondary" id="reload-coredns" title="Làm mới CoreDNS">
-              <i class="bi bi-arrow-clockwise"></i> Làm mới
-            </button>
-          </div>
-          <div class="table-responsive">
-            <table class="table table-hover table-workloads">
-              <thead>
-                <tr>
-                  <th style="max-width: 150px;">Namespace</th>
-                  <th style="max-width: 200px;">Tên</th>
-                  <th>Pods</th>
-                  <th>IP</th>
-                  <th style="max-width: 300px;">DNS Domain</th>
-                  <th>DNS Status</th>
-                  <th style="max-width: 250px;">DNS Mapping</th>
-                  <th>Status</th>
-                  <th>Age</th>
-                  <th style="min-width: 100px;">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="coredns-tbody">
-                <tr>
-                  <td colspan="10" class="text-center text-muted py-3">
+                  <td colspan="6" class="text-center text-muted py-3">
                     <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
                   </td>
                 </tr>

@@ -231,18 +231,103 @@
         await Promise.all(reloadPromises);
     }
 
+    async function fetchWorkloadDetail(type, namespace, name, format = 'json') {
+        const formatParam = format === 'yaml' ? '?format=yaml' : '';
+        return window.ApiClient.get(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}${formatParam}`);
+    }
+
+    async function fetchNamespacePods(namespace) {
+        return window.ApiClient.get(`/admin/cluster/k8s/workloads/pods?namespace=${encodeURIComponent(namespace)}`);
+    }
+
+    function renderBadgeList(list, badgeClass = 'bg-light text-dark border') {
+        if (!Array.isArray(list) || list.length === 0) {
+            return '<span class="text-muted">—</span>';
+        }
+        return list.map(item => `<span class="badge ${badgeClass} me-1 mb-1">${escapeHtml(item)}</span>`).join('');
+    }
+
+    function renderKeyValueBadges(obj = {}, badgeClass = 'bg-secondary') {
+        const entries = Object.entries(obj || {});
+        if (entries.length === 0) return '<span class="text-muted">—</span>';
+        return entries.map(([key, value]) => `<span class="badge ${badgeClass} me-1 mb-1">${escapeHtml(key)}=${escapeHtml(String(value))}</span>`).join('');
+    }
+
+    function filterPodsByOwner(pods = [], ownerKind, ownerName) {
+        return pods.filter(pod => {
+            const owners = pod.ownerReferences || [];
+            return owners.some(owner => owner.kind?.toLowerCase() === ownerKind.toLowerCase() && owner.name === ownerName);
+        });
+    }
+
+    function setSectionContent(elementId, html) {
+        const el = document.getElementById(elementId);
+        if (el) el.innerHTML = html;
+    }
+
+    const LOADING_HTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>';
+
+    function renderYamlBlock(containerId, yamlText) {
+        setSectionContent(containerId, `
+            <div class="mb-2">
+                <button class="btn btn-sm btn-outline-primary me-2" onclick="window.K8sWorkloadsModule.copySectionYaml('${containerId}-content')">
+                    <i class="bi bi-clipboard"></i> Copy
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="window.K8sWorkloadsModule.downloadSectionYaml('${containerId}-content', '${containerId}.yaml')">
+                    <i class="bi bi-download"></i> Download
+                </button>
+            </div>
+            <pre class="bg-light p-3 rounded" style="max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-word;"><code id="${containerId}-content">${escapeHtml(yamlText || '')}</code></pre>
+        `);
+    }
+
+    function formatPorts(ports = []) {
+        if (!Array.isArray(ports) || ports.length === 0) return '—';
+        return ports.map(port => {
+            const number = port.containerPort ?? port.port ?? '';
+            const protocol = port.protocol ?? 'TCP';
+            return `${number}/${protocol}`;
+        }).join(', ');
+    }
+
+    function formatEnv(env = []) {
+        if (!Array.isArray(env) || env.length === 0) return '—';
+        return env.map(e => `<code class="d-block">${escapeHtml(e.name || '')}=${escapeHtml(e.value || '')}</code>`).join('');
+    }
+
+    function formatDuration(from, to) {
+        if (!from && !to) return '—';
+        return `${from || '--'} → ${to || '--'}`;
+    }
+
+    function showModalInstance(modalEl) {
+        if (!modalEl) return null;
+        if (window.Modal) {
+            window.Modal.show(modalEl.id);
+            return null;
+        }
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: true, keyboard: true, focus: true });
+            modal.show();
+            return modal;
+        }
+        modalEl.classList.add('show');
+        modalEl.style.display = 'block';
+        return null;
+    }
+
     // Helper: Kiểm tra workload có ready không
     function isWorkloadReady(workload, type) {
         if (!workload) return false;
         
         if (type === 'deployment' || type === 'statefulset') {
-            const ready = workload.ready || 0;
-            const desired = workload.desired || workload.replicas || 0;
-            return desired > 0 && ready === desired;
+            const ready = workload.ready ?? 0;
+            const desired = workload.desired ?? workload.replicas ?? 0;
+            return ready === desired;
         } else if (type === 'daemonset') {
-            const ready = workload.ready || 0;
-            const desired = workload.desired || 0;
-            return desired > 0 && ready === desired;
+            const ready = workload.ready ?? 0;
+            const desired = workload.desired ?? workload.replicas ?? 0;
+            return ready === desired;
         } else if (type === 'pod') {
             return workload.status === 'Running';
         }
@@ -527,25 +612,28 @@
         if (!tbody) return;
 
         if (filteredData.deployments.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Không có deployments</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Không có deployments</td></tr>';
             return;
         }
 
         tbody.innerHTML = filteredData.deployments.map(item => {
             const ready = item.ready || 0;
             const desired = item.desired || item.replicas || 0;
-            const statusClass = getStatusClass(ready, desired);
+            const current = item.current || item.updated || 0;
+            const available = item.available || 0;
+            const unavailable = desired - available;
             const rolloutStatus = item.rolloutStatus || 'Unknown';
             const image = item.image || 'N/A';
-            
-            // Xác định badge class cho rollout status
-            let rolloutStatusClass = 'bg-secondary';
-            if (rolloutStatus === 'Complete') {
-                rolloutStatusClass = 'bg-success';
-            } else if (rolloutStatus === 'Progressing') {
-                rolloutStatusClass = 'bg-info';
-            } else if (rolloutStatus === 'Failed' || rolloutStatus === 'Degraded') {
-                rolloutStatusClass = 'bg-danger';
+
+            // Xác định status: Running / Pending / Error
+            let status = 'Running';
+            let statusClass = 'bg-success';
+            if (rolloutStatus === 'Failed' || rolloutStatus === 'Degraded') {
+                status = 'Error';
+                statusClass = 'bg-danger';
+            } else if (rolloutStatus === 'Progressing' || ready < desired) {
+                status = 'Pending';
+                statusClass = 'bg-warning text-dark';
             }
 
             const isSystem = isSystemNamespace(item.namespace);
@@ -554,32 +642,40 @@
             const namespace = item.namespace || '';
             const name = item.name || '';
 
+            // Xác định màu cho Replicas badge
+            let replicasBadgeClass = 'bg-success'; // Mặc định xanh
+            if (ready < desired) {
+                replicasBadgeClass = 'bg-warning text-dark'; // Vàng nếu chưa đủ ready
+            }
+            if (ready === 0 && desired > 0) {
+                replicasBadgeClass = 'bg-danger'; // Đỏ nếu không có pod nào ready
+            }
+            if (current < desired) {
+                replicasBadgeClass = 'bg-warning text-dark'; // Vàng nếu current < desired
+            }
+
             return `<tr>
+                <td style="word-break: break-word;">
+                    <span class="fw-medium">${escapeHtml(name)}</span>
+                </td>
                 <td style="word-break: break-word;"><code>${escapeHtml(namespace)}</code></td>
-                <td style="word-break: break-word;"><span class="fw-medium">${escapeHtml(name)}</span></td>
-                <td style="white-space: nowrap;"><span class="badge ${statusClass}">${ready}/${desired}</span></td>
-                <td style="white-space: nowrap;"><span class="badge ${rolloutStatusClass}">${escapeHtml(rolloutStatus)}</span></td>
-                <td style="word-break: break-all; max-width: 350px;"><code class="text-muted small">${escapeHtml(image)}</code></td>
+                <td style="white-space: nowrap;">
+                    <span class="badge ${replicasBadgeClass}">${desired}/${current}/${ready}</span>
+                </td>
+                <td style="white-space: nowrap;">
+                    <span class="badge ${statusClass}">${escapeHtml(status)}</span>
+                </td>
                 <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(item.age || '-')}</td>
                 <td style="white-space: nowrap;">
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
-                            <i class="bi bi-eye"></i>
+                    <div class="d-flex gap-1 flex-wrap">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.viewDeploymentDetail('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="View">
+                            <i class="bi bi-eye"></i> View
                         </button>
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.restartWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Restart">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>` : ''}
                         ${canScale && !isSystem ? `<button class="btn btn-sm btn-outline-warning" onclick="window.K8sWorkloadsModule.scaleWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Scale">
-                            <i class="bi bi-arrows-angle-expand"></i>
+                            <i class="bi bi-arrows-angle-expand"></i> Scale
                         </button>` : ''}
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-success" onclick="window.K8sWorkloadsModule.showRolloutHistory('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Lịch sử Rollout">
-                            <i class="bi bi-clock-history"></i>
-                        </button>` : ''}
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-secondary" onclick="window.K8sWorkloadsModule.showUpdateImage('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Update Image">
-                            <i class="bi bi-pencil-square"></i>
-                        </button>` : ''}
-                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
-                            <i class="bi bi-trash"></i>
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('deployment', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Delete">
+                            <i class="bi bi-trash"></i> Delete
                         </button>` : ''}
                     </div>
                 </td>
@@ -601,55 +697,43 @@
             const ready = item.ready || 0;
             const desired = item.desired || item.replicas || 0;
             const current = item.current || 0;
-            const statusClass = getStatusClass(ready, desired);
-            const podNames = item.podNames || [];
+            const serviceName = item.serviceName || '-';
+            const volumeTemplates = item.volumeTemplates || [];
             const pvcCount = item.pvcCount || 0;
-            const currentRevision = item.currentRevision || '';
-            const updateRevision = item.updateRevision || '';
-            
-            // Update status
-            let updateStatus = 'Up-to-date';
-            let updateStatusClass = 'bg-success';
-            if (updateRevision && currentRevision && updateRevision !== currentRevision) {
-                updateStatus = 'Updating';
-                updateStatusClass = 'bg-warning text-dark';
-            }
-
+            const volumeDisplay = volumeTemplates.length
+                ? volumeTemplates.map(v => `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(v)}</span>`).join('')
+                : (pvcCount > 0 ? `${pvcCount} PVCs` : '<span class="text-muted">No PVC</span>');
             const isSystem = isSystemNamespace(item.namespace);
             const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
             const canScale = canScaleWorkloadType('statefulset');
             const namespace = item.namespace || '';
             const name = item.name || '';
+            const replicasBadgeClass = desired === ready ? 'bg-success' : 'bg-warning text-dark';
             
-            // Pods list (hiển thị tối đa 3 pods, còn lại hiển thị "...")
-            let podsDisplay = podNames.length > 0 ? podNames.slice(0, 3).join(', ') : '-';
-            if (podNames.length > 3) {
-                podsDisplay += ` ... (+${podNames.length - 3})`;
-            }
-
             return `<tr>
+                <td style="word-break: break-word;">
+                    <span class="fw-medium">${escapeHtml(name)}</span>
+                </td>
                 <td style="word-break: break-word;"><code>${escapeHtml(namespace)}</code></td>
-                <td style="word-break: break-word;"><span class="fw-medium">${escapeHtml(name)}</span></td>
-                <td style="white-space: nowrap;"><span class="badge ${statusClass}">${ready}/${desired}</span></td>
-                <td style="word-break: break-word; max-width: 300px;" title="${escapeHtml(podNames.join(', '))}"><code class="text-muted small">${escapeHtml(podsDisplay)}</code></td>
-                <td style="white-space: nowrap;">${pvcCount}</td>
-                <td style="white-space: nowrap;"><span class="badge ${updateStatusClass}">${escapeHtml(updateStatus)}</span></td>
+                <td style="white-space: nowrap;">
+                    <span class="badge ${replicasBadgeClass}">${desired}/${current}/${ready}</span>
+                </td>
+                <td style="word-break: break-word;">
+                    ${serviceName !== '-' ? `<code>${escapeHtml(serviceName)}</code>` : '<span class="text-muted">—</span>'}
+                </td>
+                <td style="max-width: 280px;">
+                    ${volumeDisplay}
+                </td>
                 <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(item.age || '-')}</td>
                 <td style="white-space: nowrap;">
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
-                            <i class="bi bi-eye"></i>
+                    <div class="d-flex gap-1 flex-wrap">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.viewStatefulSetDetail('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="View">
+                            <i class="bi bi-eye"></i> View
                         </button>
                         ${canScale && !isSystem ? `<button class="btn btn-sm btn-outline-warning" onclick="window.K8sWorkloadsModule.scaleWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Scale">
-                            <i class="bi bi-arrows-angle-expand"></i>
+                            <i class="bi bi-arrows-angle-expand"></i> Scale
                         </button>` : ''}
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showStatefulSetVolumes('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Quản lý Volume">
-                            <i class="bi bi-hdd"></i>
-                        </button>` : ''}
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-secondary" onclick="window.K8sWorkloadsModule.showUpdateStatefulSetImage('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Update Image">
-                            <i class="bi bi-pencil-square"></i>
-                        </button>` : ''}
-                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('statefulset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -669,41 +753,30 @@
         }
 
         tbody.innerHTML = filteredData.daemonSets.map(item => {
-            const ready = item.ready || 0;
             const desired = item.desired || 0;
-            const podsPerNode = item.podsPerNode || 0;
-            const image = item.image || 'N/A';
-            const rolloutStatus = item.rolloutStatus || 'Available';
-            
-            // Rollout status badge
-            let rolloutStatusClass = 'bg-success';
-            if (rolloutStatus === 'Progressing') {
-                rolloutStatusClass = 'bg-warning text-dark';
-            } else if (rolloutStatus === 'Failed' || rolloutStatus === 'Degraded') {
-                rolloutStatusClass = 'bg-danger';
-            }
-
-            const isSystem = isSystemNamespace(item.namespace);
-            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
+            const current = item.current || 0;
+            const ready = item.ready || 0;
             const namespace = item.namespace || '';
             const name = item.name || '';
-
+            const isSystem = isSystemNamespace(namespace);
+            const isSpecial = isAllowedSpecialWorkload(namespace, name);
+            const replicasBadgeClass = ready === desired ? 'bg-success' : 'bg-warning text-dark';
+            
             return `<tr>
+                <td style="word-break: break-word;">
+                    <span class="fw-medium">${escapeHtml(name)}</span>
+                </td>
                 <td style="word-break: break-word;"><code>${escapeHtml(namespace)}</code></td>
-                <td style="word-break: break-word;"><span class="fw-medium">${escapeHtml(name)}</span></td>
-                <td style="white-space: nowrap;">${ready}/${desired}</td>
-                <td style="word-break: break-all; max-width: 350px;"><code class="text-muted small">${escapeHtml(image)}</code></td>
-                <td style="white-space: nowrap;"><span class="badge ${rolloutStatusClass}">${escapeHtml(rolloutStatus)}</span></td>
+                <td><span class="badge bg-secondary">${desired}</span></td>
+                <td><span class="badge bg-info">${current}</span></td>
+                <td><span class="badge ${replicasBadgeClass}">${ready}</span></td>
                 <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(item.age || '-')}</td>
                 <td style="white-space: nowrap;">
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
-                            <i class="bi bi-eye"></i>
+                    <div class="d-flex gap-1 flex-wrap">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.viewDaemonSetDetail('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="View">
+                            <i class="bi bi-eye"></i> View
                         </button>
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-secondary" onclick="window.K8sWorkloadsModule.showUpdateDaemonSetImage('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Update Image">
-                            <i class="bi bi-pencil-square"></i>
-                        </button>` : ''}
-                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('daemonset', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -723,46 +796,32 @@
         }
 
         tbody.innerHTML = filteredData.cronJobs.map(item => {
-            const isSystem = isSystemNamespace(item.namespace);
-            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
             const namespace = item.namespace || '';
             const name = item.name || '';
             const schedule = item.schedule || '-';
-            const status = item.status || (item.suspend ? 'Suspended' : 'Active');
+            const lastRun = item.lastRun || item.lastSchedule || '—';
             const active = item.active || 0;
-            const successfulJobsHistoryLimit = item.successfulJobsHistoryLimit || 3;
-            const failedJobsHistoryLimit = item.failedJobsHistoryLimit || 1;
-            
-            // Status badge
+            const status = item.status || (item.suspend ? 'Suspended' : 'Active');
+            const isSystem = isSystemNamespace(namespace);
+            const isSpecial = isAllowedSpecialWorkload(namespace, name);
             let statusBadge = 'bg-success';
-            if (status === 'Suspended') {
-                statusBadge = 'bg-warning text-dark';
-            } else if (status === 'Inactive') {
-                statusBadge = 'bg-secondary';
-            }
+            if (status === 'Suspended') statusBadge = 'bg-warning text-dark';
+            if (status === 'Failed') statusBadge = 'bg-danger';
 
             return `<tr>
-                <td style="word-break: break-word;"><code>${escapeHtml(namespace)}</code></td>
-                <td style="word-break: break-word;"><span class="fw-medium">${escapeHtml(name)}</span></td>
+                <td style="word-break: break-word;">
+                    <span class="fw-medium">${escapeHtml(name)}</span>
+                </td>
                 <td style="white-space: nowrap;"><code>${escapeHtml(schedule)}</code></td>
-                <td style="white-space: nowrap;"><span class="badge ${statusBadge}">${escapeHtml(status)}</span></td>
-                <td style="white-space: nowrap;">${active} jobs</td>
-                <td style="white-space: nowrap;" class="text-muted small">Success: ${successfulJobsHistoryLimit}, Failed: ${failedJobsHistoryLimit}</td>
+                <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(lastRun)}</td>
+                <td style="white-space: nowrap;"><span class="badge bg-info">${active}</span></td>
                 <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(item.age || '-')}</td>
                 <td style="white-space: nowrap;">
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('cronjob', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
-                            <i class="bi bi-eye"></i>
+                    <div class="d-flex gap-1 flex-wrap">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.viewCronJobDetail('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="View">
+                            <i class="bi bi-eye"></i> View
                         </button>
-                        ${!isSystem ? `<button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showCronJobHistory('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Lịch sử Jobs">
-                            <i class="bi bi-clock-history"></i>
-                        </button>` : ''}
-                        ${!isSystem || isSpecial ? item.suspend ? `<button class="btn btn-sm btn-outline-success" onclick="window.K8sWorkloadsModule.resumeCronJob('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Resume">
-                            <i class="bi bi-play-circle"></i>
-                        </button>` : `<button class="btn btn-sm btn-outline-warning" onclick="window.K8sWorkloadsModule.suspendCronJob('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Suspend">
-                            <i class="bi bi-pause-circle"></i>
-                        </button>` : ''}
-                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('cronjob', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('cronjob', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -782,43 +841,36 @@
         }
 
         tbody.innerHTML = filteredData.jobs.map(item => {
-            const isSystem = isSystemNamespace(item.namespace);
-            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
             const namespace = item.namespace || '';
             const name = item.name || '';
-            const podCount = item.podCount || 0;
+            const completions = item.completions ?? '-';
+            const succeeded = item.succeeded ?? 0;
+            const completionStr = `${succeeded}/${completions === 0 ? '∞' : completions}`;
+            const duration = item.duration || `${item.startTime || '--'} → ${item.completionTime || '--'}`;
             const status = item.status || 'Unknown';
-            const startTime = item.startTime || '-';
-            const completionTime = item.completionTime || '-';
-            const retryConfig = item.retryConfig || '-';
-            
-            // Status badge
+            const age = item.age || '-';
+            const isSystem = isSystemNamespace(namespace);
+            const isSpecial = isAllowedSpecialWorkload(namespace, name);
             let statusClass = 'bg-secondary';
-            if (status === 'Complete' || status === 'Succeeded') {
-                statusClass = 'bg-success';
-            } else if (status === 'Failed') {
-                statusClass = 'bg-danger';
-            } else if (status === 'Running') {
-                statusClass = 'bg-warning text-dark';
-            }
-            
-            // Thời gian hiển thị
-            const timeDisplay = completionTime !== '-' ? `Completed: ${completionTime}` : (startTime !== '-' ? `Started: ${startTime}` : '-');
+            if (status === 'Complete' || status === 'Succeeded') statusClass = 'bg-success';
+            else if (status === 'Running') statusClass = 'bg-info';
+            else if (status === 'Failed') statusClass = 'bg-danger';
 
             return `<tr>
+                <td style="word-break: break-word;">
+                    <span class="fw-medium">${escapeHtml(name)}</span>
+                </td>
                 <td style="word-break: break-word;"><code>${escapeHtml(namespace)}</code></td>
-                <td style="word-break: break-word;"><span class="fw-medium">${escapeHtml(name)}</span></td>
-                <td style="white-space: nowrap;">${podCount}</td>
-                <td style="white-space: nowrap;"><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
-                <td style="white-space: nowrap;" class="text-muted small">${escapeHtml(timeDisplay)}</td>
-                <td style="word-break: break-word; max-width: 200px;" class="text-muted small"><code>${escapeHtml(retryConfig)}</code></td>
-                <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(item.age || '-')}</td>
+                <td><span class="badge bg-primary">${completionStr}</span></td>
+                <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(duration)}</td>
+                <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
+                <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(age)}</td>
                 <td style="white-space: nowrap;">
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('job', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
-                            <i class="bi bi-eye"></i>
+                    <div class="d-flex gap-1 flex-wrap">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.viewJobDetail('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="View">
+                            <i class="bi bi-eye"></i> View
                         </button>
-                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('job', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('job', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -838,45 +890,43 @@
         }
 
         tbody.innerHTML = filteredData.pods.map(item => {
-            const isSystem = isSystemNamespace(item.namespace);
-            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
             const namespace = item.namespace || '';
             const name = item.name || '';
             const status = item.status || 'Unknown';
-            const image = item.image || 'N/A';
             const node = item.node || '-';
+            const restarts = item.restarts ?? 0;
             const podIP = item.podIP || '-';
+            const age = item.age || '-';
+            const isSystem = isSystemNamespace(namespace);
+            const isSpecial = isAllowedSpecialWorkload(namespace, name);
             
-            // Status badge based on pod status
             let statusClass = 'bg-secondary';
-            if (status === 'Running') {
-                statusClass = 'bg-success';
-            } else if (status === 'Pending') {
-                statusClass = 'bg-warning text-dark';
-            } else if (status === 'Failed' || status === 'Error') {
-                statusClass = 'bg-danger';
-            }
+            if (status === 'Running') statusClass = 'bg-success';
+            else if (status === 'Pending') statusClass = 'bg-warning text-dark';
+            else if (status === 'Failed' || status === 'Error') statusClass = 'bg-danger';
 
             return `<tr>
+                <td style="word-break: break-word;">
+                    <span class="fw-medium">${escapeHtml(name)}</span>
+                </td>
                 <td style="word-break: break-word;"><code>${escapeHtml(namespace)}</code></td>
-                <td style="word-break: break-word;"><span class="fw-medium">${escapeHtml(name)}</span></td>
                 <td style="white-space: nowrap;"><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
-                <td style="word-break: break-all; max-width: 350px;"><code class="text-muted small">${escapeHtml(image)}</code></td>
-                <td class="text-muted small" style="word-break: break-word;">${escapeHtml(node)}</td>
+                <td style="white-space: nowrap;"><code class="text-muted small">${escapeHtml(node)}</code></td>
+                <td style="white-space: nowrap;"><span class="badge bg-secondary">${restarts}</span></td>
                 <td style="white-space: nowrap;"><code class="text-muted small">${escapeHtml(podIP)}</code></td>
-                <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(item.age || '-')}</td>
+                <td class="text-muted small" style="white-space: nowrap;">${escapeHtml(age)}</td>
                 <td style="white-space: nowrap;">
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.describeWorkload('pod', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem chi tiết">
-                            <i class="bi bi-eye"></i>
+                    <div class="d-flex gap-1 flex-wrap">
+                        <button class="btn btn-sm btn-outline-info" onclick="window.K8sWorkloadsModule.viewPodDetail('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="View">
+                            <i class="bi bi-eye"></i> View
                         </button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showPodLogs('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xem logs">
-                            <i class="bi bi-file-text"></i>
+                        <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showPodLogs('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Logs">
+                            <i class="bi bi-file-text"></i> Logs
                         </button>
-                        ${status === 'Running' ? `<button class="btn btn-sm btn-outline-success" onclick="window.K8sWorkloadsModule.showExecPod('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Exec vào pod">
-                            <i class="bi bi-terminal"></i>
+                        ${status === 'Running' ? `<button class="btn btn-sm btn-outline-success" onclick="window.K8sWorkloadsModule.showExecPod('${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Exec terminal">
+                            <i class="bi bi-terminal"></i> Exec
                         </button>` : ''}
-                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('pod', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Xóa">
+                        ${!isSystem || isSpecial ? `<button class="btn btn-sm btn-outline-danger" onclick="window.K8sWorkloadsModule.deleteWorkload('pod', '${escapeHtml(namespace)}', '${escapeHtml(name)}')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>` : ''}
                     </div>
@@ -1222,68 +1272,47 @@
             // Lấy số replicas hiện tại trước khi scale
             const currentWorkload = getWorkloadFromData(type, namespace, name);
             const currentReplicas = currentWorkload ? (currentWorkload.desired || currentWorkload.replicas || 0) : 0;
+            if (replicasNum === currentReplicas) {
+                showAlertOrFallback('info', 'Số replicas không thay đổi.', alert);
+                return;
+            }
             const isScalingDown = replicasNum < currentReplicas;
-            
-            const data = await window.ApiClient.post(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`, {
+            await window.ApiClient.post(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`, {
                 replicas: replicasNum
             });
             
             // Reload tab chính và các tab liên quan ngay lập tức để cập nhật count
             await reloadRelatedTabs('scale', type);
             
-            // Hiển thị thông báo
-            if (replicasNum === 0) {
-                if (window.showAlert) {
-                    window.showAlert('success', `✅ Đã scale ${type} <strong>${namespace}/${name}</strong> về 0 replicas`);
-                }
-            } else if (isScalingDown) {
-                // Khi giảm replica, reload nhiều lần để đảm bảo count được cập nhật
-                // (Kubernetes cần thời gian để terminate pods)
-                if (window.showAlert) {
-                    window.showAlert('success', `✅ Đã scale ${type} <strong>${namespace}/${name}</strong> từ ${currentReplicas} → ${replicasNum} replicas`);
-                }
-                
-                // Reload ngay lập tức (đã được gọi ở trên)
-                // Reload lại sau 1 giây và 3 giây để đảm bảo count được cập nhật
-                setTimeout(async () => {
-                    await reloadRelatedTabs('scale', type);
-                }, 1000);
-                
-                setTimeout(async () => {
-                    await reloadRelatedTabs('scale', type);
-                }, 3000);
-            } else {
-                // Khi tăng replica, chờ workload ready
-                const initialMsg = `✅ Đã scale ${type} <strong>${namespace}/${name}</strong> từ ${currentReplicas} → ${replicasNum} replicas. Đang chờ workload ready...`;
-                if (window.showAlert) {
-                    window.showAlert('info', initialMsg);
-                }
-                
-                waitForWorkloadReady(type, namespace, name, {
-                    maxAttempts: 60,
-                    interval: 5000,
-                    onUpdate: (workload, status, attempts) => {
-                        // Cập nhật UI trong khi chờ
-                        const tabName = getTabNameFromType(type);
-                        if (tabName) {
-                            reloadTabDataSilent(tabName);
-                        }
-                    },
-                    onComplete: (success, status) => {
-                        if (success) {
-                            if (window.showAlert) {
-                                window.showAlert('success', `✅ Workload <strong>${namespace}/${name}</strong> đã ready! Trạng thái: ${status}`);
-                            }
-                        } else {
-                            if (window.showAlert) {
-                                window.showAlert('warning', `⚠️ Workload <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
-                            }
-                        }
-                        // Reload lại để đảm bảo UI cập nhật
-                        reloadRelatedTabs('scale', type);
+            const baseMessage = `✅ Đã scale ${type} <strong>${namespace}/${name}</strong> từ ${currentReplicas} → ${replicasNum} replicas.`;
+            const waitHint = (() => {
+                if (replicasNum === 0) return 'Đang chờ Kubernetes terminate toàn bộ Pods...';
+                if (isScalingDown) return `Đang chờ số Pods giảm xuống ${replicasNum}...`;
+                return 'Đang chờ Pods mới sẵn sàng...';
+            })();
+            showAlertOrFallback('info', `${baseMessage} ${waitHint}`, alert);
+            
+            waitForWorkloadReady(type, namespace, name, {
+                maxAttempts: 60,
+                interval: 5000,
+                onUpdate: () => {
+                    const tabName = getTabNameFromType(type);
+                    if (tabName) {
+                        reloadTabDataSilent(tabName);
                     }
-                });
-            }
+                    if ((type === 'deployment' || type === 'statefulset' || type === 'daemonset') && loadedTabs.pods) {
+                        reloadTabDataSilent('pods');
+                    }
+                },
+                onComplete: (success, status) => {
+                    const alertType = success ? 'success' : 'warning';
+                    const message = success
+                        ? `✅ Workload <strong>${namespace}/${name}</strong> đã đạt trạng thái mong muốn (${status}).`
+                        : `⚠️ Workload <strong>${namespace}/${name}</strong> chưa đạt trạng thái mong muốn. ${status}`;
+                    showAlertOrFallback(alertType, message, alert);
+                    reloadRelatedTabs('scale', type);
+                }
+            });
         } catch (error) {
             const errorMsg = error.message || 'Lỗi scale workload';
             if (window.showAlert) {
@@ -1409,188 +1438,200 @@
 
     // Show pod logs modal
     async function showPodLogs(namespace, name) {
+        const modalEl = document.getElementById('pod-logs-modal');
+        if (!modalEl) {
+            showK8sOutput(`Pod Logs: ${namespace}/${name}`, '<div class="text-danger">Pod logs modal chưa được include.</div>');
+            return;
+        }
+
+        modalEl.dataset.namespace = namespace;
+        modalEl.dataset.name = name;
+
+        const titleEl = document.getElementById('pod-logs-title');
+        if (titleEl) titleEl.textContent = `${namespace}/${name}`;
+
+        const containerSelect = document.getElementById('pod-logs-container-select');
+        const tailSelect = document.getElementById('pod-logs-tail-select');
+        const searchInput = document.getElementById('pod-logs-search-input');
+        const refreshBtn = document.getElementById('pod-logs-refresh-btn');
+        const statusEl = document.getElementById('pod-logs-status');
+        const outputEl = document.getElementById('pod-logs-output');
+
+        if (statusEl) statusEl.textContent = 'Đang tải danh sách container...';
+        if (outputEl) {
+            outputEl.textContent = '';
+            outputEl.dataset.raw = '';
+        }
+        if (searchInput) searchInput.value = '';
+
         try {
-            // Hiển thị loading
-            const logsTitle = `Pod Logs: ${namespace}/${name}`;
-            showK8sOutput(logsTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải logs...</div>');
-            
-            // Lấy danh sách containers
             const containers = await getPodContainers(namespace, name);
-            let containerName = containers.length > 0 ? containers[0] : null;
-            
-            // Lấy logs
-            const logs = await getPodLogs(namespace, name, containerName, 500);
-            
-            // Hiển thị logs với container selector nếu có nhiều containers
-            let logsContent = '';
-            if (containers.length > 1) {
-                logsContent += `<div class="mb-2">
-                    <label class="form-label small">Container:</label>
-                    <select id="pod-logs-container-select" class="form-select form-select-sm" onchange="window.K8sWorkloadsModule.reloadPodLogs('${escapeHtml(namespace)}', '${escapeHtml(name)}', this.value)">
-                        ${containers.map(c => `<option value="${escapeHtml(c)}" ${c === containerName ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
-                    </select>
-                </div>`;
+            if (containerSelect) {
+                containerSelect.innerHTML = containers.length
+                    ? containers.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')
+                    : '<option value="">(Default)</option>';
+                containerSelect.value = containers[0] || '';
+                containerSelect.onchange = () => loadPodLogsModal(namespace, name);
             }
-            
-            logsContent += `<div class="mb-2">
-                <button class="btn btn-sm btn-outline-secondary" onclick="window.K8sWorkloadsModule.reloadPodLogs('${escapeHtml(namespace)}', '${escapeHtml(name)}', '${escapeHtml(containerName || '')}')">
-                    <i class="bi bi-arrow-clockwise"></i> Làm mới
-                </button>
-                <span class="text-muted small ms-2">Hiển thị 500 dòng gần nhất</span>
-            </div>`;
-            
-            logsContent += `<pre class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto; font-size: 12px; line-height: 1.4;">${escapeHtml(logs || 'Không có logs')}</pre>`;
-            
-            showK8sOutput(logsTitle, logsContent);
+            if (tailSelect) {
+                if (!tailSelect.value) tailSelect.value = '500';
+                tailSelect.onchange = () => loadPodLogsModal(namespace, name);
+            }
+            if (refreshBtn) {
+                refreshBtn.onclick = () => loadPodLogsModal(namespace, name);
+            }
+            if (searchInput) {
+                searchInput.oninput = () => applyPodLogsSearchFilter();
+            }
+
+            showModalInstance(modalEl);
+            await loadPodLogsModal(namespace, name);
         } catch (error) {
-            const errorMsg = error.message || 'Lỗi lấy logs pod';
             if (window.showAlert) {
-                window.showAlert('error', errorMsg);
-            } else {
-                alert('Lỗi: ' + errorMsg);
+                window.showAlert('error', error.message || 'Lỗi lấy logs pod');
             }
-            showK8sOutput(`Pod Logs: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
         }
     }
 
-    // Reload pod logs
-    async function reloadPodLogs(namespace, name, container) {
+    async function loadPodLogsModal(namespace, name) {
+        const containerSelect = document.getElementById('pod-logs-container-select');
+        const tailSelect = document.getElementById('pod-logs-tail-select');
+        const statusEl = document.getElementById('pod-logs-status');
+        const outputEl = document.getElementById('pod-logs-output');
+        const refreshBtn = document.getElementById('pod-logs-refresh-btn');
+        if (!outputEl || !statusEl) return;
+
+        const container = containerSelect?.value || null;
+        const tailLines = parseInt(tailSelect?.value, 10) || 500;
+
+        statusEl.textContent = 'Đang tải logs...';
+        outputEl.textContent = 'Đang tải...';
+        outputEl.dataset.raw = '';
+        if (refreshBtn) refreshBtn.disabled = true;
+
         try {
-            const logsTitle = `Pod Logs: ${namespace}/${name}`;
-            showK8sOutput(logsTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải logs...</div>');
-            
-            const logs = await getPodLogs(namespace, name, container || null, 500);
-            const containers = await getPodContainers(namespace, name);
-            
-            let logsContent = '';
-            if (containers.length > 1) {
-                logsContent += `<div class="mb-2">
-                    <label class="form-label small">Container:</label>
-                    <select id="pod-logs-container-select" class="form-select form-select-sm" onchange="window.K8sWorkloadsModule.reloadPodLogs('${escapeHtml(namespace)}', '${escapeHtml(name)}', this.value)">
-                        ${containers.map(c => `<option value="${escapeHtml(c)}" ${c === container ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
-                    </select>
-                </div>`;
-            }
-            
-            logsContent += `<div class="mb-2">
-                <button class="btn btn-sm btn-outline-secondary" onclick="window.K8sWorkloadsModule.reloadPodLogs('${escapeHtml(namespace)}', '${escapeHtml(name)}', '${escapeHtml(container || '')}')">
-                    <i class="bi bi-arrow-clockwise"></i> Làm mới
-                </button>
-                <span class="text-muted small ms-2">Hiển thị 500 dòng gần nhất</span>
-            </div>`;
-            
-            logsContent += `<pre class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto; font-size: 12px; line-height: 1.4;">${escapeHtml(logs || 'Không có logs')}</pre>`;
-            
-            showK8sOutput(logsTitle, logsContent);
+            const logs = await getPodLogs(namespace, name, container || null, tailLines);
+            outputEl.dataset.raw = logs || '';
+            statusEl.textContent = `Container: ${container || 'default'} • ${tailLines} dòng cuối`;
+            applyPodLogsSearchFilter();
         } catch (error) {
-            const errorMsg = error.message || 'Lỗi lấy logs pod';
-            if (window.showAlert) {
-                window.showAlert('error', errorMsg);
-            }
-            showK8sOutput(`Pod Logs: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
+            const errorMsg = error.message || 'Không lấy được logs';
+            statusEl.textContent = errorMsg;
+            outputEl.textContent = errorMsg;
+            outputEl.dataset.raw = errorMsg;
+            if (window.showAlert) window.showAlert('error', errorMsg);
+        } finally {
+            if (refreshBtn) refreshBtn.disabled = false;
         }
+    }
+
+    function applyPodLogsSearchFilter() {
+        const outputEl = document.getElementById('pod-logs-output');
+        const searchInput = document.getElementById('pod-logs-search-input');
+        if (!outputEl) return;
+        const raw = outputEl.dataset.raw || '';
+        const query = (searchInput?.value || '').trim().toLowerCase();
+        if (!query) {
+            outputEl.textContent = raw || 'Không có logs';
+            return;
+        }
+        const filtered = raw
+            .split('\n')
+            .filter(line => line.toLowerCase().includes(query))
+            .join('\n');
+        outputEl.textContent = filtered || '(Không tìm thấy dòng phù hợp)';
     }
 
     // Show exec pod modal
     async function showExecPod(namespace, name) {
+        const modalEl = document.getElementById('pod-exec-modal');
+        if (!modalEl) {
+            showK8sOutput(`Exec Pod: ${namespace}/${name}`, '<div class="text-danger">Pod exec modal chưa được include.</div>');
+            return;
+        }
+
+        modalEl.dataset.namespace = namespace;
+        modalEl.dataset.name = name;
+
+        const titleEl = document.getElementById('pod-exec-title');
+        if (titleEl) titleEl.textContent = `${namespace}/${name}`;
+
+        const containerSelect = document.getElementById('pod-exec-container-select');
+        const commandInput = document.getElementById('pod-exec-command-input');
+        const outputEl = document.getElementById('pod-exec-output');
+        const statusEl = document.getElementById('pod-exec-status');
+        const runBtn = document.getElementById('pod-exec-run-btn');
+        const clearBtn = document.getElementById('pod-exec-clear-btn');
+
+        if (statusEl) statusEl.textContent = 'Đang tải danh sách container...';
+        if (outputEl) outputEl.textContent = 'Chưa thực thi';
+
         try {
-            // Lấy danh sách containers
             const containers = await getPodContainers(namespace, name);
-            const containerName = containers.length > 0 ? containers[0] : '';
-            
-            // Tạo modal content
-            let execContent = `<div class="mb-3">
-                <label class="form-label">Pod: <strong>${escapeHtml(namespace)}/${escapeHtml(name)}</strong></label>
-            </div>`;
-            
-            if (containers.length > 1) {
-                execContent += `<div class="mb-3">
-                    <label for="exec-container-select" class="form-label">Container:</label>
-                    <select id="exec-container-select" class="form-select">
-                        ${containers.map(c => `<option value="${escapeHtml(c)}" ${c === containerName ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
-                    </select>
-                </div>`;
-            } else if (containerName) {
-                execContent += `<input type="hidden" id="exec-container-select" value="${escapeHtml(containerName)}">`;
+            if (containerSelect) {
+                containerSelect.innerHTML = containers.length
+                    ? containers.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')
+                    : '<option value="">(Default)</option>';
+                containerSelect.value = containers[0] || '';
             }
-            
-            execContent += `<div class="mb-3">
-                <label for="exec-command-input" class="form-label">Command:</label>
-                <input type="text" class="form-control font-monospace" id="exec-command-input" placeholder="Ví dụ: ls -la, ps aux, env" value="ls -la">
-                <div class="form-text">Nhập lệnh để thực thi trong pod (non-interactive)</div>
-            </div>`;
-            
-            execContent += `<div class="mb-3">
-                <button class="btn btn-primary" onclick="window.K8sWorkloadsModule.execPodCommand('${escapeHtml(namespace)}', '${escapeHtml(name)}')">
-                    <i class="bi bi-play-circle"></i> Thực thi
-                </button>
-                <button class="btn btn-secondary ms-2" onclick="document.getElementById('exec-command-input').value=''">
-                    <i class="bi bi-x-circle"></i> Xóa
-                </button>
-            </div>`;
-            
-            execContent += `<div id="exec-output-area" class="mt-3" style="display: none;">
-                <label class="form-label">Output:</label>
-                <pre class="bg-dark text-light p-3 rounded" style="max-height: 400px; overflow-y: auto; font-size: 12px; line-height: 1.4;" id="exec-output"></pre>
-            </div>`;
-            
-            showK8sOutput(`Exec Pod: ${namespace}/${name}`, execContent);
+            if (commandInput) commandInput.value = 'ls -la';
+            if (statusEl) statusEl.textContent = 'Nhập lệnh và nhấn Thực thi.';
+
+            if (runBtn) runBtn.onclick = () => execPodCommand();
+            if (clearBtn) {
+                clearBtn.onclick = () => {
+                    if (commandInput) commandInput.value = '';
+                    if (outputEl) outputEl.textContent = 'Chưa thực thi';
+                    if (statusEl) statusEl.textContent = '';
+                };
+            }
+
+            showModalInstance(modalEl);
         } catch (error) {
-            const errorMsg = error.message || 'Lỗi khởi tạo exec';
-            if (window.showAlert) {
-                window.showAlert('error', errorMsg);
-            }
+            if (window.showAlert) window.showAlert('error', error.message || 'Lỗi khởi tạo exec');
         }
     }
-
+    
     // Exec pod command
     async function execPodCommand(namespace, name) {
+        const modalEl = document.getElementById('pod-exec-modal');
+        const ns = namespace || modalEl?.dataset.namespace;
+        const podName = name || modalEl?.dataset.name;
+        const containerSelect = document.getElementById('pod-exec-container-select');
+        const commandInput = document.getElementById('pod-exec-command-input');
+        const outputEl = document.getElementById('pod-exec-output');
+        const statusEl = document.getElementById('pod-exec-status');
+        const runBtn = document.getElementById('pod-exec-run-btn');
+
+        if (!ns || !podName || !commandInput) return;
+        const command = commandInput.value.trim();
+        if (!command) {
+            if (window.showAlert) window.showAlert('error', 'Vui lòng nhập command');
+            return;
+        }
+
+        const container = containerSelect?.value || null;
+        if (statusEl) statusEl.textContent = 'Đang thực thi...';
+        if (outputEl) outputEl.textContent = 'Đang thực thi command...';
+        if (runBtn) runBtn.disabled = true;
+
         try {
-            const containerSelect = document.getElementById('exec-container-select');
-            const commandInput = document.getElementById('exec-command-input');
-            const outputArea = document.getElementById('exec-output-area');
-            const outputPre = document.getElementById('exec-output');
-            
-            if (!commandInput || !commandInput.value.trim()) {
-                if (window.showAlert) {
-                    window.showAlert('error', 'Vui lòng nhập command');
-                }
-                return;
-            }
-            
-            const container = containerSelect ? containerSelect.value : null;
-            const command = commandInput.value.trim();
-            
-            // Hiển thị loading
-            if (outputArea) outputArea.style.display = 'block';
-            if (outputPre) outputPre.textContent = 'Đang thực thi command...';
-            
-            // Gọi API
-            const data = await window.ApiClient.post(`/admin/cluster/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/exec`, {
+            const data = await window.ApiClient.post(`/admin/cluster/k8s/pods/${encodeURIComponent(ns)}/${encodeURIComponent(podName)}/exec`, {
                 container: container,
                 command: command
             });
-            
-            // Hiển thị output
-            if (outputPre) {
-                const output = data.output || '';
-                outputPre.textContent = output || '(Không có output)';
-            }
-            
-            if (window.showAlert && data.success) {
-                window.showAlert('success', 'Command thực thi thành công');
+            if (outputEl) outputEl.textContent = data.output || '(Không có output)';
+            if (statusEl) statusEl.textContent = 'Hoàn tất';
+            if (window.showAlert) {
+                window.showAlert('success', `✅ Đã thực thi command trong <strong>${ns}/${podName}</strong>`);
             }
         } catch (error) {
             const errorMsg = error.message || 'Lỗi thực thi command';
-            if (window.showAlert) {
-                window.showAlert('error', errorMsg);
-            }
-            const outputPre = document.getElementById('exec-output');
-            if (outputPre) {
-                outputPre.textContent = `Error: ${errorMsg}`;
-            }
-            const outputArea = document.getElementById('exec-output-area');
-            if (outputArea) outputArea.style.display = 'block';
+            if (outputEl) outputEl.textContent = errorMsg;
+            if (statusEl) statusEl.textContent = errorMsg;
+            if (window.showAlert) window.showAlert('error', errorMsg);
+        } finally {
+            if (runBtn) runBtn.disabled = false;
         }
     }
 
@@ -2019,6 +2060,779 @@
     }
 
     // Export for external access
+    // ========== Deployment Detail Modal ==========
+    
+    async function viewDeploymentDetail(namespace, name) {
+        const modal = new bootstrap.Modal(document.getElementById('deployment-detail-modal'));
+        const modalEl = document.getElementById('deployment-detail-modal');
+        
+        // Set title
+        document.getElementById('deployment-detail-name').textContent = `${namespace}/${name}`;
+        
+        // Reset all tabs to loading state
+        document.getElementById('deployment-basic-content').innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</div>';
+        document.getElementById('deployment-replicas-content').innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</div>';
+        document.getElementById('deployment-resources-content').innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</div>';
+        document.getElementById('deployment-events-content').innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</div>';
+        document.getElementById('deployment-pods-content').innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</div>';
+        document.getElementById('deployment-yaml-content').innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</div>';
+        
+        // Load basic info immediately
+        loadDeploymentBasicInfo(namespace, name);
+        
+        // Set up tab event listeners for lazy loading
+        const basicTab = document.getElementById('deployment-basic-tab');
+        const replicasTab = document.getElementById('deployment-replicas-tab');
+        const resourcesTab = document.getElementById('deployment-resources-tab');
+        const eventsTab = document.getElementById('deployment-events-tab');
+        const podsTab = document.getElementById('deployment-pods-tab');
+        const yamlTab = document.getElementById('deployment-yaml-tab');
+        
+        // Remove existing listeners
+        [basicTab, replicasTab, resourcesTab, eventsTab, podsTab, yamlTab].forEach(tab => {
+            if (tab._handler) {
+                tab.removeEventListener('shown.bs.tab', tab._handler);
+            }
+        });
+        
+        // Add new listeners
+        replicasTab._handler = () => loadDeploymentReplicas(namespace, name);
+        resourcesTab._handler = () => loadDeploymentResources(namespace, name);
+        eventsTab._handler = () => loadDeploymentEvents(namespace, name);
+        podsTab._handler = () => loadDeploymentPods(namespace, name);
+        yamlTab._handler = () => loadDeploymentYAML(namespace, name);
+        
+        replicasTab.addEventListener('shown.bs.tab', replicasTab._handler);
+        resourcesTab.addEventListener('shown.bs.tab', resourcesTab._handler);
+        eventsTab.addEventListener('shown.bs.tab', eventsTab._handler);
+        podsTab.addEventListener('shown.bs.tab', podsTab._handler);
+        yamlTab.addEventListener('shown.bs.tab', yamlTab._handler);
+        
+        modal.show();
+    }
+    
+    async function loadDeploymentBasicInfo(namespace, name) {
+        try {
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            const deployment = JSON.parse(data.output);
+            
+            const metadata = deployment.metadata || {};
+            const spec = deployment.spec || {};
+            const labels = metadata.labels || {};
+            const selector = spec.selector || {};
+            const matchLabels = selector.matchLabels || {};
+            
+            // Lấy images từ containers
+            const containers = spec.template?.spec?.containers || [];
+            let imagesHtml = '';
+            if (containers.length > 0) {
+                imagesHtml = containers.map(container => {
+                    const image = container.image || 'N/A';
+                    const name = container.name || 'N/A';
+                    return `<div class="mb-2"><strong>${escapeHtml(name)}:</strong> <code class="text-muted small">${escapeHtml(image)}</code></div>`;
+                }).join('');
+            } else {
+                imagesHtml = '<span class="text-muted">Không có containers</span>';
+            }
+            
+            let labelsHtml = Object.keys(labels).length > 0 
+                ? Object.entries(labels).map(([k, v]) => `<span class="badge bg-secondary me-1">${escapeHtml(k)}=${escapeHtml(v)}</span>`).join('')
+                : '<span class="text-muted">Không có</span>';
+            
+            let selectorHtml = Object.keys(matchLabels).length > 0
+                ? Object.entries(matchLabels).map(([k, v]) => `<span class="badge bg-primary me-1">${escapeHtml(k)}=${escapeHtml(v)}</span>`).join('')
+                : '<span class="text-muted">Không có</span>';
+            
+            const content = `
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Name:</label>
+                        <div><code>${escapeHtml(metadata.name || '-')}</code></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Namespace:</label>
+                        <div><code>${escapeHtml(metadata.namespace || '-')}</code></div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-bold">Images:</label>
+                        <div>${imagesHtml}</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-bold">Labels:</label>
+                        <div>${labelsHtml}</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-bold">Selector:</label>
+                        <div>${selectorHtml}</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Created:</label>
+                        <div class="text-muted small">${metadata.creationTimestamp ? new Date(metadata.creationTimestamp).toLocaleString('vi-VN') : '-'}</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">UID:</label>
+                        <div class="text-muted small"><code>${escapeHtml(metadata.uid || '-')}</code></div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('deployment-basic-content').innerHTML = content;
+        } catch (error) {
+            document.getElementById('deployment-basic-content').innerHTML = 
+                `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+        }
+    }
+    
+    async function loadDeploymentReplicas(namespace, name) {
+        try {
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            const deployment = JSON.parse(data.output);
+            
+            const spec = deployment.spec || {};
+            const status = deployment.status || {};
+            const desired = spec.replicas || 0;
+            const current = status.replicas || 0;
+            const ready = status.readyReplicas || 0;
+            const available = status.availableReplicas || 0;
+            const unavailable = desired - available;
+            const updated = status.updatedReplicas || 0;
+            
+            const content = `
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-body text-center">
+                                <h5 class="card-title text-primary">Desired</h5>
+                                <h3 class="mb-0">${desired}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-body text-center">
+                                <h5 class="card-title text-info">Available</h5>
+                                <h3 class="mb-0">${available}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-body text-center">
+                                <h5 class="card-title text-danger">Unavailable</h5>
+                                <h3 class="mb-0">${unavailable}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <table class="table table-sm">
+                            <tr>
+                                <th>Current:</th>
+                                <td><strong>${current}</strong></td>
+                            </tr>
+                            <tr>
+                                <th>Ready:</th>
+                                <td><strong>${ready}</strong></td>
+                            </tr>
+                            <tr>
+                                <th>Updated:</th>
+                                <td><strong>${updated}</strong></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('deployment-replicas-content').innerHTML = content;
+        } catch (error) {
+            document.getElementById('deployment-replicas-content').innerHTML = 
+                `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+        }
+    }
+    
+    async function loadDeploymentResources(namespace, name) {
+        try {
+            // Get deployment to get selector labels
+            const deploymentData = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            const deployment = JSON.parse(deploymentData.output);
+            
+            // Get selector labels from deployment
+            const selector = deployment.spec?.selector?.matchLabels || {};
+            if (Object.keys(selector).length === 0) {
+                document.getElementById('deployment-resources-content').innerHTML = 
+                    '<div class="alert alert-warning">Deployment không có selector labels</div>';
+                return;
+            }
+            
+            // Get all pods in namespace
+            const podsData = await window.ApiClient.get(`/admin/cluster/k8s/workloads/pods?namespace=${encodeURIComponent(namespace)}`);
+            const pods = podsData.pods || [];
+            
+            // Filter pods by matching selector labels
+            const deploymentPods = pods.filter(pod => {
+                const podLabels = pod.labels || {};
+                return Object.keys(selector).every(key => podLabels[key] === selector[key]);
+            });
+            
+            if (deploymentPods.length === 0) {
+                document.getElementById('deployment-resources-content').innerHTML = 
+                    '<div class="alert alert-info">Không có pods nào thuộc deployment này</div>';
+                return;
+            }
+            
+            // Try to get metrics (if available)
+            let metricsHtml = '<div class="alert alert-warning">Metrics API không khả dụng. Cần cài đặt metrics-server để xem resource usage.</div>';
+            
+            try {
+                // This would require a new API endpoint - for now show placeholder
+                metricsHtml = `
+                    <div class="alert alert-info">
+                        <strong>Resource Usage (trung bình):</strong><br>
+                        CPU: Đang tính toán...<br>
+                        Memory: Đang tính toán...
+                    </div>
+                    <small class="text-muted">💡 Resource usage được tính từ metrics của các pods thuộc deployment này.</small>
+                `;
+            } catch (e) {
+                // Metrics not available
+            }
+            
+            const content = `
+                ${metricsHtml}
+                <div class="mt-3">
+                    <h6>Pods trong deployment: ${deploymentPods.length}</h6>
+                    <small class="text-muted">Resource usage được tính trung bình từ ${deploymentPods.length} pod(s)</small>
+                </div>
+            `;
+            
+            document.getElementById('deployment-resources-content').innerHTML = content;
+        } catch (error) {
+            document.getElementById('deployment-resources-content').innerHTML = 
+                `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+        }
+    }
+    
+    async function loadDeploymentEvents(namespace, name) {
+        try {
+            // Events would need a new API endpoint
+            // For now, show placeholder
+            const content = `
+                <div class="alert alert-info">
+                    <strong>Events:</strong><br>
+                    Đang tải events từ Kubernetes API...
+                </div>
+                <small class="text-muted">💡 Events hiển thị các sự kiện liên quan đến deployment này.</small>
+            `;
+            
+            document.getElementById('deployment-events-content').innerHTML = content;
+        } catch (error) {
+            document.getElementById('deployment-events-content').innerHTML = 
+                `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+        }
+    }
+    
+    async function loadDeploymentPods(namespace, name) {
+        try {
+            // Get deployment to get selector labels
+            const deploymentData = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            const deployment = JSON.parse(deploymentData.output);
+            
+            // Get selector labels from deployment
+            const selector = deployment.spec?.selector?.matchLabels || {};
+            if (Object.keys(selector).length === 0) {
+                document.getElementById('deployment-pods-content').innerHTML = 
+                    '<div class="alert alert-warning">Deployment không có selector labels</div>';
+                return;
+            }
+            
+            // Get all pods in namespace
+            const podsData = await window.ApiClient.get(`/admin/cluster/k8s/workloads/pods?namespace=${encodeURIComponent(namespace)}`);
+            const pods = podsData.pods || [];
+            
+            // Filter pods by matching selector labels
+            const deploymentPods = pods.filter(pod => {
+                const podLabels = pod.labels || {};
+                // Check if all selector labels match pod labels
+                return Object.keys(selector).every(key => podLabels[key] === selector[key]);
+            });
+            
+            if (deploymentPods.length === 0) {
+                document.getElementById('deployment-pods-content').innerHTML = 
+                    '<div class="alert alert-info">Không có pods nào thuộc deployment này</div>';
+                return;
+            }
+            
+            let podsHtml = '<div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>Name</th><th>Status</th><th>Node</th><th>IP</th><th>Age</th></tr></thead><tbody>';
+            
+            deploymentPods.forEach(pod => {
+                const status = pod.status || 'Unknown';
+                const statusClass = status === 'Running' ? 'bg-success' : status === 'Pending' ? 'bg-warning text-dark' : 'bg-danger';
+                podsHtml += `
+                    <tr>
+                        <td><code>${escapeHtml(pod.name || '-')}</code></td>
+                        <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
+                        <td><code class="small">${escapeHtml(pod.node || '-')}</code></td>
+                        <td><code class="small">${escapeHtml(pod.podIP || '-')}</code></td>
+                        <td class="text-muted small">${escapeHtml(pod.age || '-')}</td>
+                    </tr>
+                `;
+            });
+            
+            podsHtml += '</tbody></table></div>';
+            document.getElementById('deployment-pods-content').innerHTML = podsHtml;
+        } catch (error) {
+            document.getElementById('deployment-pods-content').innerHTML = 
+                `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+        }
+    }
+    
+    async function loadDeploymentYAML(namespace, name) {
+        try {
+            const data = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}?format=yaml`);
+            const yamlContent = data.output || '';
+            
+            const content = `
+                <div class="mb-2">
+                    <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.downloadYAML('${escapeHtml(namespace)}', '${escapeHtml(name)}')">
+                        <i class="bi bi-download"></i> Download
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="window.K8sWorkloadsModule.copyYAML()">
+                        <i class="bi bi-clipboard"></i> Copy
+                    </button>
+                </div>
+                <pre class="bg-light p-3 rounded" style="max-height: 500px; overflow: auto; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word;"><code id="deployment-yaml-text">${escapeHtml(yamlContent)}</code></pre>
+            `;
+            
+            document.getElementById('deployment-yaml-content').innerHTML = content;
+        } catch (error) {
+            document.getElementById('deployment-yaml-content').innerHTML = 
+                `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+        }
+    }
+    
+    function downloadYAML(namespace, name) {
+        const yamlText = document.getElementById('deployment-yaml-text')?.textContent || '';
+        if (!yamlText) {
+            if (window.showAlert) window.showAlert('error', 'Không có YAML để download');
+            return;
+        }
+        
+        const blob = new Blob([yamlText], { type: 'text/yaml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}-${namespace}.yaml`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+    
+    function copyYAML() {
+        const yamlText = document.getElementById('deployment-yaml-text')?.textContent || '';
+        if (!yamlText) {
+            if (window.showAlert) window.showAlert('error', 'Không có YAML để copy');
+            return;
+        }
+        
+        navigator.clipboard.writeText(yamlText).then(() => {
+            if (window.showAlert) window.showAlert('success', 'Đã copy YAML vào clipboard');
+        }).catch(err => {
+            if (window.showAlert) window.showAlert('error', 'Lỗi khi copy: ' + err.message);
+        });
+    }
+
+    async function viewStatefulSetDetail(namespace, name) {
+        const modalEl = document.getElementById('statefulset-detail-modal');
+        if (!modalEl) return;
+        document.getElementById('statefulset-detail-name').textContent = `${namespace}/${name}`;
+        ['statefulset-info', 'statefulset-identity', 'statefulset-volumes', 'statefulset-events', 'statefulset-yaml']
+            .forEach(id => setSectionContent(id, LOADING_HTML));
+        showModalInstance(modalEl);
+
+        try {
+            const detailResp = await fetchWorkloadDetail('statefulset', namespace, name);
+            const detail = JSON.parse(detailResp.output || '{}');
+            const spec = detail.spec || {};
+            const status = detail.status || {};
+            const infoHtml = `
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold">Service:</label>
+                        <div><code>${escapeHtml(spec.serviceName || '-')}</code></div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold">Replicas:</label>
+                        <div><span class="badge bg-primary">${spec.replicas ?? 0}</span></div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold">Update Strategy:</label>
+                        <div>${escapeHtml(spec.updateStrategy?.type || 'RollingUpdate')}</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-bold">Selectors:</label>
+                        <div>${renderKeyValueBadges(spec.selector?.matchLabels)}</div>
+                    </div>
+                </div>`;
+            setSectionContent('statefulset-info', infoHtml);
+
+            const podsData = await fetchNamespacePods(namespace);
+            const pods = filterPodsByOwner(podsData.pods || [], 'StatefulSet', name).map(pod => ({
+                name: pod.name,
+                node: pod.node,
+                podIP: pod.podIP,
+                age: pod.age,
+                hostname: pod.hostname || '',
+                ordinal: (pod.name || '').split('-').pop()
+            }));
+            const podRows = pods.length
+                ? pods.map(p => `<tr>
+                        <td>${escapeHtml(p.ordinal || '?')}</td>
+                        <td><code>${escapeHtml(p.name || '-')}</code></td>
+                        <td><code>${escapeHtml(p.hostname || '-')}</code></td>
+                        <td><code>${escapeHtml(p.node || '-')}</code></td>
+                        <td class="text-muted small">${escapeHtml(p.podIP || '-')}</td>
+                        <td class="text-muted small">${escapeHtml(p.age || '-')}</td>
+                    </tr>`).join('')
+                : `<tr><td colspan="6" class="text-center text-muted">No pods</td></tr>`;
+            setSectionContent('statefulset-identity', `
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Ordinal</th><th>Pod</th><th>Hostname</th><th>Node</th><th>IP</th><th>Age</th></tr></thead>
+                        <tbody>${podRows}</tbody>
+                    </table>
+                </div>`);
+
+            try {
+                const volumes = await window.ApiClient.get(`/admin/cluster/k8s/statefulset/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/volumes`);
+                const items = volumes.volumes || [];
+                const volumeRows = items.length
+                    ? items.map(v => `<tr>
+                            <td><code>${escapeHtml(v.pod || '-')}</code></td>
+                            <td><code>${escapeHtml(v.pvc || '-')}</code></td>
+                            <td>${escapeHtml(v.storageClass || '-')}</td>
+                            <td>${escapeHtml(v.capacity || '-')}</td>
+                            <td>${escapeHtml(v.status || '-')}</td>
+                        </tr>`).join('')
+                    : '<tr><td colspan="5" class="text-center text-muted">No PVC</td></tr>';
+                setSectionContent('statefulset-volumes', `
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead><tr><th>Pod</th><th>PVC</th><th>Class</th><th>Capacity</th><th>Status</th></tr></thead>
+                            <tbody>${volumeRows}</tbody>
+                        </table>
+                    </div>`);
+            } catch {
+                setSectionContent('statefulset-volumes', '<div class="alert alert-warning mb-0">Không lấy được danh sách PVC.</div>');
+            }
+
+            setSectionContent('statefulset-events', '<div class="alert alert-info mb-0">Events API sẽ được bổ sung sau.</div>');
+
+            try {
+                const yamlResp = await fetchWorkloadDetail('statefulset', namespace, name, 'yaml');
+                renderYamlBlock('statefulset-yaml', yamlResp.output || '');
+            } catch (error) {
+                setSectionContent('statefulset-yaml', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được YAML')}</div>`);
+            }
+        } catch (error) {
+            setSectionContent('statefulset-info', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được thông tin')}</div>`);
+        }
+    }
+
+    async function viewDaemonSetDetail(namespace, name) {
+        const modalEl = document.getElementById('daemonset-detail-modal');
+        if (!modalEl) return;
+        document.getElementById('daemonset-detail-name').textContent = `${namespace}/${name}`;
+        ['daemonset-info', 'daemonset-pods', 'daemonset-events', 'daemonset-yaml'].forEach(id => setSectionContent(id, LOADING_HTML));
+        showModalInstance(modalEl);
+        try {
+            const detailResp = await fetchWorkloadDetail('daemonset', namespace, name);
+            const detail = JSON.parse(detailResp.output || '{}');
+            const spec = detail.spec || {};
+            const status = detail.status || {};
+            setSectionContent('daemonset-info', `
+                <div class="row g-3">
+                    <div class="col-md-3"><label class="form-label fw-bold">Desired:</label><div><span class="badge bg-primary">${status.desiredNumberScheduled ?? spec.replicas ?? 0}</span></div></div>
+                    <div class="col-md-3"><label class="form-label fw-bold">Current:</label><div><span class="badge bg-info">${status.currentNumberScheduled ?? 0}</span></div></div>
+                    <div class="col-md-3"><label class="form-label fw-bold">Ready:</label><div><span class="badge bg-success">${status.numberReady ?? 0}</span></div></div>
+                    <div class="col-md-3"><label class="form-label fw-bold">Updated:</label><div><span class="badge bg-secondary">${status.updatedNumberScheduled ?? 0}</span></div></div>
+                </div>`);
+
+            const podsData = await fetchNamespacePods(namespace);
+            const pods = filterPodsByOwner(podsData.pods || [], 'DaemonSet', name);
+            const grouped = pods.reduce((acc, pod) => {
+                const node = pod.node || 'Unknown';
+                acc[node] = acc[node] || [];
+                acc[node].push(pod);
+                return acc;
+            }, {});
+            const podRows = Object.keys(grouped).length
+                ? Object.entries(grouped).map(([node, nodePods]) => nodePods.map((pod, idx) => `
+                        <tr>
+                            ${idx === 0 ? `<td rowspan="${nodePods.length}"><code>${escapeHtml(node)}</code></td>` : ''}
+                            <td><code>${escapeHtml(pod.name || '-')}</code></td>
+                            <td><span class="badge ${pod.status === 'Running' ? 'bg-success' : 'bg-warning text-dark'}">${escapeHtml(pod.status || '-')}</span></td>
+                            <td class="text-muted small">${escapeHtml(pod.age || '-')}</td>
+                        </tr>`).join('')).join('')
+                : '<tr><td colspan="4" class="text-center text-muted">No pods</td></tr>';
+            setSectionContent('daemonset-pods', `
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Node</th><th>Pod</th><th>Status</th><th>Age</th></tr></thead>
+                        <tbody>${podRows}</tbody>
+                    </table>
+                </div>`);
+
+            setSectionContent('daemonset-events', '<div class="alert alert-info mb-0">Events API sẽ được bổ sung sau.</div>');
+            try {
+                const yamlResp = await fetchWorkloadDetail('daemonset', namespace, name, 'yaml');
+                renderYamlBlock('daemonset-yaml', yamlResp.output || '');
+            } catch (error) {
+                setSectionContent('daemonset-yaml', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được YAML')}</div>`);
+            }
+        } catch (error) {
+            setSectionContent('daemonset-info', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được thông tin')}</div>`);
+        }
+    }
+
+    async function viewJobDetail(namespace, name) {
+        const modalEl = document.getElementById('job-detail-modal');
+        if (!modalEl) return;
+        document.getElementById('job-detail-name').textContent = `${namespace}/${name}`;
+        ['job-info', 'job-pods', 'job-logs', 'job-events', 'job-yaml'].forEach(id => setSectionContent(id, LOADING_HTML));
+        showModalInstance(modalEl);
+        try {
+            const detailResp = await fetchWorkloadDetail('job', namespace, name);
+            const detail = JSON.parse(detailResp.output || '{}');
+            const spec = detail.spec || {};
+            const status = detail.status || {};
+            setSectionContent('job-info', `
+                <div class="row g-3">
+                    <div class="col-md-4"><label class="form-label fw-bold">Completions:</label><div><span class="badge bg-primary">${spec.completions ?? 0}</span></div></div>
+                    <div class="col-md-4"><label class="form-label fw-bold">Parallelism:</label><div><span class="badge bg-info">${spec.parallelism ?? 1}</span></div></div>
+                    <div class="col-md-4"><label class="form-label fw-bold">Active:</label><div><span class="badge bg-warning text-dark">${status.active ?? 0}</span></div></div>
+                    <div class="col-12"><label class="form-label fw-bold">Duration:</label><div>${formatDuration(status.startTime, status.completionTime)}</div></div>
+                </div>`);
+
+            const podsData = await fetchNamespacePods(namespace);
+            const pods = filterPodsByOwner(podsData.pods || [], 'Job', name);
+            const podRows = pods.length
+                ? pods.map(pod => `<tr>
+                        <td><code>${escapeHtml(pod.name || '-')}</code></td>
+                        <td><span class="badge ${pod.status === 'Running' ? 'bg-success' : 'bg-secondary'}">${escapeHtml(pod.status || '-')}</span></td>
+                        <td><code>${escapeHtml(pod.node || '-')}</code></td>
+                        <td class="text-muted small">${escapeHtml(pod.age || '-')}</td>
+                    </tr>`).join('')
+                : '<tr><td colspan="4" class="text-center text-muted">No pods</td></tr>';
+            setSectionContent('job-pods', `
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Pod</th><th>Status</th><th>Node</th><th>Age</th></tr></thead>
+                        <tbody>${podRows}</tbody>
+                    </table>
+                </div>`);
+
+            if (pods.length) {
+                const lastPod = pods[0];
+                try {
+                    const logs = await window.ApiClient.get(`/admin/cluster/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(lastPod.name)}/logs?tailLines=200`);
+                    setSectionContent('job-logs', `
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="small text-muted">Pod: <code>${escapeHtml(lastPod.name)}</code></div>
+                            <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showPodLogs('${escapeHtml(namespace)}', '${escapeHtml(lastPod.name)}')">
+                                <i class="bi bi-box-arrow-up-right"></i> Open real-time
+                            </button>
+                        </div>
+                        <pre class="bg-dark text-light p-3 rounded" style="max-height: 400px; overflow: auto;">${escapeHtml(logs.logs || '')}</pre>
+                    `);
+                } catch {
+                    setSectionContent('job-logs', '<div class="alert alert-warning mb-0">Không lấy được logs.</div>');
+                }
+            } else {
+                setSectionContent('job-logs', '<div class="alert alert-info mb-0">Chưa có pod nào để hiển thị logs.</div>');
+            }
+
+            setSectionContent('job-events', '<div class="alert alert-info mb-0">Events API sẽ được bổ sung sau.</div>');
+            try {
+                const yamlResp = await fetchWorkloadDetail('job', namespace, name, 'yaml');
+                renderYamlBlock('job-yaml', yamlResp.output || '');
+            } catch (error) {
+                setSectionContent('job-yaml', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được YAML')}</div>`);
+            }
+        } catch (error) {
+            setSectionContent('job-info', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được thông tin')}</div>`);
+        }
+    }
+
+    async function viewCronJobDetail(namespace, name) {
+        const modalEl = document.getElementById('cronjob-detail-modal');
+        if (!modalEl) return;
+        document.getElementById('cronjob-detail-name').textContent = `${namespace}/${name}`;
+        ['cronjob-info', 'cronjob-jobs', 'cronjob-events', 'cronjob-yaml'].forEach(id => setSectionContent(id, LOADING_HTML));
+        showModalInstance(modalEl);
+        try {
+            const detailResp = await fetchWorkloadDetail('cronjob', namespace, name);
+            const detail = JSON.parse(detailResp.output || '{}');
+            const spec = detail.spec || {};
+            const status = detail.status || {};
+            setSectionContent('cronjob-info', `
+                <div class="row g-3">
+                    <div class="col-md-4"><label class="form-label fw-bold">Schedule:</label><div><code>${escapeHtml(spec.schedule || '-')}</code></div></div>
+                    <div class="col-md-4"><label class="form-label fw-bold">Suspend:</label><div>${spec.suspend ? '<span class="badge bg-warning text-dark">Suspended</span>' : '<span class="badge bg-success">Active</span>'}</div></div>
+                    <div class="col-md-4"><label class="form-label fw-bold">Last Schedule:</label><div class="text-muted small">${escapeHtml(status.lastScheduleTime || '-')}</div></div>
+                    <div class="col-md-6"><label class="form-label fw-bold">Successful History Limit:</label><div>${escapeHtml(String(spec.successfulJobsHistoryLimit ?? 3))}</div></div>
+                    <div class="col-md-6"><label class="form-label fw-bold">Failed History Limit:</label><div>${escapeHtml(String(spec.failedJobsHistoryLimit ?? 1))}</div></div>
+                </div>`);
+
+            try {
+                const jobsData = await window.ApiClient.get(`/admin/cluster/k8s/cronjob/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/jobs`);
+                const jobs = jobsData.jobs || [];
+                const jobRows = jobs.length
+                    ? jobs.map(job => `<tr>
+                            <td><code>${escapeHtml(job.name || '-')}</code></td>
+                            <td><span class="badge ${job.status === 'Succeeded' ? 'bg-success' : job.status === 'Failed' ? 'bg-danger' : 'bg-secondary'}">${escapeHtml(job.status || '-')}</span></td>
+                            <td>${escapeHtml(job.startTime || '-')}</td>
+                            <td>${escapeHtml(job.completionTime || '-')}</td>
+                        </tr>`).join('')
+                    : '<tr><td colspan="4" class="text-center text-muted">No jobs</td></tr>';
+                setSectionContent('cronjob-jobs', `
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead><tr><th>Job</th><th>Status</th><th>Start</th><th>Completion</th></tr></thead>
+                            <tbody>${jobRows}</tbody>
+                        </table>
+                    </div>`);
+            } catch {
+                setSectionContent('cronjob-jobs', '<div class="alert alert-warning mb-0">Không lấy được danh sách Job.</div>');
+            }
+
+            setSectionContent('cronjob-events', '<div class="alert alert-info mb-0">Events API sẽ được bổ sung sau.</div>');
+            try {
+                const yamlResp = await fetchWorkloadDetail('cronjob', namespace, name, 'yaml');
+                renderYamlBlock('cronjob-yaml', yamlResp.output || '');
+            } catch (error) {
+                setSectionContent('cronjob-yaml', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được YAML')}</div>`);
+            }
+        } catch (error) {
+            setSectionContent('cronjob-info', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được thông tin')}</div>`);
+        }
+    }
+
+    async function viewPodDetail(namespace, name) {
+        const modalEl = document.getElementById('pod-detail-modal');
+        if (!modalEl) return;
+        document.getElementById('pod-detail-name').textContent = `${namespace}/${name}`;
+        ['pod-info', 'pod-containers', 'pod-logs', 'pod-events', 'pod-yaml'].forEach(id => setSectionContent(id, LOADING_HTML));
+        showModalInstance(modalEl);
+        try {
+            const detailResp = await fetchWorkloadDetail('pod', namespace, name);
+            const detail = JSON.parse(detailResp.output || '{}');
+            const metadata = detail.metadata || {};
+            const spec = detail.spec || {};
+            setSectionContent('pod-info', `
+                <div class="row g-3">
+                    <div class="col-md-6"><label class="form-label fw-bold">Name:</label><div><code>${escapeHtml(metadata.name || '-')}</code></div></div>
+                    <div class="col-md-6"><label class="form-label fw-bold">UID:</label><div class="text-muted small">${escapeHtml(metadata.uid || '-')}</div></div>
+                    <div class="col-md-6"><label class="form-label fw-bold">Node:</label><div><code>${escapeHtml(spec.nodeName || '-')}</code></div></div>
+                    <div class="col-md-6"><label class="form-label fw-bold">Restart policy:</label><div>${escapeHtml(spec.restartPolicy || '-')}</div></div>
+                    <div class="col-md-6"><label class="form-label fw-bold">Pod IP:</label><div><code>${escapeHtml(detail.status?.podIP || '-')}</code></div></div>
+                    <div class="col-md-6"><label class="form-label fw-bold">Host IP:</label><div><code>${escapeHtml(detail.status?.hostIP || '-')}</code></div></div>
+                    <div class="col-12">
+                        <label class="form-label fw-bold">Labels:</label>
+                        <div>${renderKeyValueBadges(metadata.labels)}</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-bold">Annotations:</label>
+                        <div>${renderKeyValueBadges(metadata.annotations)}</div>
+                    </div>
+                </div>`);
+
+            const containers = spec.containers || [];
+            const containerRows = containers.length
+                ? containers.map(container => `
+                        <tr>
+                            <td>${escapeHtml(container.name || '-')}</td>
+                            <td><code>${escapeHtml(container.image || '-')}</code></td>
+                            <td>${escapeHtml(container.lifecycle ? 'Managed' : '—')}</td>
+                            <td>${formatPorts(container.ports)}</td>
+                            <td>${formatEnv(container.env)}</td>
+                            <td>${escapeHtml(container.resources ? JSON.stringify(container.resources) : '—')}</td>
+                        </tr>`).join('')
+                : '<tr><td colspan="6" class="text-center text-muted">No containers</td></tr>';
+            setSectionContent('pod-containers', `
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Container</th><th>Image</th><th>State</th><th>Ports</th><th>Env</th><th>Resources</th></tr></thead>
+                        <tbody>${containerRows}</tbody>
+                    </table>
+                </div>`);
+
+            try {
+                const logs = await window.ApiClient.get(`/admin/cluster/k8s/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?tailLines=200`);
+                setSectionContent('pod-logs', `
+                    <div class="d-flex justify-content-end mb-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="window.K8sWorkloadsModule.showPodLogs('${escapeHtml(namespace)}', '${escapeHtml(name)}')">
+                            <i class="bi bi-box-arrow-up-right"></i> Open real-time
+                        </button>
+                    </div>
+                    <pre class="bg-dark text-light p-3 rounded" style="max-height: 400px; overflow: auto;">${escapeHtml(logs.logs || '')}</pre>
+                `);
+            } catch {
+                setSectionContent('pod-logs', '<div class="alert alert-warning mb-0">Không lấy được logs.</div>');
+            }
+
+            setSectionContent('pod-events', '<div class="alert alert-info mb-0">Events API sẽ được bổ sung sau.</div>');
+            try {
+                const yamlResp = await fetchWorkloadDetail('pod', namespace, name, 'yaml');
+                renderYamlBlock('pod-yaml', yamlResp.output || '');
+            } catch (error) {
+                setSectionContent('pod-yaml', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được YAML')}</div>`);
+            }
+        } catch (error) {
+            setSectionContent('pod-info', `<div class="alert alert-danger mb-0">${escapeHtml(error.message || 'Không lấy được thông tin')}</div>`);
+        }
+    }
+
+    async function restartPod(namespace, name) {
+        if (!confirm(`Restart pod ${namespace}/${name}? Kubernetes sẽ tạo pod mới nếu thuộc workload.`)) return;
+        await deleteWorkload('pod', namespace, name);
+    }
+
+    function copySectionYaml(contentId) {
+        const target = document.getElementById(contentId);
+        if (!target) return;
+        navigator.clipboard.writeText(target.textContent || '').then(() => {
+            showAlertOrFallback('success', 'Đã copy YAML vào clipboard', alert);
+        }).catch(err => showAlertOrFallback('error', err.message || 'Không copy được YAML', alert));
+    }
+
+    function downloadSectionYaml(contentId, filename) {
+        const target = document.getElementById(contentId);
+        if (!target) return;
+        const text = target.textContent || '';
+        const blob = new Blob([text], { type: 'text/yaml' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename || 'resource.yaml';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+    
+    function editYAML(type, namespace, name) {
+        // For now, just show YAML in view mode
+        // In future, can add edit functionality
+        viewDeploymentDetail(namespace, name);
+        // Switch to YAML tab
+        setTimeout(() => {
+            const yamlTab = document.getElementById('deployment-yaml-tab');
+            if (yamlTab) {
+                bootstrap.Tab.getOrCreateInstance(yamlTab).show();
+            }
+        }, 100);
+    }
+
     window.K8sWorkloadsModule = {
         loadWorkloads,
         loadTabData,
@@ -2035,13 +2849,24 @@
         getPodLogs,
         getPodContainers,
         showPodLogs,
-        reloadPodLogs,
         showExecPod,
         execPodCommand,
+        restartPod,
         // Deployment operations
         showRolloutHistory,
         rollbackToRevision,
         showUpdateImage,
+        viewDeploymentDetail,
+        viewStatefulSetDetail,
+        viewDaemonSetDetail,
+        viewJobDetail,
+        viewCronJobDetail,
+        viewPodDetail,
+        editYAML,
+        downloadYAML,
+        copyYAML,
+        copySectionYaml,
+        downloadSectionYaml,
         // StatefulSet operations
         showStatefulSetVolumes,
         showUpdateStatefulSetImage,

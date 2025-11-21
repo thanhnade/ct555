@@ -147,6 +147,28 @@ public class AdminPageController {
 		return "admin/pages/kubernetes-service-discovery";
 	}
 
+	@GetMapping({"/k8s/storage", "/kubernetes/storage"})
+	public String kubernetesStoragePage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Storage");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-storage";
+	}
+
+	@GetMapping({"/k8s/storage/pvcs", "/kubernetes/storage/pvcs"})
+	public String kubernetesStoragePvcsPage(Model model, HttpServletRequest request) {
+		return kubernetesStoragePage(model, request);
+	}
+
+	@GetMapping({"/k8s/storage/pvs", "/kubernetes/storage/pvs"})
+	public String kubernetesStoragePvsPage(Model model, HttpServletRequest request) {
+		return kubernetesStoragePage(model, request);
+	}
+
+	@GetMapping({"/k8s/storage/storageclasses", "/kubernetes/storage/storageclasses"})
+	public String kubernetesStorageClassesPage(Model model, HttpServletRequest request) {
+		return kubernetesStoragePage(model, request);
+	}
+
 	// Redirect old routes to new Service Discovery page with appropriate tab
 	// Redirect tất cả các routes cũ đến trang Service Discovery mới
 	@GetMapping({"/k8s/services", "/kubernetes/services"})

@@ -216,12 +216,14 @@ public class K8sWorkloadsController {
 
     /**
      * Describe workload cho cluster duy nhất (không cần ID)
+     * Supports optional format query parameter: json (default) or yaml
      */
     @GetMapping("/k8s/{type}/{namespace}/{name}")
     public ResponseEntity<?> describeWorkload(
             @PathVariable String type,
             @PathVariable String namespace,
             @PathVariable String name,
+            @RequestParam(required = false, defaultValue = "json") String format,
             HttpServletRequest request) {
         try {
             String t = type == null ? "" : type.toLowerCase();
@@ -259,9 +261,27 @@ public class K8sWorkloadsController {
                         .body(Map.of("error", type + " not found: " + name + " in namespace " + namespace));
             }
 
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String jsonOutput = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(workload);
-            return ResponseEntity.ok(Map.of("output", jsonOutput, "format", "json"));
+            String output;
+            String outputFormat = format != null ? format.toLowerCase() : "json";
+            
+            if ("yaml".equals(outputFormat)) {
+                // Convert to YAML using Jackson YAML
+                try {
+                    var yamlMapper = new com.fasterxml.jackson.dataformat.yaml.YAMLMapper();
+                    output = yamlMapper.writeValueAsString(workload);
+                } catch (Exception e) {
+                    // Fallback to JSON if YAML conversion fails
+                    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    output = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(workload);
+                    outputFormat = "json";
+                }
+            } else {
+                // Default to JSON
+                var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                output = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(workload);
+            }
+            
+            return ResponseEntity.ok(Map.of("output", output, "format", outputFormat));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
             if (e.getCode() == 404) {
                 return ResponseEntity.status(404)
@@ -906,6 +926,8 @@ public class K8sWorkloadsController {
             map.put("currentRevision", currentRevision);
             map.put("updateRevision", updateRevision);
             map.put("age", calculateAge(creationTimestamp));
+            map.put("serviceName", k8sWorkloadsService.getStatefulSetServiceName(sts));
+            map.put("volumeTemplates", k8sWorkloadsService.getStatefulSetVolumeTemplates(sts));
             return map;
         }
         if (workload instanceof DaemonSet ds) {
@@ -1037,6 +1059,9 @@ public class K8sWorkloadsController {
         map.put("status", status);
         map.put("active", active);
         map.put("lastSchedule", lastSchedule);
+        map.put("lastRun", cronJob.getStatus() != null && cronJob.getStatus().getLastScheduleTime() != null
+                ? cronJob.getStatus().getLastScheduleTime().toString()
+                : "");
         map.put("successfulJobsHistoryLimit", successfulJobsHistoryLimit);
         map.put("failedJobsHistoryLimit", failedJobsHistoryLimit);
         map.put("age", calculateAge(creationTimestamp));
@@ -1103,6 +1128,17 @@ public class K8sWorkloadsController {
                 completionTime = calculateAge(job.getStatus().getCompletionTime().toString());
             }
         }
+        String duration = "";
+        if (job.getStatus() != null && job.getStatus().getStartTime() != null && job.getStatus().getCompletionTime() != null) {
+            try {
+                var start = java.time.Instant.parse(job.getStatus().getStartTime().toString());
+                var end = java.time.Instant.parse(job.getStatus().getCompletionTime().toString());
+                var dur = java.time.Duration.between(start, end);
+                long minutes = dur.toMinutes();
+                long seconds = dur.getSeconds() % 60;
+                duration = (minutes > 0 ? minutes + "m " : "") + seconds + "s";
+            } catch (Exception ignored) {}
+        }
         
         // Retry config
         int backoffLimit = 6; // default
@@ -1131,6 +1167,8 @@ public class K8sWorkloadsController {
         map.put("status", status);
         map.put("startTime", startTime);
         map.put("completionTime", completionTime);
+        map.put("duration", duration);
+        map.put("succeeded", succeeded);
         map.put("retryConfig", retryConfig);
         map.put("age", calculateAge(creationTimestamp));
         return map;
@@ -1148,6 +1186,13 @@ public class K8sWorkloadsController {
                         ? pod.getSpec().getNodeName()
                         : "");
         map.put("status", pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown");
+        
+        // Add labels for filtering
+        java.util.Map<String, String> labels = new java.util.HashMap<>();
+        if (pod.getMetadata() != null && pod.getMetadata().getLabels() != null) {
+            labels.putAll(pod.getMetadata().getLabels());
+        }
+        map.put("labels", labels);
 
         // Age calculation
         String age = "";
@@ -1176,6 +1221,7 @@ public class K8sWorkloadsController {
             podIP = pod.getStatus().getPodIP();
         }
         
+        int restartTotal = 0;
         // Thêm container statuses nếu có
         if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
             java.util.List<Map<String, Object>> containerStatuses = new java.util.ArrayList<>();
@@ -1189,6 +1235,9 @@ public class K8sWorkloadsController {
                 csMap.put("name", cs.getName());
                 csMap.put("ready", cs.getReady());
                 csMap.put("restartCount", cs.getRestartCount() != null ? cs.getRestartCount() : 0);
+                if (cs.getRestartCount() != null) {
+                    restartTotal += cs.getRestartCount();
+                }
 
                 // Trích xuất trạng thái container
                 String state = extractContainerState(cs);
@@ -1202,6 +1251,20 @@ public class K8sWorkloadsController {
         map.put("ready", totalContainers > 0 ? readyCount + "/" + totalContainers : "0/0");
         map.put("image", image);
         map.put("podIP", podIP);
+        map.put("restarts", restartTotal);
+        map.put("hostname", pod.getSpec() != null ? pod.getSpec().getHostname() : "");
+        if (pod.getMetadata() != null && pod.getMetadata().getOwnerReferences() != null) {
+            java.util.List<Map<String, String>> owners = new java.util.ArrayList<>();
+            for (OwnerReference owner : pod.getMetadata().getOwnerReferences()) {
+                java.util.Map<String, String> ownerMap = new java.util.HashMap<>();
+                ownerMap.put("kind", owner.getKind());
+                ownerMap.put("name", owner.getName());
+                owners.add(ownerMap);
+            }
+            map.put("ownerReferences", owners);
+        } else {
+            map.put("ownerReferences", java.util.Collections.emptyList());
+        }
 
         return map;
     }

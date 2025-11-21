@@ -1,0 +1,148 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes Storage Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">💾 Kubernetes Storage</div>
+        <div class="page-subtitle">Theo dõi PVC, PV và StorageClass trong cụm.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="k8s-storage-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <div class="table-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0; font-weight: 600;">Danh sách Storage</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <input type="text" class="form-control" style="width: 220px; font-size: 13px;" id="k8s-storage-search"
+            placeholder="🔍 Tìm theo tên, namespace, storage class...">
+          <select class="form-control" style="width: 180px; font-size: 13px;" id="k8s-storage-namespace-filter">
+            <option value="">Tất cả namespace (PVC)</option>
+          </select>
+        </div>
+      </div>
+
+      <ul class="nav nav-tabs mb-3" id="k8s-storage-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="pvcs-tab" data-bs-toggle="tab" data-bs-target="#pvcs" type="button" role="tab">
+            PVCs (<span id="pvcs-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="pvs-tab" data-bs-toggle="tab" data-bs-target="#pvs" type="button" role="tab">
+            PVs (<span id="pvs-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="storageclasses-tab" data-bs-toggle="tab" data-bs-target="#storageclasses" type="button" role="tab">
+            StorageClasses (<span id="storageclasses-count">0</span>)
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content" id="k8s-storage-tab-content">
+        <!-- PVC Tab -->
+        <div class="tab-pane fade show active" id="pvcs" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">PersistentVolumeClaims</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-pvcs" title="Làm mới PVCs">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-workloads">
+              <thead>
+                <tr>
+                  <th style="max-width: 140px;">Namespace</th>
+                  <th style="max-width: 220px;">PVC</th>
+                  <th>Volume</th>
+                  <th>Capacity</th>
+                  <th>StorageClass</th>
+                  <th>Access Modes</th>
+                  <th>Status</th>
+                  <th style="min-width: 120px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="pvcs-tbody">
+                <tr>
+                  <td colspan="8" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- PV Tab -->
+        <div class="tab-pane fade" id="pvs" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">PersistentVolumes</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-pvs" title="Làm mới PVs">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-workloads">
+              <thead>
+                <tr>
+                  <th style="max-width: 220px;">PersistentVolume</th>
+                  <th>Capacity</th>
+                  <th>Access Modes</th>
+                  <th>Reclaim Policy</th>
+                  <th>Status</th>
+                  <th>Bound Claim</th>
+                  <th>StorageClass</th>
+                  <th style="min-width: 120px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="pvs-tbody">
+                <tr>
+                  <td colspan="8" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- StorageClass Tab -->
+        <div class="tab-pane fade" id="storageclasses" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">StorageClasses</div>
+            <button class="btn btn-sm btn-outline-secondary" id="reload-storageclasses" title="Làm mới StorageClasses">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-workloads">
+              <thead>
+                <tr>
+                  <th style="max-width: 220px;">StorageClass</th>
+                  <th>Provisioner</th>
+                  <th>Binding Mode</th>
+                  <th>Reclaim Policy</th>
+                  <th>Default</th>
+                  <th>Parameters</th>
+                  <th style="min-width: 120px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="storageclasses-tbody">
+                <tr>
+                  <td colspan="7" class="text-center text-muted py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/modules/k8sHelpers.js"></script>
+<script src="/js/modules/k8sStorage.js"></script>
+

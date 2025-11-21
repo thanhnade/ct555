@@ -37,32 +37,32 @@
       <ul class="nav nav-tabs mb-3" id="workloads-tabs" role="tablist">
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="deployments-tab" data-bs-toggle="tab" data-bs-target="#deployments" type="button" role="tab">
-            Deployments (<span id="deployments-count">0</span>)
+            📦 Deployments (<span id="deployments-count">0</span>)
           </button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="statefulsets-tab" data-bs-toggle="tab" data-bs-target="#statefulsets" type="button" role="tab">
-            StatefulSets (<span id="statefulsets-count">0</span>)
+            🧱 StatefulSets (<span id="statefulsets-count">0</span>)
           </button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="daemonsets-tab" data-bs-toggle="tab" data-bs-target="#daemonsets" type="button" role="tab">
-            DaemonSets (<span id="daemonsets-count">0</span>)
+            ⚙️ DaemonSets (<span id="daemonsets-count">0</span>)
           </button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="cronjobs-tab" data-bs-toggle="tab" data-bs-target="#cronjobs" type="button" role="tab">
-            CronJobs (<span id="cronjobs-count">0</span>)
+            ⏱ CronJobs (<span id="cronjobs-count">0</span>)
           </button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="jobs-tab" data-bs-toggle="tab" data-bs-target="#jobs" type="button" role="tab">
-            Jobs (<span id="jobs-count">0</span>)
+            🧩 Jobs (<span id="jobs-count">0</span>)
           </button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="pods-tab" data-bs-toggle="tab" data-bs-target="#pods" type="button" role="tab">
-            Pods (<span id="pods-count">0</span>)
+            🟢🔴 Pods (<span id="pods-count">0</span>)
           </button>
         </li>
       </ul>
@@ -81,13 +81,12 @@
             <table class="table table-workloads">
               <thead>
                 <tr>
+                  <th style="min-width: 160px;">Name</th>
                   <th style="min-width: 120px;">Namespace</th>
-                  <th style="min-width: 150px;">Tên</th>
-                  <th style="min-width: 100px; white-space: nowrap;">Replicas</th>
-                  <th style="min-width: 120px; white-space: nowrap;">Rollout Status</th>
-                  <th style="min-width: 200px;">Image</th>
+                  <th style="min-width: 140px;">Replicas (desired/current/ready)</th>
+                  <th style="min-width: 100px;">Status</th>
                   <th style="min-width: 80px;">Age</th>
-                  <th style="min-width: 200px; white-space: nowrap;">Actions</th>
+                  <th style="min-width: 220px;">Actions</th>
                 </tr>
               </thead>
               <tbody id="deployments-tbody">
@@ -113,12 +112,11 @@
             <table class="table table-workloads">
               <thead>
                 <tr>
-                  <th>Namespace</th>
-                  <th>Tên</th>
-                  <th>Replicas</th>
-                  <th>Pods</th>
-                  <th>PVCs</th>
-                  <th>Update Status</th>
+                  <th style="min-width: 160px;">Name</th>
+                  <th style="min-width: 140px;">Namespace</th>
+                  <th style="min-width: 140px;">Replicas</th>
+                  <th style="min-width: 160px;">Service</th>
+                  <th style="min-width: 160px;">Volume</th>
                   <th>Age</th>
                   <th>Actions</th>
                 </tr>
@@ -146,11 +144,11 @@
             <table class="table table-workloads">
               <thead>
                 <tr>
-                  <th>Namespace</th>
-                  <th>Tên</th>
-                  <th>Pods/Node</th>
-                  <th>Image</th>
-                  <th>Rollout Status</th>
+                  <th style="min-width: 160px;">Name</th>
+                  <th style="min-width: 140px;">Namespace</th>
+                  <th style="min-width: 120px;">Desired</th>
+                  <th style="min-width: 120px;">Current</th>
+                  <th style="min-width: 120px;">Ready</th>
                   <th>Age</th>
                   <th>Actions</th>
                 </tr>
@@ -178,12 +176,10 @@
             <table class="table table-workloads">
               <thead>
                 <tr>
-                  <th>Namespace</th>
-                  <th>Tên</th>
-                  <th>Schedule</th>
-                  <th>Trạng thái</th>
-                  <th>Job History</th>
-                  <th>History Limits</th>
+                  <th style="min-width: 160px;">Name</th>
+                  <th style="min-width: 140px;">Schedule</th>
+                  <th style="min-width: 140px;">Last run</th>
+                  <th style="min-width: 140px;">Active Jobs</th>
                   <th>Age</th>
                   <th>Actions</th>
                 </tr>
@@ -211,12 +207,11 @@
             <table class="table table-workloads">
               <thead>
                 <tr>
-                  <th>Namespace</th>
-                  <th>Tên</th>
-                  <th>Số Pod</th>
-                  <th>Trạng thái</th>
-                  <th>Thời gian</th>
-                  <th>Retry Config</th>
+                  <th style="min-width: 160px;">Name</th>
+                  <th style="min-width: 140px;">Namespace</th>
+                  <th style="min-width: 140px;">Completions</th>
+                  <th style="min-width: 140px;">Duration</th>
+                  <th style="min-width: 120px;">Status</th>
                   <th>Age</th>
                   <th>Actions</th>
                 </tr>
@@ -244,12 +239,12 @@
             <table class="table table-workloads">
               <thead>
                 <tr>
-                  <th>Namespace</th>
-                  <th>Tên</th>
-                  <th>Trạng thái</th>
-                  <th>Image</th>
-                  <th>Node</th>
-                  <th>IP</th>
+                  <th style="min-width: 180px;">Name</th>
+                  <th style="min-width: 140px;">Namespace</th>
+                  <th style="min-width: 120px;">Status</th>
+                  <th style="min-width: 140px;">Node</th>
+                  <th style="min-width: 120px;">Restarts</th>
+                  <th style="min-width: 140px;">IP</th>
                   <th>Age</th>
                   <th>Actions</th>
                 </tr>
