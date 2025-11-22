@@ -1,0 +1,70 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes Events Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">📋 Events</div>
+        <div class="page-subtitle">Xem và theo dõi Events trong cụm Kubernetes.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="events-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Filters Section -->
+    <div class="table-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div class="page-title" style="font-size: 16px; margin-bottom: 0;">Danh sách Events</div>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="events-search"
+            placeholder="🔍 Tìm kiếm...">
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="events-namespace-filter">
+            <option value="">Tất cả namespace</option>
+          </select>
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="events-type-filter">
+            <option value="">Tất cả loại</option>
+            <option value="Normal">Normal</option>
+            <option value="Warning">Warning</option>
+          </select>
+          <select class="form-control" style="width: 150px; font-size: 13px;" id="events-kind-filter">
+            <option value="">Tất cả Kind</option>
+            <option value="Pod">Pod</option>
+            <option value="Deployment">Deployment</option>
+            <option value="Service">Service</option>
+            <option value="Node">Node</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-workloads">
+          <thead>
+            <tr>
+              <th style="min-width: 100px;">Type</th>
+              <th style="min-width: 150px;">Namespace</th>
+              <th style="min-width: 120px;">Kind</th>
+              <th style="min-width: 200px;">Name</th>
+              <th style="min-width: 150px;">Reason</th>
+              <th style="min-width: 300px;">Message</th>
+              <th style="min-width: 80px;">Count</th>
+              <th style="min-width: 100px;">Age</th>
+              <th style="min-width: 150px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="events-tbody">
+            <tr>
+              <td colspan="9" class="text-center text-muted py-3">
+                <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- K8s Modals -->
+  <div th:replace="admin/fragments/k8s-modals :: k8s-modals"></div>
+</div>
+<script src="/js/modules/k8sHelpers.js"></script>
+<script src="/js/modules/k8sEvents.js"></script>
+

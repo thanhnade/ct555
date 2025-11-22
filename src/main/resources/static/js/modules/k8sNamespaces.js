@@ -12,25 +12,27 @@
         yamlLoading: false
     };
 
-    // Helper functions từ k8sHelpers
-    function escapeHtml(text) {
-        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
+    // Helper: Get escapeHtml function
+    function getEscapeHtml() {
+        return window.K8sHelpers?.escapeHtml || ((text) => text || '');
     }
 
-    function isSystemNamespace(name) {
-        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
-    }
-
-    function showK8sOutput(title, output) {
-        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
-            window.K8sHelpers.showK8sOutput(title, output);
-        } else {
-            alert(`${title}\n\n${output}`);
-        }
-    }
-
-    // Helper function để lấy status badge class
+    // Helper: Get status badge class for namespace
     function getStatusClass(status) {
+        // Use K8sHelpers if available, otherwise use local logic
+        if (window.K8sHelpers?.getNamespaceStatusBadgeClass) {
+            const result = window.K8sHelpers.getNamespaceStatusBadgeClass(status);
+            // K8sHelpers returns 'bg-warning' for 'terminating', but we want 'bg-danger'
+            if (status && status.toUpperCase() === 'TERMINATING') {
+                return 'bg-danger';
+            }
+            // K8sHelpers doesn't handle 'PENDING', so we handle it here
+            if (status && status.toUpperCase() === 'PENDING') {
+                return 'bg-warning text-dark';
+            }
+            return result;
+        }
+        // Fallback logic
         if (!status) return 'bg-secondary';
         const s = status.toUpperCase();
         if (s === 'ACTIVE') return 'bg-success';
@@ -39,42 +41,26 @@
         return 'bg-secondary';
     }
 
-    function normalizeCpuCores(cpuValue) {
-        let cpuRaw = typeof cpuValue === 'number' ? cpuValue : parseFloat(cpuValue || '0');
-        if (!Number.isFinite(cpuRaw)) {
-            return 0;
-        }
-        if (cpuRaw > 1000) {
-            cpuRaw = cpuRaw / 1_000_000_000.0;
-        }
-        return cpuRaw;
+    // Helper: Get format functions from K8sHelpers
+    function getFormatCpuDisplay() {
+        return window.K8sHelpers?.formatCpuDisplay || ((cpuValue) => {
+            const cores = window.K8sHelpers?.normalizeCpuCores?.(cpuValue) || parseFloat(cpuValue || '0');
+            if (cores <= 0) return '0m';
+            const millicores = Math.round(cores * 1000);
+            return millicores + 'm';
+        });
     }
 
-    function formatCpuDisplay(cpuValue) {
-        const cores = normalizeCpuCores(cpuValue);
-        if (cores <= 0) return '0';
-        if (cores < 1) {
-            return Math.round(cores * 1000) + 'm';
-        }
-        return cores.toFixed(2).replace(/\.?0+$/, '');
-    }
-
-    function normalizeRamMi(ramValue) {
-        let ramRaw = typeof ramValue === 'number' ? ramValue : parseFloat(ramValue || '0');
-        if (!Number.isFinite(ramRaw)) {
-            return 0;
-        }
-        return ramRaw;
-    }
-
-    function formatRamDisplay(ramValue) {
-        const ramMi = normalizeRamMi(ramValue);
-        if (ramMi <= 0) return '0 Mi';
-        if (ramMi >= 1024) {
-            const gib = ramMi / 1024;
-            return gib.toFixed(2).replace(/\.?0+$/, '') + ' Gi';
-        }
-        return Math.round(ramMi) + ' Mi';
+    function getFormatRamDisplay() {
+        return window.K8sHelpers?.formatRamDisplay || ((ramValue) => {
+            const ramMi = window.K8sHelpers?.normalizeRamMi?.(ramValue) || parseFloat(ramValue || '0');
+            if (ramMi <= 0) return '0 Mi';
+            if (ramMi >= 1024) {
+                const gib = ramMi / 1024;
+                return gib.toFixed(2).replace(/\.?0+$/, '') + ' Gi';
+            }
+            return Math.round(ramMi) + ' Mi';
+        });
     }
 
     function formatKeyValueBadges(obj, badgeClass = 'bg-secondary') {
@@ -82,6 +68,7 @@
         if (entries.length === 0) {
             return '<span class="text-muted">Không có</span>';
         }
+        const escapeHtml = getEscapeHtml();
         return entries.map(([k, v]) => `<span class="badge ${badgeClass} me-1 mb-1">${escapeHtml(k)}=${escapeHtml(v)}</span>`).join('');
     }
 
@@ -90,6 +77,7 @@
         if (entries.length === 0) {
             return '<span class="text-muted">Không có</span>';
         }
+        const escapeHtml = getEscapeHtml();
         return entries.map(([k, v]) => `
             <div class="border rounded p-2 mb-2">
                 <div class="text-uppercase small text-muted fw-semibold">${escapeHtml(k)}</div>
@@ -102,6 +90,7 @@
         if (!Array.isArray(finalizers) || finalizers.length === 0) {
             return '<span class="text-muted">Không có</span>';
         }
+        const escapeHtml = getEscapeHtml();
         return `<div class="d-flex flex-wrap gap-1">${finalizers
             .map(item => `<span class="badge bg-dark">${escapeHtml(item)}</span>`)
             .join('')}</div>`;
@@ -111,6 +100,7 @@
         if (!Array.isArray(conditions) || conditions.length === 0) {
             return '<span class="text-muted">Không có</span>';
         }
+        const escapeHtml = getEscapeHtml();
         const rows = conditions.map(cond => {
             const lastTransition = cond.lastTransitionTime ? new Date(cond.lastTransitionTime).toLocaleString('vi-VN') : '-';
             const message = cond.message ? `<div class="text-muted small">${escapeHtml(cond.message)}</div>` : '';
@@ -257,20 +247,41 @@
         if (!tbody) return;
 
         try {
+            console.log('[Namespaces] Loading namespaces data...');
             // Hiển thị loading state với spinner
             showLoadingState();
 
-            const response = await window.ApiClient.get('/admin/cluster/k8s/namespaces').catch(() => null);
+            const response = await window.ApiClient.get('/admin/cluster/k8s/namespaces').catch((err) => {
+                console.error('[Namespaces] API error:', err);
+                return null;
+            });
+
+            console.log('[Namespaces] Response received:', response);
 
             if (response && response.namespaces) {
                 namespacesData = response.namespaces || [];
+                console.log(`[Namespaces] Loaded ${namespacesData.length} namespaces`);
+                
+                // Log chi tiết từng namespace
+                namespacesData.forEach((ns, index) => {
+                    console.log(`[Namespaces] [${index + 1}] ${ns.name}:`, {
+                        status: ns.status,
+                        pods: ns.pods,
+                        cpu: ns.cpu,
+                        ram: ns.ram,
+                        age: ns.age
+                    });
+                });
+                
                 applyFilters();
             } else {
+                console.warn('[Namespaces] No namespaces data in response');
                 namespacesData = [];
                 renderNamespaces();
             }
         } catch (error) {
-            console.error('Error loading namespaces:', error);
+            console.error('[Namespaces] Error loading namespaces:', error);
+            const escapeHtml = getEscapeHtml();
             tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Lỗi khi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}</td></tr>`;
         }
     }
@@ -318,14 +329,17 @@
             return;
         }
 
+        const escapeHtml = getEscapeHtml();
         tbody.innerHTML = filteredData.map(item => {
             const statusClass = getStatusClass(item.status);
             const status = item.status || 'Unknown';
             const pods = item.pods !== undefined ? item.pods : 0;
+            const formatCpuDisplay = getFormatCpuDisplay();
+            const formatRamDisplay = getFormatRamDisplay();
             const cpuDisplay = formatCpuDisplay(item.cpu);
             const ramDisplay = formatRamDisplay(item.ram);
 
-            const isSystem = isSystemNamespace(item.name);
+            const isSystem = window.K8sHelpers?.isSystemNamespace(item.name) || false;
             const isDeleting = deletingNamespaces.has(item.name);
             const name = item.name || '';
 
@@ -362,6 +376,7 @@
 
         if (statusEl) {
             if (summary && summary.status) {
+                const escapeHtml = getEscapeHtml();
                 const cls = getStatusClass(summary.status);
                 statusEl.innerHTML = `<span class="badge ${cls}">${escapeHtml(summary.status)}</span>`;
             } else {
@@ -373,9 +388,11 @@
             podsEl.textContent = pods;
         }
         if (cpuEl) {
+            const formatCpuDisplay = getFormatCpuDisplay();
             cpuEl.textContent = summary && summary.cpu !== undefined ? formatCpuDisplay(summary.cpu) : '0';
         }
         if (ramEl) {
+            const formatRamDisplay = getFormatRamDisplay();
             ramEl.textContent = summary && summary.ram !== undefined ? formatRamDisplay(summary.ram) : '0 Mi';
         }
     }
@@ -430,6 +447,7 @@
             ? new Date(metadata.creationTimestamp).toLocaleString('vi-VN')
             : '-';
 
+        const escapeHtml = getEscapeHtml();
         const basicEl = document.getElementById('namespace-detail-basic');
         if (basicEl) {
             basicEl.innerHTML = `
@@ -528,6 +546,7 @@
             const message = error?.message || 'Lỗi lấy thông tin namespace';
             const basicEl = document.getElementById('namespace-detail-basic');
             if (basicEl) {
+                const escapeHtml = getEscapeHtml();
                 basicEl.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(message)}</div>`;
             }
             if (lastUpdatedEl) {
@@ -542,7 +561,9 @@
     async function showNamespaceRawDescribe(name) {
         try {
             const data = await window.ApiClient.get(`/admin/cluster/k8s/namespaces/${encodeURIComponent(name)}`);
-            showK8sOutput(`Namespace ${name}`, data.output || '');
+            if (window.K8sHelpers?.showK8sOutput) {
+                window.K8sHelpers.showK8sOutput(`Namespace ${name}`, data.output || '');
+            }
         } catch (error) {
             const message = error?.message || 'Lỗi lấy thông tin namespace';
             if (window.showAlert) {
@@ -555,7 +576,7 @@
 
     // Delete namespace
     async function deleteNamespace(name) {
-        if (isSystemNamespace(name)) {
+        if (window.K8sHelpers?.isSystemNamespace(name)) {
             if (window.showAlert) {
                 window.showAlert('warning', 'Không cho phép xóa namespace hệ thống');
             } else {
@@ -580,6 +601,7 @@
             const data = await window.ApiClient.delete(`/admin/cluster/k8s/namespaces/${encodeURIComponent(name)}`);
             deletingNamespaces.delete(name);
             if (window.showAlert) {
+                const escapeHtml = getEscapeHtml();
                 window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `namespace "${name}" deleted`)}</pre>`);
             }
             // Load dữ liệu ngầm (không hiển thị loading state, giữ dữ liệu cũ)

@@ -1312,18 +1312,24 @@ public class KubernetesService {
      * Tính tổng resource usage từ node metrics (K8s Metrics API)
      * Trả về Map với keys: "cpu", "ram" (percentages dựa trên capacity từ Node spec)
      */
-    public Map<String, Double> calculateClusterResourceUsageFromMetrics() {
+    public Map<String, Object> calculateClusterResourceUsageFromMetrics() {
         try {
             // Lấy node metrics từ Metrics API
             var nodeMetricsList = getNodeMetrics();
             if (nodeMetricsList == null || nodeMetricsList.isEmpty()) {
-                return Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
+                return Map.of(
+                        "cpu", 0.0, "ram", 0.0, "disk", 0.0,
+                        "cpuUsedCores", 0.0, "cpuTotalCores", 0.0,
+                        "ramUsedBytes", 0.0, "ramTotalBytes", 0.0);
             }
 
             // Lấy nodes để có capacity (CPU và Memory)
             var nodes = getNodes();
             if (nodes == null || nodes.getItems().isEmpty()) {
-                return Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
+                return Map.of(
+                        "cpu", 0.0, "ram", 0.0, "disk", 0.0,
+                        "cpuUsedCores", 0.0, "cpuTotalCores", 0.0,
+                        "ramUsedBytes", 0.0, "ramTotalBytes", 0.0);
             }
 
             // Tạo map node name -> Node để lookup capacity
@@ -1353,9 +1359,11 @@ public class KubernetesService {
                 var cpuUsage = usage.get("cpu");
                 if (cpuUsage != null) {
                     try {
-                        // Convert từ Quantity (có thể là "100m", "1", "500m", etc.) sang nano cores
+                        // Convert từ Quantity (có thể là "100m", "1", "500m", "2008901524n", "2008901524", etc.) sang nano cores
                         String cpuStr = cpuUsage.getAmount();
-                        totalCpuUsageNanoCores += parseQuantityToNanoCores(cpuStr);
+                        double nanoCores = parseQuantityToNanoCores(cpuStr);
+                        logger.debug("Node {} CPU usage: {} -> {} nano cores", nodeName, cpuStr, nanoCores);
+                        totalCpuUsageNanoCores += nanoCores;
                     } catch (Exception e) {
                         logger.debug("Khong parse duoc CPU usage cho node {}: {}", nodeName, e.getMessage());
                     }
@@ -1413,32 +1421,52 @@ public class KubernetesService {
             }
 
             // Disk usage không có trong Metrics API, giữ nguyên 0.0 hoặc có thể lấy từ SSH fallback
+            double totalCpuUsageCores = totalCpuUsageNanoCores / 1_000_000_000.0;
+            
+            // Log để debug
+            logger.debug("Cluster Resource Usage - CPU: {} nano cores = {} cores / {} cores total = {}%", 
+                    totalCpuUsageNanoCores, totalCpuUsageCores, totalCpuCapacityCores, cpuUsagePercent);
+            logger.debug("Cluster Resource Usage - RAM: {} bytes / {} bytes total = {}%", 
+                    totalMemoryUsageBytes, totalMemoryCapacityBytes, ramUsagePercent);
+            
             return Map.of(
                     "cpu", Math.min(100.0, Math.max(0.0, cpuUsagePercent)),
                     "ram", Math.min(100.0, Math.max(0.0, ramUsagePercent)),
-                    "disk", 0.0); // Disk không có trong Metrics API
+                    "disk", 0.0, // Disk không có trong Metrics API
+                    "cpuUsedCores", totalCpuUsageCores,
+                    "cpuTotalCores", totalCpuCapacityCores,
+                    "ramUsedBytes", totalMemoryUsageBytes,
+                    "ramTotalBytes", totalMemoryCapacityBytes);
         } catch (Exception e) {
             logger.debug("Loi tinh resource usage tu Metrics API: {}", e.getMessage());
-            return Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
+            return Map.of(
+                    "cpu", 0.0, "ram", 0.0, "disk", 0.0,
+                    "cpuUsedCores", 0.0, "cpuTotalCores", 0.0,
+                    "ramUsedBytes", 0.0, "ramTotalBytes", 0.0);
         }
     }
-
-    /**
-     * Helper method để parse Quantity string sang nano cores
-     * Hỗ trợ: "100m" = 100000000 nano cores, "1" = 1000000000 nano cores, "500m" = 500000000 nano cores
-     */
+    
     private double parseQuantityToNanoCores(String quantity) {
         if (quantity == null || quantity.isBlank()) return 0.0;
         quantity = quantity.trim();
         try {
+            if (quantity.endsWith("n")) {
+                double nanoCores = Double.parseDouble(quantity.substring(0, quantity.length() - 1));
+                return nanoCores;
+            }
             if (quantity.endsWith("m")) {
-                // Millicores: "100m" = 0.1 cores = 100000000 nano cores
                 double millicores = Double.parseDouble(quantity.substring(0, quantity.length() - 1));
-                return millicores * 1_000_000.0; // Convert to nano cores
+                return millicores * 1_000_000.0;
+            }
+            double value = Double.parseDouble(quantity);
+            if (value > 1000) {
+                double asCores = value / 1_000_000_000.0;
+                if (asCores > 0 && asCores < 1000) {
+                    return value;
+                }
+                return value;
             } else {
-                // Cores: "1" = 1 core = 1000000000 nano cores
-                double cores = Double.parseDouble(quantity);
-                return cores * 1_000_000_000.0; // Convert to nano cores
+                return value * 1_000_000_000.0;
             }
         } catch (Exception e) {
             logger.debug("Khong parse duoc quantity sang nano cores: {}", quantity);

@@ -2,12 +2,14 @@
 (function() {
     'use strict';
 
-    // Helper function to escape HTML
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    // Helper: Get escapeHtml function
+    function getEscapeHtml() {
+        return window.K8sHelpers?.escapeHtml || ((text) => {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        });
     }
 
     const ClusterSetupModule = {
@@ -88,6 +90,7 @@
                         if (hasK8s && hasMaster) {
                             // Cluster đã sẵn sàng
                             clusterStatusDisplay.style.cssText = 'padding: 8px 12px; background: #E8F5E9; border-radius: 6px; border: 1px solid #4CAF50; font-size: 13px; color: #2E7D32; display: flex; align-items: center; gap: 8px; white-space: nowrap;';
+                            const escapeHtml = getEscapeHtml();
                             const version = k8sVersionResponse.version ? escapeHtml(k8sVersionResponse.version) : '';
                             clusterStatusDisplay.innerHTML = `<span>✅</span> <span>Trạng thái: K8s ${version} | ${masterCount} master | ${workerCount} worker</span>`;
                         } else if (hasMaster) {

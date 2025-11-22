@@ -14,12 +14,14 @@
 	let onComplete = null; // (success, message) => void
 	let onOpen = null; // () => void - callback khi WebSocket mở
 
-	// Hàm hỗ trợ: Escape HTML để tránh XSS
-	function escapeHtml(text) {
-		if (text == null) return '';
-		const div = document.createElement('div');
-		div.textContent = String(text);
-		return div.innerHTML;
+	// Helper: Get escapeHtml function
+	function getEscapeHtml() {
+		return window.K8sHelpers?.escapeHtml || ((text) => {
+			if (text == null) return '';
+			const div = document.createElement('div');
+			div.textContent = String(text);
+			return div.innerHTML;
+		});
 	}
 
 	// Kết nối WebSocket cho Ansible installation

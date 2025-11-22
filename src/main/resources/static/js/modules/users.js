@@ -2,12 +2,14 @@
 (function () {
 	'use strict';
 
-	// Helper: Escape HTML
-	function escapeHtml(text) {
-		if (text == null) return '';
-		const div = document.createElement('div');
-		div.textContent = String(text);
-		return div.innerHTML;
+	// Helper: Get escapeHtml function
+	function getEscapeHtml() {
+		return window.K8sHelpers?.escapeHtml || ((text) => {
+			if (text == null) return '';
+			const div = document.createElement('div');
+			div.textContent = String(text);
+			return div.innerHTML;
+		});
 	}
 
 	// Helper: Get role badge HTML
@@ -60,6 +62,7 @@
 				const createdAt = u.createdAt ? new Date(u.createdAt).toLocaleDateString('vi-VN') : '-';
 				
 				tr.innerHTML = `
+					const escapeHtml = getEscapeHtml();
 					<td><strong>${escapeHtml(u.username || '-')}</strong></td>
 					<td>${escapeHtml(u.fullname || '-')}</td>
 					<td>${roleChip}</td>
@@ -308,6 +311,7 @@
 			// Update title
 			const titleEl = document.getElementById('edit-user-title');
 			if (titleEl) {
+				const escapeHtml = getEscapeHtml();
 				titleEl.textContent = `✏️ Sửa thông tin: ${escapeHtml(user.username || 'Người dùng')}`;
 			}
 
@@ -463,6 +467,7 @@
 			// Update title
 			const titleEl = document.getElementById('reset-password-title');
 			if (titleEl) {
+				const escapeHtml = getEscapeHtml();
 				titleEl.textContent = `🔑 Đặt lại mật khẩu: ${escapeHtml(user.username || username || 'Người dùng')}`;
 			}
 

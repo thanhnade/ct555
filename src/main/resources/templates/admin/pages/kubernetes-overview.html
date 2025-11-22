@@ -1,137 +1,167 @@
 <div th:replace="admin/layout :: layout(~{::content})">
-  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
-    <!-- Kubernetes Cluster Overview -->
-    <div class="page-title-row">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org" class="container-fluid py-3">
+    <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
       <div>
-        <div class="page-title">☸️ Kubernetes Cluster Overview</div>
-        <div class="page-subtitle">Tình trạng tổng quan của cụm Kubernetes.</div>
+        <div class="h4 mb-1">☸️ Kubernetes Cluster Overview</div>
+        <div class="text-muted">Tình trạng tổng quan của cụm Kubernetes.</div>
       </div>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button class="btn" id="cd-reload">🔄 Làm mới</button>
-        <button class="btn" id="cd-back" onclick="window.location.href='/admin/cluster'">← Quay lại danh sách</button>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" id="cd-reload">🔄 Làm mới</button>
+        <button class="btn btn-outline-primary" id="cd-back" onclick="window.location.href='/admin/cluster'">← Quay lại danh sách</button>
       </div>
     </div>
 
-    <!-- Overview Section -->
-    <div id="overview-content" class="d-flex flex-column h-100">
-      <div class="flex-grow-1 d-flex flex-column" id="k8s-overview" style="min-height: 0;">
-        <div class="d-flex flex-column flex-grow-1" style="min-height: 0;">
-          <!-- TOP STAT CARDS -->
-          <div class="row g-3 mb-3" id="overview-stat-cards">
-            <div class="col-12 col-sm-6 col-md-3">
-              <div class="card text-center">
-                <div class="card-body py-2">
-                  <div class="text-muted small mb-2">Nodes</div>
-                  <div class="h2 fw-bold text-primary mb-1" id="overview-nodes-count">-</div>
-                  <div class="text-muted small" id="overview-nodes-sub">-</div>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-sm-6 col-md-3">
-              <div class="card text-center">
-                <div class="card-body py-2">
-                  <div class="text-muted small mb-2">Workloads</div>
-                  <div class="h2 fw-bold text-primary mb-1" id="overview-workloads-count">-</div>
-                  <div class="text-muted small">Deployment / DaemonSet</div>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-sm-6 col-md-3">
-              <div class="card text-center">
-                <div class="card-body py-2">
-                  <div class="text-muted small mb-2">Pods</div>
-                  <div class="h2 fw-bold text-primary mb-1" id="overview-pods-count">-</div>
-                  <div class="text-muted small" id="overview-pods-sub">Running pods</div>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-sm-6 col-md-3">
-              <div class="card text-center">
-                <div class="card-body py-2">
-                  <div class="text-muted small mb-2">Namespaces</div>
-                  <div class="h2 fw-bold text-primary mb-1" id="overview-namespaces-count">-</div>
-                </div>
+    <!-- Ưu tiên: Sức khỏe cluster -->
+    <div class="card mb-3">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 fw-semibold">Cluster Health</h6>
+        <span class="text-muted small">Ready/Total & cảnh báo gần đây</span>
+      </div>
+      <div class="card-body py-3">
+        <div class="row g-3">
+          <div class="col-12 col-md-3">
+            <div class="card h-100 shadow-sm">
+              <div class="card-body py-3 text-center">
+                <div class="text-muted small mb-1">Nodes</div>
+                <div class="h4 mb-1 text-primary" id="overview-nodes-health">-</div>
+                <div class="small text-muted">Ready / Total</div>
               </div>
             </div>
           </div>
-
-          <!-- RESOURCE USAGE -->
-          <div class="card mb-3">
-            <div class="card-header py-2">
-              <h6 class="mb-0 fw-semibold">Cluster Resource Usage</h6>
-            </div>
-            <div class="card-body py-2">
-              <div class="row g-3">
-                <div class="col-12 col-md-4">
-                  <div class="mb-2">CPU Usage</div>
-                  <div class="progress" style="height: 24px; position: relative;">
-                    <div class="progress-bar bg-primary" role="progressbar" id="overview-cpu-bar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%; transition: width 0.3s ease;"></div>
-                    <span class="position-absolute top-50 start-50 translate-middle fw-bold small" id="overview-cpu-percent" style="z-index: 1;">0%</span>
-                  </div>
-                </div>
-                <div class="col-12 col-md-4">
-                  <div class="mb-2">RAM Usage</div>
-                  <div class="progress" style="height: 24px; position: relative;">
-                    <div class="progress-bar bg-success" role="progressbar" id="overview-ram-bar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%; transition: width 0.3s ease;"></div>
-                    <span class="position-absolute top-50 start-50 translate-middle fw-bold small" id="overview-ram-percent" style="z-index: 1;">0%</span>
-                  </div>
-                </div>
-                <div class="col-12 col-md-4">
-                  <div class="mb-2">Disk Usage</div>
-                  <div class="progress" style="height: 24px; position: relative;">
-                    <div class="progress-bar bg-warning" role="progressbar" id="overview-disk-bar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%; transition: width 0.3s ease;"></div>
-                    <span class="position-absolute top-50 start-50 translate-middle fw-bold small" id="overview-disk-percent" style="z-index: 1;">0%</span>
-                  </div>
-                </div>
+          <div class="col-12 col-md-3">
+            <div class="card h-100 shadow-sm">
+              <div class="card-body py-3 text-center">
+                <div class="text-muted small mb-1">Pods</div>
+                <div class="h4 mb-1 text-success" id="overview-pods-health">-</div>
+                <div class="small text-muted" id="overview-pods-health-sub">Running / Pending / Failed</div>
               </div>
             </div>
           </div>
-
-          <!-- SUMMARY TABLES -->
-          <div class="row g-3 flex-grow-1" style="min-height: 0;">
-            <div class="col-12 col-md-6 d-flex">
-              <div class="card flex-grow-1 d-flex flex-column h-100">
-                <div class="card-header py-2">
-                  <h6 class="mb-0 fw-semibold">Nodes Status</h6>
-                </div>
-                <div class="card-body p-0 d-flex flex-column flex-grow-1" style="min-height: 0;">
-                  <div id="overview-nodes-list" class="flex-grow-1 overflow-auto px-3 pt-3 pb-0 h-auto">
-                    <div class="text-center text-muted py-3">Đang tải...</div>
-                  </div>
-                </div>
+          <div class="col-12 col-md-3">
+            <div class="card h-100 shadow-sm">
+              <div class="card-body py-3 text-center">
+                <div class="text-muted small mb-1">Deployments</div>
+                <div class="h4 mb-1 text-info" id="overview-deployments-health">-</div>
+                <div class="small text-muted">Available / Total</div>
               </div>
             </div>
-            <div class="col-12 col-md-6 d-flex">
-              <div class="card flex-grow-1 d-flex flex-column h-100">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                  <h6 class="mb-0 fw-semibold">Workload Status</h6>
-                  <div class="btn-group btn-group-sm" role="group">
-                    <input type="radio" class="btn-check" name="workload-filter" id="filter-all" value="all" checked>
-                    <label class="btn btn-outline-secondary" for="filter-all">Tất cả</label>
-                    
-                    <input type="radio" class="btn-check" name="workload-filter" id="filter-deployment" value="Deployment">
-                    <label class="btn btn-outline-secondary" for="filter-deployment">Deployment</label>
-                    
-                    <input type="radio" class="btn-check" name="workload-filter" id="filter-statefulset" value="StatefulSet">
-                    <label class="btn btn-outline-secondary" for="filter-statefulset">StatefulSet</label>
-                    
-                    <input type="radio" class="btn-check" name="workload-filter" id="filter-daemonset" value="DaemonSet">
-                    <label class="btn btn-outline-secondary" for="filter-daemonset">DaemonSet</label>
+          </div>
+          <div class="col-12 col-md-3">
+            <div class="card h-100 shadow-sm">
+              <div class="card-body py-3">
+                <div class="text-muted small mb-2">Resource Usage</div>
+                <div class="mb-2">
+                  <div class="d-flex justify-content-between small text-muted"><span>CPU</span><span id="overview-cpu-percent">0%</span></div>
+                  <div class="progress" style="height: 8px;">
+                    <div class="progress-bar bg-primary" id="overview-cpu-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>
                   </div>
                 </div>
-                <div class="card-body p-0 d-flex flex-column flex-grow-1" style="min-height: 0;">
-                  <div id="overview-workloads-list" class="flex-grow-1 overflow-auto px-3 pt-3 pb-0 h-auto">
-                    <div class="text-center text-muted py-3">Đang tải...</div>
+                <div class="mb-2">
+                  <div class="d-flex justify-content-between small text-muted"><span>RAM</span><span id="overview-ram-percent">0%</span></div>
+                  <div class="progress" style="height: 8px;">
+                    <div class="progress-bar bg-success" id="overview-ram-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>
                   </div>
                 </div>
+                <div>
+                  <div class="d-flex justify-content-between small text-muted"><span>Disk</span><span id="overview-disk-percent">0%</span></div>
+                  <div class="progress" style="height: 8px;">
+                    <div class="progress-bar bg-warning" id="overview-disk-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>
+                  </div>
+                </div>
+                <div id="resource-usage-note" class="mt-2 small text-muted" style="display: none;"></div>
               </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-    <!-- End Overview Section -->
+
+    <!-- Ưu tiên 2: Tóm tắt số lượng -->
+    <div class="row g-3 mb-3" id="overview-stat-cards">
+      <div class="col-12 col-sm-6 col-md-3">
+        <div class="card text-center h-100">
+          <div class="card-body py-3">
+            <div class="text-muted small mb-1">Workloads</div>
+            <div class="h2 fw-bold text-primary mb-1" id="overview-workloads-count">-</div>
+            <div class="text-muted small">Deploy/Stateful/Daemon/Cron/Job/Pod</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-sm-6 col-md-3">
+        <div class="card text-center h-100">
+          <div class="card-body py-3">
+            <div class="text-muted small mb-1">Services</div>
+            <div class="h2 fw-bold text-success mb-1" id="overview-services-count">-</div>
+            <div class="text-muted small">Tổng services</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-sm-6 col-md-3">
+        <div class="card text-center h-100">
+          <div class="card-body py-3">
+            <div class="text-muted small mb-1">Namespaces</div>
+            <div class="h2 fw-bold text-info mb-1" id="overview-namespaces-count">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-sm-6 col-md-3">
+        <div class="card text-center h-100">
+          <div class="card-body py-3">
+            <div class="text-muted small mb-1">Ingress</div>
+            <div class="h2 fw-bold text-warning mb-1" id="overview-ingress-count">-</div>
+            <div class="text-muted small">Tổng rules</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3" style="min-height: 0;">
+      <div class="col-12 col-lg-6 d-flex">
+        <div class="card flex-grow-1 d-flex flex-column h-100">
+          <div class="card-header py-2">
+            <h6 class="mb-0 fw-semibold">Nodes Status</h6>
+          </div>
+          <div class="card-body p-0 d-flex flex-column flex-grow-1">
+            <div id="overview-nodes-list" class="flex-grow-1 overflow-auto px-3 pt-3 pb-0 h-auto">
+              <div class="text-center text-muted py-3">Đang tải...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-6 d-flex">
+        <div class="card flex-grow-1 d-flex flex-column h-100">
+          <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0 fw-semibold">Workloads & Events</h6>
+            <a class="btn btn-sm btn-outline-primary" href="/admin/kubernetes/workloads">Xem Workloads</a>
+          </div>
+          <div class="card-body p-0 d-flex flex-column flex-grow-1">
+            <div class="px-3 pt-3 pb-2 d-flex justify-content-between align-items-center">
+              <div class="text-muted small">Warnings/Errors gần đây</div>
+              <span class="badge bg-warning text-dark" id="overview-events-count">-</span>
+            </div>
+            <div id="overview-events-list" class="table-responsive flex-grow-1">
+              <table class="table table-sm mb-0">
+                <thead>
+                  <tr>
+                    <th class="text-nowrap">Type</th>
+                    <th class="text-nowrap">Reason</th>
+                    <th class="text-nowrap">Object</th>
+                    <th class="text-nowrap">Message</th>
+                    <th class="text-nowrap">Time</th>
+                  </tr>
+                </thead>
+                <tbody id="overview-events-tbody">
+                  <tr>
+                    <td colspan="5" class="text-center text-muted py-3">Đang tải...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="/js/modules/k8sOverview.js"></script>
   </div>
 </div>
-

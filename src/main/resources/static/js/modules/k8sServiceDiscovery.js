@@ -20,21 +20,9 @@
     // Token để vô hiệu hóa kết quả fetch cũ theo từng tab (tránh race condition)
     const requestTokens = {};
 
-    // Helper functions từ k8sHelpers
-    function escapeHtml(text) {
-        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
-    }
-
-    function isSystemNamespace(name) {
-        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
-    }
-
-    function showK8sOutput(title, output) {
-        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
-            window.K8sHelpers.showK8sOutput(title, output);
-        } else {
-            alert(`${title}\n\n${output}`);
-        }
+    // Helper: Get escapeHtml function
+    function getEscapeHtml() {
+        return window.K8sHelpers?.escapeHtml || ((text) => text || '');
     }
 
     // Helper function để lấy type badge class
@@ -83,6 +71,7 @@
         const config = serviceDiscoveryConfig[tabName];
         if (!tbody || !config) return;
 
+        const escapeHtml = getEscapeHtml();
         if (error.status === 503 || error.response?.status === 503) {
             const errorMsg = error.message || error.response?.data?.error || 'Kubernetes API server không khả dụng';
             tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-warning py-3"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(errorMsg)}</td></tr>`;
@@ -268,6 +257,7 @@
             return;
         }
 
+        const escapeHtml = getEscapeHtml();
         tbody.innerHTML = data.map(item => {
             const typeClass = getTypeClass(item.type);
             const clusterIP = item.clusterIP === 'None' ? '<none>' : (item.clusterIP || '-');
@@ -291,7 +281,7 @@
             const exposeStatus = item.exposeStatus || 'Unknown';
             const exposeStatusClass = item.isExposed ? 'bg-success' : 'bg-secondary';
             
-            const isSystem = isSystemNamespace(item.namespace);
+            const isSystem = window.K8sHelpers?.isSystemNamespace(item.namespace) || false;
             const namespace = escapeHtml(item.namespace || '');
             const name = escapeHtml(item.name || '');
 
@@ -339,6 +329,7 @@
             return;
         }
 
+        const escapeHtml = getEscapeHtml();
         tbody.innerHTML = data.map(item => {
             const hostnames = item.hostnames || item.hosts || [];
             const hostnamesStr = hostnames.length > 0 
@@ -364,7 +355,7 @@
             const loadBalancerIP = item.loadBalancerIP || item.address || '<pending>';
             const ingressController = item.ingressController || item.class || 'Unknown';
             const ports = item.ports ? item.ports.join(', ') : '80,443';
-            const isSystem = isSystemNamespace(item.namespace);
+            const isSystem = window.K8sHelpers?.isSystemNamespace(item.namespace) || false;
             const namespace = escapeHtml(item.namespace || '');
             const name = escapeHtml(item.name || '');
 
@@ -404,7 +395,9 @@
     async function describeService(namespace, name) {
         try {
             const data = await window.ApiClient.get(`/admin/cluster/k8s/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
-            showK8sOutput(`Service ${namespace}/${name}`, data.output || '');
+            if (window.K8sHelpers?.showK8sOutput) {
+                window.K8sHelpers.showK8sOutput(`Service ${namespace}/${name}`, data.output || '');
+            }
         } catch (error) {
             if (window.showAlert) {
                 window.showAlert('error', error.message || 'Lỗi lấy thông tin service');
@@ -416,7 +409,7 @@
 
     // Delete Service
     async function deleteService(namespace, name) {
-        if (isSystemNamespace(namespace)) {
+        if (window.K8sHelpers?.isSystemNamespace(namespace)) {
             if (window.showAlert) {
                 window.showAlert('warning', 'Không cho phép xóa Service trong namespace hệ thống');
             } else {
@@ -429,6 +422,7 @@
         try {
             const data = await window.ApiClient.delete(`/admin/cluster/k8s/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
             if (window.showAlert) {
+                const escapeHtml = getEscapeHtml();
                 window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || `service "${name}" deleted`)}</pre>`);
             }
             await reloadTabDataSilent('services');

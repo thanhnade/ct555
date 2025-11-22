@@ -2,12 +2,14 @@
 (function () {
 	'use strict';
 
-	// Helper: Escape HTML
-	function escapeHtml(text) {
-		if (text == null) return '';
-		const div = document.createElement('div');
-		div.textContent = String(text);
-		return div.innerHTML;
+	// Helper: Get escapeHtml function
+	function getEscapeHtml() {
+		return window.K8sHelpers?.escapeHtml || ((text) => {
+			if (text == null) return '';
+			const div = document.createElement('div');
+			div.textContent = String(text);
+			return div.innerHTML;
+		});
 	}
 
 	// State
@@ -60,6 +62,7 @@
 					statusBadge = 'Deleted';
 					chipClass = 'yellow';
 				} else {
+					const escapeHtml = getEscapeHtml();
 					statusBadge = escapeHtml(req.status || '');
 					chipClass = 'yellow';
 				}
@@ -91,6 +94,7 @@
 				}
 
 				const uploadedDate = req.createdAt ? new Date(req.createdAt).toLocaleDateString('vi-VN') : 'N/A';
+				const escapeHtml = getEscapeHtml();
 				const dockerImage = escapeHtml(req.dockerImage || 'N/A');
 
 				tr.innerHTML = `
@@ -107,6 +111,7 @@
 			});
 		} catch (error) {
 			if (tbody) {
+				const escapeHtml = getEscapeHtml();
 				tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="color: #dc3545; padding: 20px;">Lỗi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}</td></tr>`;
 			}
 			console.error('loadDeploymentRequests error:', error);
@@ -144,6 +149,7 @@
 			}
 		} catch (error) {
 			console.error('Error loading deployment logs:', error);
+			const escapeHtml = getEscapeHtml();
 			consoleDiv.innerHTML = `<div class="text-danger text-center">Lỗi tải logs: ${escapeHtml(error.message || 'Unknown error')}</div>`;
 		}
 	}
@@ -232,6 +238,7 @@
 			}
 		} catch (error) {
 			console.error('Error deleting deployment request:', error);
+			const escapeHtml = getEscapeHtml();
 			window.showAlert('error', '❌ Lỗi xóa yêu cầu: ' + escapeHtml(error.message || 'Lỗi kết nối'));
 		}
 	}
@@ -315,6 +322,7 @@
 				(detail.status === 'ERROR' ? 'bg-danger' :
 					(detail.status === 'RUNNING' ? 'bg-success' : 'bg-secondary'));
 
+			const escapeHtml = getEscapeHtml();
 			const modalHtml = `
       <div class="modal fade" id="${modalId}" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg">
@@ -785,6 +793,7 @@
 
 			window.showAlert('success', `
 				✅ Đã cập nhật yêu cầu #${data.id} thành công.
+				const escapeHtml = getEscapeHtml();
 				<br>Docker Image: <strong>${escapeHtml(data.dockerImage || '')}</strong>
 				<br>Trạng thái: <strong>${escapeHtml(data.status || '')}</strong>
 			`);

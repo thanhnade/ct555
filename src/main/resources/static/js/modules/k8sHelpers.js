@@ -61,6 +61,57 @@
         return 'bg-danger';
     }
 
+    // Hàm hỗ trợ: Normalize CPU cores (convert từ nan cores về cores nếu cần)
+    function normalizeCpuCores(cpuValue) {
+        let cpuRaw = typeof cpuValue === 'number' ? cpuValue : parseFloat(cpuValue || '0');
+        if (!Number.isFinite(cpuRaw)) {
+            return 0;
+        }
+        if (cpuRaw > 1000) {
+            cpuRaw = cpuRaw / 1_000_000_000.0;
+        }
+        return cpuRaw;
+    }
+
+    // Hàm hỗ trợ: Format CPU để hiển thị (dạng millicores)
+    function formatCpuDisplay(cpuValue) {
+        const cores = normalizeCpuCores(cpuValue);
+        if (cores <= 0) return '0m';
+        // Luôn hiển thị dưới dạng millicores (m) để đồng nhất
+        const millicores = Math.round(cores * 1000);
+        return millicores + 'm';
+    }
+
+    // Hàm hỗ trợ: Format CPU cores đơn giản (cho servers/clusters - hiển thị "X cores")
+    function formatCpuCores(cpuCores) {
+        if (!cpuCores || cpuCores === '-') return '-';
+        const cores = parseInt(cpuCores, 10);
+        if (!isNaN(cores)) {
+            return `${cores} cores`;
+        }
+        return String(cpuCores);
+    }
+
+    // Hàm hỗ trợ: Normalize RAM về Mi
+    function normalizeRamMi(ramValue) {
+        let ramRaw = typeof ramValue === 'number' ? ramValue : parseFloat(ramValue || '0');
+        if (!Number.isFinite(ramRaw)) {
+            return 0;
+        }
+        return ramRaw;
+    }
+
+    // Hàm hỗ trợ: Format RAM để hiển thị (Mi/Gi)
+    function formatRamDisplay(ramValue) {
+        const ramMi = normalizeRamMi(ramValue);
+        if (ramMi <= 0) return '0 Mi';
+        if (ramMi >= 1024) {
+            const gib = ramMi / 1024;
+            return gib.toFixed(2).replace(/\.?0+$/, '') + ' Gi';
+        }
+        return Math.round(ramMi) + ' Mi';
+    }
+
     // Hàm hỗ trợ: Hiển thị output K8s trong modal (luôn dùng modal, không dùng alert)
     function showK8sOutput(title, output) {
         const modalEl = document.getElementById('k8s-output-modal');
@@ -163,7 +214,12 @@
         getPodStatusBadgeClass,
         getNamespaceStatusBadgeClass,
         getWorkloadStatusBadgeClass,
-        showK8sOutput
+        showK8sOutput,
+        normalizeCpuCores,
+        formatCpuDisplay,
+        formatCpuCores,
+        normalizeRamMi,
+        formatRamDisplay
     };
 })();
 

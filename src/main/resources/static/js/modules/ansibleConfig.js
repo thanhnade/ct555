@@ -5,12 +5,14 @@
 	// Trạng thái module
 	let ansibleStatusRequestToken = 0; // Token để track request hiện tại, tránh race condition
 
-	// Hàm hỗ trợ: Escape HTML để tránh XSS
-	function escapeHtml(text) {
-		if (text == null) return '';
-		const div = document.createElement('div');
-		div.textContent = String(text);
-		return div.innerHTML;
+	// Helper: Get escapeHtml function
+	function getEscapeHtml() {
+		return window.K8sHelpers?.escapeHtml || ((text) => {
+			if (text == null) return '';
+			const div = document.createElement('div');
+			div.textContent = String(text);
+			return div.innerHTML;
+		});
 	}
 
 	// Đọc cấu hình Ansible
@@ -234,6 +236,7 @@
 			// Hiển thị thông tin đang kiểm tra controller node (nếu có)
 			if (statusDisplay && controllerHost) {
 				const roleDisplay = controllerRole === 'ANSIBLE' ? 'ANSIBLE Controller' : 'MASTER Controller';
+				const escapeHtml = getEscapeHtml();
 				statusDisplay.innerHTML = `
 					<div class="alert alert-info">
 						<i class="bi bi-info-circle"></i> Đang kiểm tra trạng thái Ansible trên ${roleDisplay}: <strong>${escapeHtml(controllerHost)}</strong>
@@ -281,6 +284,7 @@
 			}
 
 			if (statusDisplay) {
+				const escapeHtml = getEscapeHtml();
 				statusDisplay.innerHTML = `
 					<div class="alert alert-${alertType}">
 						<i class="bi ${iconClass}"></i> ${escapeHtml(errorMessage)}
@@ -343,6 +347,7 @@
 				`;
 			}
 			if (statusDisplay) {
+				const escapeHtml = getEscapeHtml();
 				statusDisplay.innerHTML = `
 					<div class="alert alert-warning"><i class="bi bi-server"></i> ${roleDisplay} (${escapeHtml(controllerHost)}) đang offline.</div>
 				`;
@@ -492,6 +497,7 @@
 				break;
 			case 'empty':
 				badgeInstall.className = 'badge bg-secondary';
+				const escapeHtml = getEscapeHtml();
 				badgeInstall.innerHTML = `<i class="bi bi-info-circle"></i> ${escapeHtml(message || 'Không có dữ liệu')}`;
 				break;
 			default:

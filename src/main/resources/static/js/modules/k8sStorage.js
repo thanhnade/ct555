@@ -21,8 +21,9 @@
 
     const requestTokens = {};
 
-    function escapeHtml(text) {
-        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
+    // Helper: Get escapeHtml function
+    function getEscapeHtml() {
+        return window.K8sHelpers?.escapeHtml || ((text) => text || '');
     }
 
     function getNextToken(tabName) {
@@ -68,6 +69,7 @@
         const config = storageConfig[tabName];
         if (!tbody || !config) return;
 
+        const escapeHtml = getEscapeHtml();
         if (error.status === 503 || error.response?.status === 503) {
             const errorMsg = error.message || error.response?.data?.error || 'Kubernetes API server không khả dụng';
             tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-warning py-3"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(errorMsg)}</td></tr>`;
@@ -209,6 +211,7 @@
             return;
         }
 
+        const escapeHtml = getEscapeHtml();
         tbody.innerHTML = data.map(item => {
             const accessModes = item.accessModesStr || '-';
             const namespace = escapeHtml(item.namespace || '');
@@ -256,6 +259,7 @@
             return;
         }
 
+        const escapeHtml = getEscapeHtml();
         tbody.innerHTML = data.map(item => {
             const name = escapeHtml(item.name || '');
             const capacity = item.capacity || '-';
@@ -303,6 +307,7 @@
             return;
         }
 
+        const escapeHtml = getEscapeHtml();
         tbody.innerHTML = data.map(item => {
             const name = escapeHtml(item.name || '');
             const provisioner = item.provisioner || '-';
@@ -360,6 +365,7 @@
         if (!confirm(`Xóa PVC ${namespace}/${name}?`)) return;
         try {
             const data = await window.ApiClient.delete(`/admin/cluster/k8s/storage/pvcs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+            const escapeHtml = getEscapeHtml();
             window.showAlert?.('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || '')}</pre>`);
             await reloadTabDataSilent('pvcs');
         } catch (error) {
@@ -380,6 +386,7 @@
         if (!confirm(`Xóa PV ${name}?`)) return;
         try {
             const data = await window.ApiClient.delete(`/admin/cluster/k8s/storage/pvs/${encodeURIComponent(name)}`);
+            const escapeHtml = getEscapeHtml();
             window.showAlert?.('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || '')}</pre>`);
             await reloadTabDataSilent('pvs');
         } catch (error) {
@@ -400,6 +407,7 @@
         if (!confirm(`Xóa StorageClass ${name}?`)) return;
         try {
             const data = await window.ApiClient.delete(`/admin/cluster/k8s/storage/storageclasses/${encodeURIComponent(name)}`);
+            const escapeHtml = getEscapeHtml();
             window.showAlert?.('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || '')}</pre>`);
             await reloadTabDataSilent('storageclasses');
         } catch (error) {

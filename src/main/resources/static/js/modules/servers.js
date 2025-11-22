@@ -11,12 +11,14 @@
 	// Auto-reconnect interval (45 seconds)
 	let autoReconnectInterval = null;
 
-	// Helper: Escape HTML
-	function escapeHtml(text) {
-		if (!text) return '';
-		const div = document.createElement('div');
-		div.textContent = text;
-		return div.innerHTML;
+	// Helper: Get escapeHtml function
+	function getEscapeHtml() {
+		return window.K8sHelpers?.escapeHtml || ((text) => {
+			if (!text) return '';
+			const div = document.createElement('div');
+			div.textContent = text;
+			return div.innerHTML;
+		});
 	}
 
 	// Load servers list
@@ -65,16 +67,11 @@
 				const ramTotal = s.ramTotal || '-';
 				const diskTotal = s.diskTotal || '-';
 				
-				// Format CPU: number of cores
-				let cpuDisplay = '-';
-				if (cpuCores !== '-') {
-					const cores = parseInt(cpuCores, 10);
-					if (!isNaN(cores)) {
-						cpuDisplay = `${cores} cores`;
-					} else {
-						cpuDisplay = escapeHtml(cpuCores);
-					}
-				}
+				const escapeHtml = getEscapeHtml();
+				// Format CPU: number of cores - sử dụng K8sHelpers
+				const cpuDisplay = window.K8sHelpers?.formatCpuCores ? 
+					window.K8sHelpers.formatCpuCores(cpuCores) : 
+					(cpuCores !== '-' ? (parseInt(cpuCores, 10) ? `${parseInt(cpuCores, 10)} cores` : escapeHtml(cpuCores)) : '-');
 				
 				// Format RAM: total RAM capacity
 				const ramDisplay = ramTotal !== '-' ? escapeHtml(ramTotal) : '-';
@@ -604,6 +601,7 @@
 			// Update title
 			const titleEl = document.getElementById('editServerModalLabel');
 			if (titleEl) {
+				const escapeHtml = getEscapeHtml();
 				titleEl.textContent = `✏️ Sửa Server: ${escapeHtml(server.host || 'Unknown')}`;
 			}
 
@@ -804,6 +802,7 @@
 			// Update title
 			const titleEl = document.getElementById('reconnectServerModalLabel');
 			if (titleEl) {
+				const escapeHtml = getEscapeHtml();
 				titleEl.textContent = `🔌 Kết nối lại: ${escapeHtml(server.host || 'Unknown')}`;
 			}
 
@@ -1458,6 +1457,7 @@
 				const diskTotal = metrics.diskTotal || '-';
 				
 				// Hiển thị thông báo chi tiết với HTML format
+				const escapeHtml = getEscapeHtml();
 				const message = `📊 <strong>Metrics đã cập nhật:</strong><br>` +
 					`• <strong>CPU:</strong> ${escapeHtml(cpuCores)} ${cpuCores !== '-' ? 'cores' : ''}<br>` +
 					`• <strong>RAM:</strong> ${escapeHtml(ramTotal)}<br>` +

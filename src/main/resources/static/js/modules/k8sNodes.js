@@ -5,12 +5,14 @@
     let nodesData = [];
     let filteredNodesData = [];
 
-    // Helper function để escape HTML
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    // Helper: Get escapeHtml function
+    function getEscapeHtml() {
+        return window.K8sHelpers?.escapeHtml || ((text) => {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        });
     }
 
     // Helper function để lấy badge class cho status
@@ -72,6 +74,7 @@
             }
         } catch (error) {
             console.error('Error loading quick nodes:', error);
+            const escapeHtml = getEscapeHtml();
             tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Lỗi khi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}</td></tr>`;
         }
     }
@@ -217,6 +220,7 @@
             return;
         }
 
+        const escapeHtml = getEscapeHtml();
         tbody.innerHTML = filteredNodesData.map(node => {
             const statusClass = getStatusClass(node.k8sStatus);
             const roleClass = getRoleClass(node.k8sRoles);
@@ -297,6 +301,9 @@
             modal.show();
             return;
         }
+
+        // Get escapeHtml function for use throughout this function
+        const escapeHtml = getEscapeHtml();
 
         // Render Info tab
         if (infoContentEl) {

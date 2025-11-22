@@ -1,0 +1,166 @@
+<div th:replace="admin/layout :: layout(~{::content})">
+  <div th:fragment="content" xmlns:th="http://www.thymeleaf.org">
+    <!-- Kubernetes RBAC Page -->
+    <div class="page-title-row">
+      <div>
+        <div class="page-title">👤 RBAC</div>
+        <div class="page-subtitle">Quản lý Roles, ClusterRoles, RoleBindings và ClusterRoleBindings.</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn" id="rbac-reload">🔄 Làm mới</button>
+      </div>
+    </div>
+
+    <!-- Tabs for RBAC Types -->
+    <div class="table-card" style="margin-top: 20px;">
+      <ul class="nav nav-tabs mb-3" id="rbac-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="roles-tab" data-bs-toggle="tab" data-bs-target="#roles" type="button" role="tab">
+            Roles (<span id="roles-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="clusterroles-tab" data-bs-toggle="tab" data-bs-target="#clusterroles" type="button" role="tab">
+            ClusterRoles (<span id="clusterroles-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="rolebindings-tab" data-bs-toggle="tab" data-bs-target="#rolebindings" type="button" role="tab">
+            RoleBindings (<span id="rolebindings-count">0</span>)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="clusterrolebindings-tab" data-bs-toggle="tab" data-bs-target="#clusterrolebindings" type="button" role="tab">
+            ClusterRoleBindings (<span id="clusterrolebindings-count">0</span>)
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content" id="rbac-tab-content">
+        <!-- Roles Tab -->
+        <div class="tab-pane fade show active" id="roles" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">Roles</div>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="roles-search"
+                placeholder="🔍 Tìm kiếm...">
+              <select class="form-control" style="width: 150px; font-size: 13px;" id="roles-namespace-filter">
+                <option value="">Tất cả namespace</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-workloads">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Name</th>
+                  <th>Rules</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="roles-tbody">
+                <tr>
+                  <td colspan="5" class="text-center text-muted py-3">Đang tải...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ClusterRoles Tab -->
+        <div class="tab-pane fade" id="clusterroles" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">ClusterRoles</div>
+            <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="clusterroles-search"
+              placeholder="🔍 Tìm kiếm...">
+          </div>
+          <div class="table-responsive">
+            <table class="table table-workloads">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Rules</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="clusterroles-tbody">
+                <tr>
+                  <td colspan="4" class="text-center text-muted py-3">Đang tải...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- RoleBindings Tab -->
+        <div class="tab-pane fade" id="rolebindings" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">RoleBindings</div>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="rolebindings-search"
+                placeholder="🔍 Tìm kiếm...">
+              <select class="form-control" style="width: 150px; font-size: 13px;" id="rolebindings-namespace-filter">
+                <option value="">Tất cả namespace</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-workloads">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Name</th>
+                  <th>Role Ref</th>
+                  <th>Subjects</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rolebindings-tbody">
+                <tr>
+                  <td colspan="6" class="text-center text-muted py-3">Đang tải...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ClusterRoleBindings Tab -->
+        <div class="tab-pane fade" id="clusterrolebindings" role="tabpanel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-weight: 500; color: #495057;">ClusterRoleBindings</div>
+            <input type="text" class="form-control" style="width: 200px; font-size: 13px;" id="clusterrolebindings-search"
+              placeholder="🔍 Tìm kiếm...">
+          </div>
+          <div class="table-responsive">
+            <table class="table table-workloads">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Role Ref</th>
+                  <th>Subjects</th>
+                  <th>Age</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="clusterrolebindings-tbody">
+                <tr>
+                  <td colspan="5" class="text-center text-muted py-3">Đang tải...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- K8s Modals -->
+  <div th:replace="admin/fragments/k8s-modals :: k8s-modals"></div>
+</div>
+<script src="/js/modules/k8sHelpers.js"></script>
+<script src="/js/modules/k8sConfiguration.js"></script>
+

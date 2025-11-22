@@ -217,6 +217,43 @@ public class AdminPageController {
 		model.addAttribute("username", getUsernameFromSession(request));
 		return "admin/pages/deployment-request";
 	}
+
+	// ===================== Kubernetes Configuration Pages =====================
+
+	@GetMapping({"/k8s/configmaps", "/kubernetes/configmaps"})
+	public String kubernetesConfigMapsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes ConfigMaps");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-configmaps";
+	}
+
+	@GetMapping({"/k8s/secrets", "/kubernetes/secrets"})
+	public String kubernetesSecretsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Secrets");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-secrets";
+	}
+
+	@GetMapping({"/k8s/rbac", "/kubernetes/rbac"})
+	public String kubernetesRBACPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes RBAC");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-rbac";
+	}
+
+	@GetMapping({"/k8s/networkpolicies", "/kubernetes/networkpolicies"})
+	public String kubernetesNetworkPoliciesPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Network Policies");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-networkpolicies";
+	}
+
+	@GetMapping({"/k8s/events", "/kubernetes/events"})
+	public String kubernetesEventsPage(Model model, HttpServletRequest request) {
+		model.addAttribute("pageTitle", "Kubernetes Events");
+		model.addAttribute("username", getUsernameFromSession(request));
+		return "admin/pages/kubernetes-events";
+	}
 }
 
 

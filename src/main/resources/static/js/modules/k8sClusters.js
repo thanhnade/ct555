@@ -5,12 +5,14 @@
 	// Playbook manager is loaded separately via script tag in HTML
 	// Integration: Set cluster ID for playbook-manager when needed
 
-	// Helper: Escape HTML
-	function escapeHtml(text) {
-		if (text == null) return '';
-		const div = document.createElement('div');
-		div.textContent = String(text);
-		return div.innerHTML;
+	// Helper: Get escapeHtml function
+	function getEscapeHtml() {
+		return window.K8sHelpers?.escapeHtml || ((text) => {
+			if (text == null) return '';
+			const div = document.createElement('div');
+			div.textContent = String(text);
+			return div.innerHTML;
+		});
 	}
 
 	// State
@@ -87,6 +89,7 @@
 					}
 					
 					// Render các phần khác trước (không đợi K8s version)
+					const escapeHtml = getEscapeHtml();
 					summaryDiv.innerHTML = `
 						<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;">
 							<div style="background: #FFFFFF; padding: 12px; border-radius: 8px; border: 1px solid #E0E0E0;">
@@ -186,6 +189,7 @@
 				} else if (role === 'ANSIBLE') {
 					roleBadge = '<span class="badge bg-success">ANSIBLE</span>';
 				} else {
+					const escapeHtml = getEscapeHtml();
 					roleBadge = `<span class="badge bg-secondary">${escapeHtml(role)}</span>`;
 				}
 
@@ -194,16 +198,11 @@
 				const ramTotal = s.ramTotal || '-';
 				const diskTotal = s.diskTotal || '-';
 				
-				// Format CPU
-				let cpuDisplay = '-';
-				if (cpuCores !== '-') {
-					const cores = parseInt(cpuCores, 10);
-					if (!isNaN(cores)) {
-						cpuDisplay = `${cores} cores`;
-					} else {
-						cpuDisplay = escapeHtml(cpuCores);
-					}
-				}
+				const escapeHtml = getEscapeHtml();
+				// Format CPU - sử dụng K8sHelpers
+				const cpuDisplay = window.K8sHelpers?.formatCpuCores ? 
+					window.K8sHelpers.formatCpuCores(cpuCores) : 
+					(cpuCores !== '-' ? (parseInt(cpuCores, 10) ? `${parseInt(cpuCores, 10)} cores` : escapeHtml(cpuCores)) : '-');
 				
 				const ramDisplay = ramTotal !== '-' ? escapeHtml(ramTotal) : '-';
 				const diskDisplay = diskTotal !== '-' ? escapeHtml(diskTotal) : '-';
@@ -245,6 +244,7 @@
 
 		} catch (err) {
 			console.error('Error loading cluster list:', err);
+			const escapeHtml = getEscapeHtml();
 			const grid = document.getElementById('cluster-servers-grid');
 			if (grid) {
 				grid.innerHTML = `<div class="col-12 text-center text-danger p-4">Lỗi tải danh sách: ${escapeHtml(err.message || 'Unknown error')}</div>`;
@@ -280,6 +280,7 @@
 			}
 			
 			// Cập nhật card khi có kết quả
+			const escapeHtml = getEscapeHtml();
 			k8sCard.innerHTML = `
 				<div style="font-size: 11px; color: #666; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Kubernetes</div>
 				<div style="font-size: 16px; margin-bottom: 4px;">${k8sStatusChip}</div>
@@ -336,6 +337,7 @@
 			} else {
 				statusChip = '<span class="chip red">ERROR</span>';
 			}
+			const escapeHtml = getEscapeHtml();
 			const tr = document.createElement('tr');
 			tr.innerHTML = `
 				<td><strong>${escapeHtml(c.name || '')}</strong></td>
@@ -453,6 +455,7 @@
 							statusChip = '<span class="chip red">OFFLINE</span>';
 						}
 						const role = s.role || 'WORKER';
+						const escapeHtml = getEscapeHtml();
 						const tr = document.createElement('tr');
 						tr.innerHTML = `
 							<td><input type="checkbox" class="available-sel" value="${s.id}"></td>
@@ -493,6 +496,7 @@
 							statusChip = '<span class="chip red">OFFLINE</span>';
 						}
 						const role = s.role || 'WORKER';
+						const escapeHtml = getEscapeHtml();
 						const tr = document.createElement('tr');
 						tr.innerHTML = `
 							<td><input type="checkbox" class="assigned-sel" value="${s.id}"></td>
@@ -667,6 +671,7 @@
 						} else {
 							statusChip = '<span class="chip red">OFFLINE</span>';
 						}
+						const escapeHtml = getEscapeHtml();
 						const tr = document.createElement('tr');
 						tr.innerHTML = `
 							<td><input type="checkbox" class="k8s-sel" value="${s.id}"></td>

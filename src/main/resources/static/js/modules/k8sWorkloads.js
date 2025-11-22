@@ -32,33 +32,18 @@
     // Token để vô hiệu hóa kết quả fetch cũ khi có request mới (tránh race condition)
     let workloadsRequestToken = 0;
 
-    // Helper functions từ k8sHelpers
-    function escapeHtml(text) {
-        return window.K8sHelpers ? window.K8sHelpers.escapeHtml(text) : (text || '');
-    }
-
-    function isSystemNamespace(name) {
-        return window.K8sHelpers ? window.K8sHelpers.isSystemNamespace(name) : false;
-    }
-
-    function isAllowedSpecialWorkload(namespace, name) {
-        return window.K8sHelpers ? window.K8sHelpers.isAllowedSpecialWorkload(namespace, name) : false;
-    }
-
-    function canScaleWorkloadType(type) {
-        return window.K8sHelpers ? window.K8sHelpers.canScaleWorkloadType(type) : false;
-    }
-
-    function showK8sOutput(title, output) {
-        if (window.K8sHelpers && window.K8sHelpers.showK8sOutput) {
-            window.K8sHelpers.showK8sOutput(title, output);
-        } else {
-            alert(`${title}\n\n${output}`);
-        }
+    // Helper: Get escapeHtml function
+    function getEscapeHtml() {
+        return window.K8sHelpers?.escapeHtml || ((text) => text || '');
     }
 
     // Helper function để lấy status class
     function getStatusClass(ready, desired) {
+        // Use K8sHelpers if available
+        if (window.K8sHelpers?.getWorkloadStatusBadgeClass) {
+            return window.K8sHelpers.getWorkloadStatusBadgeClass(ready, desired);
+        }
+        // Fallback logic
         if (ready === desired && ready > 0) return 'bg-success';
         if (ready > 0) return 'bg-warning text-dark';
         return 'bg-danger';
@@ -114,9 +99,11 @@
 
         if (error.status === 503 || error.response?.status === 503) {
             const errorMsg = error.message || error.response?.data?.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY';
+            const escapeHtml = getEscapeHtml();
             tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-warning py-3"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(errorMsg)}</td></tr>`;
         } else {
             const errorMsg = error.message || 'Lỗi khi tải dữ liệu';
+            const escapeHtml = getEscapeHtml();
             tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-danger py-3">${escapeHtml(errorMsg)}</td></tr>`;
         }
     }
@@ -175,14 +162,6 @@
     }
 
     // Helper: Hiển thị alert hoặc alert fallback
-    function showAlertOrFallback(type, message, fallbackFn) {
-        if (window.showAlert) {
-            window.showAlert(type, message);
-        } else if (fallbackFn) {
-            fallbackFn(message);
-        }
-    }
-
     // Helper: Reload pods nếu đang xem pods tab
     async function reloadPodsIfActive() {
         if (loadedTabs.pods) {
@@ -244,12 +223,14 @@
         if (!Array.isArray(list) || list.length === 0) {
             return '<span class="text-muted">—</span>';
         }
+        const escapeHtml = getEscapeHtml();
         return list.map(item => `<span class="badge ${badgeClass} me-1 mb-1">${escapeHtml(item)}</span>`).join('');
     }
 
     function renderKeyValueBadges(obj = {}, badgeClass = 'bg-secondary') {
         const entries = Object.entries(obj || {});
         if (entries.length === 0) return '<span class="text-muted">—</span>';
+        const escapeHtml = getEscapeHtml();
         return entries.map(([key, value]) => `<span class="badge ${badgeClass} me-1 mb-1">${escapeHtml(key)}=${escapeHtml(String(value))}</span>`).join('');
     }
 
@@ -277,7 +258,7 @@
                     <i class="bi bi-download"></i> Download
                 </button>
             </div>
-            <pre class="bg-light p-3 rounded" style="max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-word;"><code id="${containerId}-content">${escapeHtml(yamlText || '')}</code></pre>
+            <pre class="bg-light p-3 rounded" style="max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-word;"><code id="${containerId}-content">${(getEscapeHtml())(yamlText || '')}</code></pre>
         `);
     }
 
@@ -292,6 +273,7 @@
 
     function formatEnv(env = []) {
         if (!Array.isArray(env) || env.length === 0) return '—';
+        const escapeHtml = getEscapeHtml();
         return env.map(e => `<code class="d-block">${escapeHtml(e.name || '')}=${escapeHtml(e.value || '')}</code>`).join('');
     }
 
@@ -636,9 +618,10 @@
                 statusClass = 'bg-warning text-dark';
             }
 
-            const isSystem = isSystemNamespace(item.namespace);
-            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
-            const canScale = canScaleWorkloadType('deployment');
+            const isSystem = window.K8sHelpers?.isSystemNamespace(item.namespace) || false;
+            const isSpecial = window.K8sHelpers?.isAllowedSpecialWorkload(item.namespace, item.name) || false;
+            const canScale = window.K8sHelpers?.canScaleWorkloadType('deployment') || false;
+            const escapeHtml = getEscapeHtml();
             const namespace = item.namespace || '';
             const name = item.name || '';
 
@@ -700,15 +683,16 @@
             const serviceName = item.serviceName || '-';
             const volumeTemplates = item.volumeTemplates || [];
             const pvcCount = item.pvcCount || 0;
-            const volumeDisplay = volumeTemplates.length
-                ? volumeTemplates.map(v => `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(v)}</span>`).join('')
-                : (pvcCount > 0 ? `${pvcCount} PVCs` : '<span class="text-muted">No PVC</span>');
-            const isSystem = isSystemNamespace(item.namespace);
-            const isSpecial = isAllowedSpecialWorkload(item.namespace, item.name);
-            const canScale = canScaleWorkloadType('statefulset');
+            const isSystem = window.K8sHelpers?.isSystemNamespace(item.namespace) || false;
+            const isSpecial = window.K8sHelpers?.isAllowedSpecialWorkload(item.namespace, item.name) || false;
+            const canScale = window.K8sHelpers?.canScaleWorkloadType('statefulset') || false;
             const namespace = item.namespace || '';
             const name = item.name || '';
             const replicasBadgeClass = desired === ready ? 'bg-success' : 'bg-warning text-dark';
+            const escapeHtml = getEscapeHtml();
+            const volumeDisplay = volumeTemplates.length
+                ? volumeTemplates.map(v => `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(v)}</span>`).join('')
+                : (pvcCount > 0 ? `${pvcCount} PVCs` : '<span class="text-muted">No PVC</span>');
             
             return `<tr>
                 <td style="word-break: break-word;">
@@ -758,9 +742,10 @@
             const ready = item.ready || 0;
             const namespace = item.namespace || '';
             const name = item.name || '';
-            const isSystem = isSystemNamespace(namespace);
-            const isSpecial = isAllowedSpecialWorkload(namespace, name);
+            const isSystem = window.K8sHelpers?.isSystemNamespace(namespace) || false;
+            const isSpecial = window.K8sHelpers?.isAllowedSpecialWorkload(namespace, name) || false;
             const replicasBadgeClass = ready === desired ? 'bg-success' : 'bg-warning text-dark';
+            const escapeHtml = getEscapeHtml();
             
             return `<tr>
                 <td style="word-break: break-word;">
@@ -802,11 +787,12 @@
             const lastRun = item.lastRun || item.lastSchedule || '—';
             const active = item.active || 0;
             const status = item.status || (item.suspend ? 'Suspended' : 'Active');
-            const isSystem = isSystemNamespace(namespace);
-            const isSpecial = isAllowedSpecialWorkload(namespace, name);
+            const isSystem = window.K8sHelpers?.isSystemNamespace(namespace) || false;
+            const isSpecial = window.K8sHelpers?.isAllowedSpecialWorkload(namespace, name) || false;
             let statusBadge = 'bg-success';
             if (status === 'Suspended') statusBadge = 'bg-warning text-dark';
             if (status === 'Failed') statusBadge = 'bg-danger';
+            const escapeHtml = getEscapeHtml();
 
             return `<tr>
                 <td style="word-break: break-word;">
@@ -849,12 +835,13 @@
             const duration = item.duration || `${item.startTime || '--'} → ${item.completionTime || '--'}`;
             const status = item.status || 'Unknown';
             const age = item.age || '-';
-            const isSystem = isSystemNamespace(namespace);
-            const isSpecial = isAllowedSpecialWorkload(namespace, name);
+            const isSystem = window.K8sHelpers?.isSystemNamespace(namespace) || false;
+            const isSpecial = window.K8sHelpers?.isAllowedSpecialWorkload(namespace, name) || false;
             let statusClass = 'bg-secondary';
             if (status === 'Complete' || status === 'Succeeded') statusClass = 'bg-success';
             else if (status === 'Running') statusClass = 'bg-info';
             else if (status === 'Failed') statusClass = 'bg-danger';
+            const escapeHtml = getEscapeHtml();
 
             return `<tr>
                 <td style="word-break: break-word;">
@@ -897,13 +884,14 @@
             const restarts = item.restarts ?? 0;
             const podIP = item.podIP || '-';
             const age = item.age || '-';
-            const isSystem = isSystemNamespace(namespace);
-            const isSpecial = isAllowedSpecialWorkload(namespace, name);
+            const isSystem = window.K8sHelpers?.isSystemNamespace(namespace) || false;
+            const isSpecial = window.K8sHelpers?.isAllowedSpecialWorkload(namespace, name) || false;
             
             let statusClass = 'bg-secondary';
             if (status === 'Running') statusClass = 'bg-success';
             else if (status === 'Pending') statusClass = 'bg-warning text-dark';
             else if (status === 'Failed' || status === 'Error') statusClass = 'bg-danger';
+            const escapeHtml = getEscapeHtml();
 
             return `<tr>
                 <td style="word-break: break-word;">
@@ -1059,7 +1047,7 @@
             // Hiển thị loading nếu có hàm showK8sOutput với loading
             if (window.showK8sOutput) {
                 // Có thể hiển thị loading trong output nếu hàm hỗ trợ
-                showK8sOutput(originalTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải thông tin...</div>');
+                window.K8sHelpers?.showK8sOutput(originalTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải thông tin...</div>');
                 loadingShown = true;
             }
             
@@ -1068,9 +1056,9 @@
             // Hiển thị kết quả
             const output = data.output || '';
             if (output.trim()) {
-                showK8sOutput(originalTitle, output);
+                window.K8sHelpers?.showK8sOutput(originalTitle, output);
             } else {
-                showK8sOutput(originalTitle, '<div class="text-muted">Không có thông tin chi tiết</div>');
+                window.K8sHelpers?.showK8sOutput(originalTitle, '<div class="text-muted">Không có thông tin chi tiết</div>');
             }
         } catch (error) {
             const errorMsg = error.message || 'Lỗi lấy thông tin workload';
@@ -1081,7 +1069,8 @@
             }
             // Hiển thị lỗi trong output nếu đã mở modal
             if (loadingShown) {
-                showK8sOutput(originalTitle, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
+                const escapeHtml = getEscapeHtml();
+                window.K8sHelpers?.showK8sOutput(originalTitle, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
             }
         }
     }
@@ -1089,8 +1078,8 @@
     // Delete workload
     async function deleteWorkload(type, namespace, name) {
         // Cho phép xóa các workloads đặc biệt ngay cả khi nằm trong namespace hệ thống
-        const isSpecial = isAllowedSpecialWorkload(namespace, name);
-        if (isSystemNamespace(namespace) && !isSpecial) {
+        const isSpecial = window.K8sHelpers?.isAllowedSpecialWorkload(namespace, name) || false;
+        if ((window.K8sHelpers?.isSystemNamespace(namespace) || false) && !isSpecial) {
             if (window.showAlert) {
                 window.showAlert('warning', 'Không cho phép xóa trong namespace hệ thống');
             } else {
@@ -1125,7 +1114,8 @@
                     const data = await window.ApiClient.delete(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
                     const defaultOutput = getDefaultOutput(type, name);
                     
-                    showAlertOrFallback('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || defaultOutput)}</pre>`);
+                    const escapeHtml = getEscapeHtml();
+                    window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || defaultOutput)}</pre>`);
                     
                     // Reload tab chính và các tab liên quan (ví dụ: delete deployment → reload deployments + pods)
                     await reloadRelatedTabs('delete', type);
@@ -1138,7 +1128,8 @@
                 const data = await window.ApiClient.delete(`/admin/cluster/k8s/${encodeURIComponent(type)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
                 const defaultOutput = getDefaultOutput(type, name);
                 
-                showAlertOrFallback('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || defaultOutput)}</pre>`);
+                const escapeHtml = getEscapeHtml();
+                window.showAlert('success', `<pre class="mb-0 font-monospace">${escapeHtml(data.output || defaultOutput)}</pre>`);
                 
                 // Reload tab chính và các tab liên quan (reloadTabDataSilent đã gọi applyFilters() → updateCounts())
                 const tabName = getTabNameFromType(type);
@@ -1159,7 +1150,7 @@
 
     // Scale workload
     async function scaleWorkload(type, namespace, name) {
-        if (!canScaleWorkloadType(type) || isSystemNamespace(namespace)) {
+        if (!(window.K8sHelpers?.canScaleWorkloadType(type) || false) || (window.K8sHelpers?.isSystemNamespace(namespace) || false)) {
             if (window.showAlert) {
                 window.showAlert('warning', 'Chỉ hỗ trợ scale Deployment/StatefulSet ngoài namespace hệ thống');
             } else {
@@ -1273,7 +1264,7 @@
             const currentWorkload = getWorkloadFromData(type, namespace, name);
             const currentReplicas = currentWorkload ? (currentWorkload.desired || currentWorkload.replicas || 0) : 0;
             if (replicasNum === currentReplicas) {
-                showAlertOrFallback('info', 'Số replicas không thay đổi.', alert);
+                window.showAlert('info', 'Số replicas không thay đổi.');
                 return;
             }
             const isScalingDown = replicasNum < currentReplicas;
@@ -1290,7 +1281,7 @@
                 if (isScalingDown) return `Đang chờ số Pods giảm xuống ${replicasNum}...`;
                 return 'Đang chờ Pods mới sẵn sàng...';
             })();
-            showAlertOrFallback('info', `${baseMessage} ${waitHint}`, alert);
+            window.showAlert('info', `${baseMessage} ${waitHint}`);
             
             waitForWorkloadReady(type, namespace, name, {
                 maxAttempts: 60,
@@ -1309,7 +1300,7 @@
                     const message = success
                         ? `✅ Workload <strong>${namespace}/${name}</strong> đã đạt trạng thái mong muốn (${status}).`
                         : `⚠️ Workload <strong>${namespace}/${name}</strong> chưa đạt trạng thái mong muốn. ${status}`;
-                    showAlertOrFallback(alertType, message, alert);
+                    window.showAlert(alertType, message);
                     reloadRelatedTabs('scale', type);
                 }
             });
@@ -1336,7 +1327,7 @@
         }
 
         if (isSystemNamespace(namespace)) {
-            showAlertOrFallback('warning', 'Không cho phép restart trong namespace hệ thống', alert);
+            window.showAlert('warning', 'Không cho phép restart trong namespace hệ thống');
             return;
         }
 
@@ -1344,7 +1335,7 @@
 
         try {
             await window.ApiClient.post(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`);
-            showAlertOrFallback('info', `✅ Đã restart deployment <strong>${namespace}/${name}</strong>. Đang chờ workload ready...`);
+            window.showAlert('info', `✅ Đã restart deployment <strong>${namespace}/${name}</strong>. Đang chờ workload ready...`);
             
             // Reload deployments và pods (nếu đã load)
             await reloadRelatedTabs('restart', 'deployment');
@@ -1359,7 +1350,7 @@
                 },
                 onComplete: (success, status) => {
                     if (success) {
-                        showAlertOrFallback('success', `✅ Deployment <strong>${namespace}/${name}</strong> đã ready sau restart! Trạng thái: ${status}`);
+                        window.showAlert('success', `✅ Deployment <strong>${namespace}/${name}</strong> đã ready sau restart! Trạng thái: ${status}`);
                     } else {
                         showAlertOrFallback('warning', `⚠️ Deployment <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
                     }
@@ -1367,14 +1358,14 @@
                 }
             });
         } catch (error) {
-            showAlertOrFallback('error', error.message || 'Lỗi restart deployment', (msg) => alert('Lỗi: ' + msg));
+            window.showAlert('error', error.message || 'Lỗi restart deployment');
         }
     }
 
     // Suspend CronJob
     async function suspendCronJob(namespace, name) {
         if (isSystemNamespace(namespace)) {
-            showAlertOrFallback('warning', 'Không cho phép suspend trong namespace hệ thống', alert);
+            window.showAlert('warning', 'Không cho phép suspend trong namespace hệ thống');
             return;
         }
 
@@ -1382,18 +1373,18 @@
 
         try {
             await window.ApiClient.post(`/admin/cluster/k8s/cronjob/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/suspend`);
-            showAlertOrFallback('success', `✅ Đã suspend CronJob <strong>${namespace}/${name}</strong>`);
+            window.showAlert('success', `✅ Đã suspend CronJob <strong>${namespace}/${name}</strong>`);
             // Reload cronjobs và các tab liên quan (jobs, pods nếu đã load)
             await reloadRelatedTabs('suspend', 'cronjob');
         } catch (error) {
-            showAlertOrFallback('error', error.message || 'Lỗi suspend CronJob', (msg) => alert('Lỗi: ' + msg));
+            window.showAlert('error', error.message || 'Lỗi suspend CronJob');
         }
     }
 
     // Resume CronJob
     async function resumeCronJob(namespace, name) {
         if (isSystemNamespace(namespace)) {
-            showAlertOrFallback('warning', 'Không cho phép resume trong namespace hệ thống', alert);
+            window.showAlert('warning', 'Không cho phép resume trong namespace hệ thống');
             return;
         }
 
@@ -1401,11 +1392,11 @@
 
         try {
             await window.ApiClient.post(`/admin/cluster/k8s/cronjob/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/resume`);
-            showAlertOrFallback('success', `✅ Đã resume CronJob <strong>${namespace}/${name}</strong>`);
+            window.showAlert('success', `✅ Đã resume CronJob <strong>${namespace}/${name}</strong>`);
             // Reload cronjobs và các tab liên quan (jobs, pods nếu đã load)
             await reloadRelatedTabs('resume', 'cronjob');
         } catch (error) {
-            showAlertOrFallback('error', error.message || 'Lỗi resume CronJob', (msg) => alert('Lỗi: ' + msg));
+            window.showAlert('error', error.message || 'Lỗi resume CronJob');
         }
     }
 
@@ -1438,9 +1429,10 @@
 
     // Show pod logs modal
     async function showPodLogs(namespace, name) {
+        const escapeHtml = getEscapeHtml();
         const modalEl = document.getElementById('pod-logs-modal');
         if (!modalEl) {
-            showK8sOutput(`Pod Logs: ${namespace}/${name}`, '<div class="text-danger">Pod logs modal chưa được include.</div>');
+            window.K8sHelpers?.showK8sOutput(`Pod Logs: ${namespace}/${name}`, '<div class="text-danger">Pod logs modal chưa được include.</div>');
             return;
         }
 
@@ -1544,9 +1536,10 @@
 
     // Show exec pod modal
     async function showExecPod(namespace, name) {
+        const escapeHtml = getEscapeHtml();
         const modalEl = document.getElementById('pod-exec-modal');
         if (!modalEl) {
-            showK8sOutput(`Exec Pod: ${namespace}/${name}`, '<div class="text-danger">Pod exec modal chưa được include.</div>');
+            window.K8sHelpers?.showK8sOutput(`Exec Pod: ${namespace}/${name}`, '<div class="text-danger">Pod exec modal chưa được include.</div>');
             return;
         }
 
@@ -1775,13 +1768,13 @@
     async function showRolloutHistory(namespace, name) {
         try {
             const historyTitle = `Rollout History: ${namespace}/${name}`;
-            showK8sOutput(historyTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải lịch sử...</div>');
+            window.K8sHelpers?.showK8sOutput(historyTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải lịch sử...</div>');
             
             const data = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/history`);
             const history = data.history || [];
             
             if (history.length === 0) {
-                showK8sOutput(historyTitle, '<div class="text-muted">Không có lịch sử rollout</div>');
+                window.K8sHelpers?.showK8sOutput(historyTitle, '<div class="text-muted">Không có lịch sử rollout</div>');
                 return;
             }
             
@@ -1810,13 +1803,14 @@
             });
             
             historyContent += '</tbody></table></div>';
-            showK8sOutput(historyTitle, historyContent);
+            window.K8sHelpers?.showK8sOutput(historyTitle, historyContent);
         } catch (error) {
             const errorMsg = error.message || 'Lỗi lấy rollout history';
             if (window.showAlert) {
                 window.showAlert('error', errorMsg);
             }
-            showK8sOutput(`Rollout History: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
+            const escapeHtml = getEscapeHtml();
+            window.K8sHelpers?.showK8sOutput(`Rollout History: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
         }
     }
     
@@ -1829,7 +1823,7 @@
                 toRevision: revision
             });
             
-            showAlertOrFallback('success', `✅ Đã rollback deployment <strong>${namespace}/${name}</strong> về revision ${revision}. Đang chờ rollout...`);
+            window.showAlert('success', `✅ Đã rollback deployment <strong>${namespace}/${name}</strong> về revision ${revision}. Đang chờ rollout...`);
             
             // Reload deployments và pods
             await reloadRelatedTabs('restart', 'deployment');
@@ -1844,7 +1838,7 @@
                 },
                 onComplete: (success, status) => {
                     if (success) {
-                        showAlertOrFallback('success', `✅ Deployment <strong>${namespace}/${name}</strong> đã ready sau rollback! Trạng thái: ${status}`);
+                        window.showAlert('success', `✅ Deployment <strong>${namespace}/${name}</strong> đã ready sau rollback! Trạng thái: ${status}`);
                     } else {
                         showAlertOrFallback('warning', `⚠️ Deployment <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
                     }
@@ -1852,7 +1846,7 @@
                 }
             });
         } catch (error) {
-            showAlertOrFallback('error', error.message || 'Lỗi rollback deployment', (msg) => alert('Lỗi: ' + msg));
+            window.showAlert('error', error.message || 'Lỗi rollback deployment');
         }
     }
     
@@ -1879,7 +1873,7 @@
                 newImage: newImage
             });
             
-            showAlertOrFallback('success', `✅ Đã cập nhật image cho container <strong>${containerName}</strong> trong deployment <strong>${namespace}/${name}</strong>. Đang chờ rollout...`);
+            window.showAlert('success', `✅ Đã cập nhật image cho container <strong>${containerName}</strong> trong deployment <strong>${namespace}/${name}</strong>. Đang chờ rollout...`);
             
             // Reload deployments và pods
             await reloadRelatedTabs('restart', 'deployment');
@@ -1894,7 +1888,7 @@
                 },
                 onComplete: (success, status) => {
                     if (success) {
-                        showAlertOrFallback('success', `✅ Deployment <strong>${namespace}/${name}</strong> đã ready sau update image! Trạng thái: ${status}`);
+                        window.showAlert('success', `✅ Deployment <strong>${namespace}/${name}</strong> đã ready sau update image! Trạng thái: ${status}`);
                     } else {
                         showAlertOrFallback('warning', `⚠️ Deployment <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
                     }
@@ -1902,7 +1896,7 @@
                 }
             });
         } catch (error) {
-            showAlertOrFallback('error', error.message || 'Lỗi cập nhật image', (msg) => alert('Lỗi: ' + msg));
+            window.showAlert('error', error.message || 'Lỗi cập nhật image');
         }
     }
 
@@ -1912,13 +1906,13 @@
     async function showStatefulSetVolumes(namespace, name) {
         try {
             const volumesTitle = `Volumes: ${namespace}/${name}`;
-            showK8sOutput(volumesTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải volumes...</div>');
+            window.K8sHelpers?.showK8sOutput(volumesTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải volumes...</div>');
             
             const data = await window.ApiClient.get(`/admin/cluster/k8s/statefulset/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/volumes`);
             const volumes = data.volumes || [];
             
             if (volumes.length === 0) {
-                showK8sOutput(volumesTitle, '<div class="text-muted">StatefulSet này không có volumes (PVCs)</div>');
+                window.K8sHelpers?.showK8sOutput(volumesTitle, '<div class="text-muted">StatefulSet này không có volumes (PVCs)</div>');
                 return;
             }
             
@@ -1949,13 +1943,14 @@
             volumesContent += '</tbody></table></div>';
             volumesContent += '<div class="mt-3"><small class="text-muted">💡 StatefulSets tự động tạo PVCs cho mỗi pod theo thứ tự (ordinal). Mỗi pod có volume riêng để giữ định danh và dữ liệu.</small></div>';
             
-            showK8sOutput(volumesTitle, volumesContent);
+            window.K8sHelpers?.showK8sOutput(volumesTitle, volumesContent);
         } catch (error) {
             const errorMsg = error.message || 'Lỗi lấy volumes';
             if (window.showAlert) {
                 window.showAlert('error', errorMsg);
             }
-            showK8sOutput(`Volumes: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
+            const escapeHtml = getEscapeHtml();
+            window.K8sHelpers?.showK8sOutput(`Volumes: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
         }
     }
     
@@ -1981,7 +1976,7 @@
                 newImage: newImage
             });
             
-            showAlertOrFallback('success', `✅ Đã cập nhật image cho container <strong>${containerName}</strong> trong statefulset <strong>${namespace}/${name}</strong>. Đang chờ rolling update...`);
+            window.showAlert('success', `✅ Đã cập nhật image cho container <strong>${containerName}</strong> trong statefulset <strong>${namespace}/${name}</strong>. Đang chờ rolling update...`);
             
             // Reload statefulsets và pods
             await reloadRelatedTabs('restart', 'statefulset');
@@ -1996,15 +1991,15 @@
                 },
                 onComplete: (success, status) => {
                     if (success) {
-                        showAlertOrFallback('success', `✅ StatefulSet <strong>${namespace}/${name}</strong> đã ready sau update image! Trạng thái: ${status}`);
+                        window.showAlert('success', `✅ StatefulSet <strong>${namespace}/${name}</strong> đã ready sau update image! Trạng thái: ${status}`);
                     } else {
-                        showAlertOrFallback('warning', `⚠️ StatefulSet <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
+                        window.showAlert('warning', `⚠️ StatefulSet <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
                     }
                     reloadRelatedTabs('restart', 'statefulset');
                 }
             });
         } catch (error) {
-            showAlertOrFallback('error', error.message || 'Lỗi cập nhật image', (msg) => alert('Lỗi: ' + msg));
+            window.showAlert('error', error.message || 'Lỗi cập nhật image');
         }
     }
 
@@ -2032,7 +2027,7 @@
                 newImage: newImage
             });
             
-            showAlertOrFallback('success', `✅ Đã cập nhật image cho container <strong>${containerName}</strong> trong daemonset <strong>${namespace}/${name}</strong>. Đang chờ rolling update...`);
+            window.showAlert('success', `✅ Đã cập nhật image cho container <strong>${containerName}</strong> trong daemonset <strong>${namespace}/${name}</strong>. Đang chờ rolling update...`);
             
             // Reload daemonsets và pods
             await reloadRelatedTabs('restart', 'daemonset');
@@ -2047,15 +2042,15 @@
                 },
                 onComplete: (success, status) => {
                     if (success) {
-                        showAlertOrFallback('success', `✅ DaemonSet <strong>${namespace}/${name}</strong> đã ready sau update image! Trạng thái: ${status}`);
+                        window.showAlert('success', `✅ DaemonSet <strong>${namespace}/${name}</strong> đã ready sau update image! Trạng thái: ${status}`);
                     } else {
-                        showAlertOrFallback('warning', `⚠️ DaemonSet <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
+                        window.showAlert('warning', `⚠️ DaemonSet <strong>${namespace}/${name}</strong> chưa ready. ${status}`);
                     }
                     reloadRelatedTabs('restart', 'daemonset');
                 }
             });
         } catch (error) {
-            showAlertOrFallback('error', error.message || 'Lỗi cập nhật image', (msg) => alert('Lỗi: ' + msg));
+            window.showAlert('error', error.message || 'Lỗi cập nhật image');
         }
     }
 
@@ -2113,6 +2108,7 @@
     
     async function loadDeploymentBasicInfo(namespace, name) {
         try {
+            const escapeHtml = getEscapeHtml();
             const data = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
             const deployment = JSON.parse(data.output);
             
@@ -2178,6 +2174,7 @@
             
             document.getElementById('deployment-basic-content').innerHTML = content;
         } catch (error) {
+            const escapeHtml = getEscapeHtml();
             document.getElementById('deployment-basic-content').innerHTML = 
                 `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
         }
@@ -2306,6 +2303,7 @@
             
             document.getElementById('deployment-resources-content').innerHTML = content;
         } catch (error) {
+            const escapeHtml = getEscapeHtml();
             document.getElementById('deployment-resources-content').innerHTML = 
                 `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
         }
@@ -2325,6 +2323,7 @@
             
             document.getElementById('deployment-events-content').innerHTML = content;
         } catch (error) {
+            const escapeHtml = getEscapeHtml();
             document.getElementById('deployment-events-content').innerHTML = 
                 `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
         }
@@ -2361,6 +2360,7 @@
                 return;
             }
             
+            const escapeHtml = getEscapeHtml();
             let podsHtml = '<div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>Name</th><th>Status</th><th>Node</th><th>IP</th><th>Age</th></tr></thead><tbody>';
             
             deploymentPods.forEach(pod => {
@@ -2380,6 +2380,7 @@
             podsHtml += '</tbody></table></div>';
             document.getElementById('deployment-pods-content').innerHTML = podsHtml;
         } catch (error) {
+            const escapeHtml = getEscapeHtml();
             document.getElementById('deployment-pods-content').innerHTML = 
                 `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
         }
@@ -2387,6 +2388,7 @@
     
     async function loadDeploymentYAML(namespace, name) {
         try {
+            const escapeHtml = getEscapeHtml();
             const data = await window.ApiClient.get(`/admin/cluster/k8s/deployment/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}?format=yaml`);
             const yamlContent = data.output || '';
             
@@ -2404,6 +2406,7 @@
             
             document.getElementById('deployment-yaml-content').innerHTML = content;
         } catch (error) {
+            const escapeHtml = getEscapeHtml();
             document.getElementById('deployment-yaml-content').innerHTML = 
                 `<div class="alert alert-danger">Lỗi: ${escapeHtml(error.message || 'Unknown error')}</div>`;
         }
@@ -2442,6 +2445,7 @@
     }
 
     async function viewStatefulSetDetail(namespace, name) {
+        const escapeHtml = getEscapeHtml();
         const modalEl = document.getElementById('statefulset-detail-modal');
         if (!modalEl) return;
         document.getElementById('statefulset-detail-name').textContent = `${namespace}/${name}`;
@@ -2539,6 +2543,7 @@
     }
 
     async function viewDaemonSetDetail(namespace, name) {
+        const escapeHtml = getEscapeHtml();
         const modalEl = document.getElementById('daemonset-detail-modal');
         if (!modalEl) return;
         document.getElementById('daemonset-detail-name').textContent = `${namespace}/${name}`;
@@ -2595,6 +2600,7 @@
     }
 
     async function viewJobDetail(namespace, name) {
+        const escapeHtml = getEscapeHtml();
         const modalEl = document.getElementById('job-detail-modal');
         if (!modalEl) return;
         document.getElementById('job-detail-name').textContent = `${namespace}/${name}`;
@@ -2664,6 +2670,7 @@
     }
 
     async function viewCronJobDetail(namespace, name) {
+        const escapeHtml = getEscapeHtml();
         const modalEl = document.getElementById('cronjob-detail-modal');
         if (!modalEl) return;
         document.getElementById('cronjob-detail-name').textContent = `${namespace}/${name}`;
@@ -2718,6 +2725,7 @@
     }
 
     async function viewPodDetail(namespace, name) {
+        const escapeHtml = getEscapeHtml();
         const modalEl = document.getElementById('pod-detail-modal');
         if (!modalEl) return;
         document.getElementById('pod-detail-name').textContent = `${namespace}/${name}`;
@@ -2801,8 +2809,8 @@
         const target = document.getElementById(contentId);
         if (!target) return;
         navigator.clipboard.writeText(target.textContent || '').then(() => {
-            showAlertOrFallback('success', 'Đã copy YAML vào clipboard', alert);
-        }).catch(err => showAlertOrFallback('error', err.message || 'Không copy được YAML', alert));
+            window.showAlert('success', 'Đã copy YAML vào clipboard');
+        }).catch(err => window.showAlert('error', err.message || 'Không copy được YAML'));
     }
 
     function downloadSectionYaml(contentId, filename) {
@@ -2882,13 +2890,13 @@
     async function showCronJobHistory(namespace, name) {
         try {
             const historyTitle = `Job History: ${namespace}/${name}`;
-            showK8sOutput(historyTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải lịch sử Jobs...</div>');
+            window.K8sHelpers?.showK8sOutput(historyTitle, '<div class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải lịch sử Jobs...</div>');
             
             const data = await window.ApiClient.get(`/admin/cluster/k8s/cronjob/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/jobs`);
             const jobs = data.jobs || [];
             
             if (jobs.length === 0) {
-                showK8sOutput(historyTitle, '<div class="text-muted">CronJob này chưa tạo Job nào</div>');
+                window.K8sHelpers?.showK8sOutput(historyTitle, '<div class="text-muted">CronJob này chưa tạo Job nào</div>');
                 return;
             }
             
@@ -2933,13 +2941,14 @@
             historyContent += '</tbody></table></div>';
             historyContent += '<div class="mt-3"><small class="text-muted">💡 CronJob tự động tạo Jobs theo lịch trình (schedule). Mỗi Job chạy một lần và có thể thành công hoặc thất bại.</small></div>';
             
-            showK8sOutput(historyTitle, historyContent);
+            window.K8sHelpers?.showK8sOutput(historyTitle, historyContent);
         } catch (error) {
             const errorMsg = error.message || 'Lỗi lấy lịch sử Jobs';
             if (window.showAlert) {
                 window.showAlert('error', errorMsg);
             }
-            showK8sOutput(`Job History: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
+            const escapeHtml = getEscapeHtml();
+            window.K8sHelpers?.showK8sOutput(`Job History: ${namespace}/${name}`, `<div class="text-danger">${escapeHtml(errorMsg)}</div>`);
         }
     }
 })();

@@ -5,6 +5,7 @@ import com.example.AutoDeployApp.service.ServerService;
 import com.example.AutoDeployApp.service.AnsibleInstallationService;
 import com.example.AutoDeployApp.service.KubernetesService;
 import com.example.AutoDeployApp.service.K8sWorkloadsService;
+import com.example.AutoDeployApp.service.K8sServiceDiscoveryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,6 +25,9 @@ import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.DaemonSet;
+import io.fabric8.kubernetes.api.model.Event;
+import io.fabric8.kubernetes.api.model.batch.v1.CronJob;
+import io.fabric8.kubernetes.api.model.batch.v1.Job;
 
 @RestController
 @RequestMapping("/admin/cluster")
@@ -47,6 +51,7 @@ public class ClusterAdminController {
     private final AnsibleInstallationService ansibleInstallationService;
     private final KubernetesService kubernetesService;
     private final K8sWorkloadsService k8sWorkloadsService;
+    private final K8sServiceDiscoveryService k8sServiceDiscoveryService;
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
 
     // Constants for timeouts and commands
@@ -62,12 +67,13 @@ public class ClusterAdminController {
 
     public ClusterAdminController(ClusterService clusterService, ServerService serverService,
             AnsibleInstallationService ansibleInstallationService, KubernetesService kubernetesService,
-            K8sWorkloadsService k8sWorkloadsService) {
+            K8sWorkloadsService k8sWorkloadsService, K8sServiceDiscoveryService k8sServiceDiscoveryService) {
         this.clusterService = clusterService;
         this.serverService = serverService;
         this.ansibleInstallationService = ansibleInstallationService;
         this.kubernetesService = kubernetesService;
         this.k8sWorkloadsService = k8sWorkloadsService;
+        this.k8sServiceDiscoveryService = k8sServiceDiscoveryService;
     }
 
     @PreDestroy
@@ -170,15 +176,15 @@ public class ClusterAdminController {
     @GetMapping("/overview/nodes")
     public ResponseEntity<?> getOverviewNodes() {
         logger.info("[Overview Nodes] Bat dau lay nodes...");
-        System.out.println("[Overview Nodes] Bat dau lay nodes...");
+        logger.debug("[Overview Nodes] Bat dau lay nodes...");
         try {
             java.util.List<java.util.Map<String, Object>> k8sNodes = kubernetesService.getKubernetesNodes();
             logger.info("[Overview Nodes] K8s API tra ve {} nodes", k8sNodes != null ? k8sNodes.size() : 0);
-            System.out.println("[Overview Nodes] K8s API tra ve " + (k8sNodes != null ? k8sNodes.size() : 0) + " nodes");
+            logger.debug("[Overview Nodes] K8s API tra ve " + (k8sNodes != null ? k8sNodes.size() : 0) + " nodes");
             
             if (k8sNodes == null || k8sNodes.isEmpty()) {
                 logger.info("[Overview Nodes] Khong co nodes trong K8s cluster");
-                System.out.println("[Overview Nodes] Khong co nodes trong K8s cluster");
+                logger.debug("[Overview Nodes] Khong co nodes trong K8s cluster");
                 return ResponseEntity.ok(Map.of(
                         "nodesCount", 0,
                         "masterCount", 0L,
@@ -193,7 +199,7 @@ public class ClusterAdminController {
             
             logger.info("[Overview Nodes] Ket qua: nodesCount={}, masterCount={}, workerCount={}", 
                     nodesCount, masterCount, workerCount);
-            System.out.println("[Overview Nodes] Ket qua: nodesCount=" + nodesCount + 
+            logger.debug("[Overview Nodes] Ket qua: nodesCount=" + nodesCount + 
                     ", masterCount=" + masterCount + ", workerCount=" + workerCount);
 
             var recentNodes = k8sNodes.stream()
@@ -229,7 +235,7 @@ public class ClusterAdminController {
                     "recentNodes", recentNodes));
         } catch (Exception e) {
             logger.error("[Overview Nodes] Loi khi lay nodes tu K8s API: {}", e.getMessage());
-            System.out.println("[Overview Nodes] Loi khi lay nodes tu K8s API: " + e.getMessage());
+            logger.debug("[Overview Nodes] Loi khi lay nodes tu K8s API: " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.ok(Map.of(
                     "nodesCount", 0,
@@ -249,10 +255,16 @@ public class ClusterAdminController {
             io.fabric8.kubernetes.api.model.apps.DeploymentList deployments = null;
             io.fabric8.kubernetes.api.model.apps.StatefulSetList statefulSets = null;
             io.fabric8.kubernetes.api.model.apps.DaemonSetList daemonSets = null;
+            io.fabric8.kubernetes.api.model.batch.v1.CronJobList cronJobs = null;
+            io.fabric8.kubernetes.api.model.batch.v1.JobList jobs = null;
+            io.fabric8.kubernetes.api.model.PodList pods = null;
             
             CompletableFuture<io.fabric8.kubernetes.api.model.apps.DeploymentList> deploymentsFuture = null;
             CompletableFuture<io.fabric8.kubernetes.api.model.apps.StatefulSetList> statefulSetsFuture = null;
             CompletableFuture<io.fabric8.kubernetes.api.model.apps.DaemonSetList> daemonSetsFuture = null;
+            CompletableFuture<io.fabric8.kubernetes.api.model.batch.v1.CronJobList> cronJobsFuture = null;
+            CompletableFuture<io.fabric8.kubernetes.api.model.batch.v1.JobList> jobsFuture = null;
+            CompletableFuture<io.fabric8.kubernetes.api.model.PodList> podsFuture = null;
             
             try {
                 deploymentsFuture = CompletableFuture.supplyAsync(() -> {
@@ -282,15 +294,46 @@ public class ClusterAdminController {
                     }
                 }, executorService);
                 
-                CompletableFuture.allOf(deploymentsFuture, statefulSetsFuture, daemonSetsFuture)
+                cronJobsFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return k8sWorkloadsService.getCronJobs(null);
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được CronJobs: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
+                
+                jobsFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return k8sWorkloadsService.getJobs(null);
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được Jobs: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
+                
+                podsFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return k8sWorkloadsService.getPods(null);
+                    } catch (Exception e) {
+                        logger.debug("Không lấy được Pods: " + e.getMessage());
+                        return null;
+                    }
+                }, executorService);
+                
+                CompletableFuture.allOf(deploymentsFuture, statefulSetsFuture, daemonSetsFuture,
+                        cronJobsFuture, jobsFuture, podsFuture)
                     .get(OVERVIEW_API_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 
                 deployments = deploymentsFuture.get();
                 statefulSets = statefulSetsFuture.get();
                 daemonSets = daemonSetsFuture.get();
+                cronJobs = cronJobsFuture.get();
+                jobs = jobsFuture.get();
+                pods = podsFuture.get();
             } catch (java.util.concurrent.TimeoutException e) {
                 logger.warn("[Overview Workloads] Timeout sau {} giây khi lấy workloads: {}", OVERVIEW_API_TIMEOUT_SECONDS, e.getMessage());
-                System.out.println("[Overview Workloads] Timeout sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây khi lấy workloads: " + e.getMessage());
+                logger.debug("[Overview Workloads] Timeout sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây khi lấy workloads: " + e.getMessage());
                 // Lấy kết quả đã có (có thể null nếu chưa hoàn thành)
                 try {
                     if (deploymentsFuture != null && deploymentsFuture.isDone()) {
@@ -302,18 +345,30 @@ public class ClusterAdminController {
                     if (daemonSetsFuture != null && daemonSetsFuture.isDone()) {
                         daemonSets = daemonSetsFuture.get();
                     }
+                    if (cronJobsFuture != null && cronJobsFuture.isDone()) {
+                        cronJobs = cronJobsFuture.get();
+                    }
+                    if (jobsFuture != null && jobsFuture.isDone()) {
+                        jobs = jobsFuture.get();
+                    }
+                    if (podsFuture != null && podsFuture.isDone()) {
+                        pods = podsFuture.get();
+                    }
                 } catch (Exception ex) {
                     logger.debug("Không lấy được kết quả từ futures: " + ex.getMessage());
                 }
             } catch (Exception e) {
                 logger.warn("[Overview Workloads] Lỗi khi lấy workloads: " + e.getMessage());
-                System.out.println("[Overview Workloads] Lỗi khi lấy workloads: " + e.getMessage());
+                logger.debug("[Overview Workloads] Lỗi khi lấy workloads: " + e.getMessage());
             }
             
             int workloadsCount = 0;
             if (deployments != null) workloadsCount += deployments.getItems().size();
             if (statefulSets != null) workloadsCount += statefulSets.getItems().size();
             if (daemonSets != null) workloadsCount += daemonSets.getItems().size();
+            if (cronJobs != null) workloadsCount += cronJobs.getItems().size();
+            if (jobs != null) workloadsCount += jobs.getItems().size();
+            if (pods != null) workloadsCount += pods.getItems().size();
 
             java.util.List<java.util.Map<String, Object>> recentWorkloads = java.util.List.of();
             try {
@@ -332,6 +387,21 @@ public class ClusterAdminController {
                 if (daemonSets != null) {
                     daemonSets.getItems().stream()
                             .forEach(ds -> workloadsList.add(convertWorkloadToOverviewMap(ds)));
+                }
+                
+                if (cronJobs != null) {
+                    cronJobs.getItems().stream()
+                            .forEach(cj -> workloadsList.add(convertWorkloadToOverviewMap(cj)));
+                }
+                
+                if (jobs != null) {
+                    jobs.getItems().stream()
+                            .forEach(job -> workloadsList.add(convertWorkloadToOverviewMap(job)));
+                }
+                
+                if (pods != null) {
+                    pods.getItems().stream()
+                            .forEach(pod -> workloadsList.add(convertWorkloadToOverviewMap(pod)));
                 }
                 
                 recentWorkloads = workloadsList.stream().limit(10).collect(java.util.stream.Collectors.toList());
@@ -389,7 +459,7 @@ public class ClusterAdminController {
                 namespaces = namespacesFuture.get();
             } catch (java.util.concurrent.TimeoutException e) {
                 logger.warn("[Overview Pods/Namespaces] Timeout sau {} giây khi lấy pods/namespaces: {}", OVERVIEW_API_TIMEOUT_SECONDS, e.getMessage());
-                System.out.println("[Overview Pods/Namespaces] Timeout sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây khi lấy pods/namespaces: " + e.getMessage());
+                logger.debug("[Overview Pods/Namespaces] Timeout sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây khi lấy pods/namespaces: " + e.getMessage());
                 // Lấy kết quả đã có (có thể null nếu chưa hoàn thành)
                 try {
                     if (podsFuture != null && podsFuture.isDone()) {
@@ -403,7 +473,7 @@ public class ClusterAdminController {
                 }
             } catch (Exception e) {
                 logger.warn("[Overview Pods/Namespaces] Lỗi khi lấy pods/namespaces: " + e.getMessage());
-                System.out.println("[Overview Pods/Namespaces] Lỗi khi lấy pods/namespaces: " + e.getMessage());
+                logger.debug("[Overview Pods/Namespaces] Lỗi khi lấy pods/namespaces: " + e.getMessage());
             }
             
             int totalPodsCount = 0;
@@ -442,8 +512,11 @@ public class ClusterAdminController {
      */
     @GetMapping("/overview/resource-usage")
     public ResponseEntity<?> getOverviewResourceUsage(HttpServletRequest request) {
-        Map<String, Double> resourceUsage = Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0);
+        Map<String, Object> resourceUsage = Map.of("cpu", 0.0, "ram", 0.0, "disk", 0.0,
+                "cpuUsedCores", 0.0, "cpuTotalCores", 0.0, "ramUsedBytes", 0.0, "ramTotalBytes", 0.0);
+        Map<String, String> resourceUsageRaw = Map.of();
         String reason = "";
+        String warning = "";
         
         // Kiểm tra xem có nodes trong K8s cluster không trước khi lấy Resource Usage
         // Chỉ kiểm tra từ K8s API, không fallback về database
@@ -451,58 +524,70 @@ public class ClusterAdminController {
             java.util.List<java.util.Map<String, Object>> k8sNodes = kubernetesService.getKubernetesNodes();
             if (k8sNodes == null || k8sNodes.isEmpty()) {
                 reason = "Khong co nodes trong K8s cluster (k8sNodes = " + (k8sNodes == null ? "null" : "empty") + ")";
-                logger.info("[Resource Usage] " + reason);
-                System.out.println("[Resource Usage] " + reason);
-                return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "reason", reason));
+                logger.info("[Overview] " + reason);
+                logger.debug("[Overview] " + reason);
+                resourceUsageRaw = extractRawUsage(resourceUsage);
+                return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "resourceUsageRaw", resourceUsageRaw, "reason", reason, "warning", warning));
             }
-            logger.info("[Resource Usage] Tim thay {} nodes tu K8s API", k8sNodes.size());
-            System.out.println("[Resource Usage] Tim thay " + k8sNodes.size() + " nodes tu K8s API");
+            logger.info("[Overview] Tim thay {} nodes tu K8s API", k8sNodes.size());
+            logger.debug("[Overview] Tim thay " + k8sNodes.size() + " nodes tu K8s API");
         } catch (Exception e) {
             reason = "Khong ket noi duoc K8s API hoac khong co nodes: " + e.getMessage();
-            logger.info("[Resource Usage] " + reason);
-            System.out.println("[Resource Usage] " + reason);
+            logger.info("[Overview] " + reason);
+            logger.debug("[Overview] " + reason);
             e.printStackTrace();
-            return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "reason", reason));
+            resourceUsageRaw = extractRawUsage(resourceUsage);
+            return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "resourceUsageRaw", resourceUsageRaw, "reason", reason, "warning", warning));
         }
         
         // Ưu tiên lấy từ Kubernetes Metrics API (nhanh hơn, chính xác hơn)
         try {
-            logger.info("[Resource Usage] Dang lay metrics tu K8s Metrics API...");
-            System.out.println("[Resource Usage] Dang lay metrics tu K8s Metrics API...");
+            logger.info("[Overview] Dang lay metrics tu K8s Metrics API...");
+            logger.debug("[Overview] Dang lay metrics tu K8s Metrics API...");
             resourceUsage = kubernetesService.calculateClusterResourceUsageFromMetrics();
             
-            logger.info("[Resource Usage] Metrics API tra ve: CPU={}%, RAM={}%, Disk={}%", 
+            logger.info("[Overview] Metrics API tra ve: CPU={}%, RAM={}%, Disk={}%", 
                     resourceUsage.get("cpu"), resourceUsage.get("ram"), resourceUsage.get("disk"));
-            System.out.println("[Resource Usage] Metrics API tra ve: CPU=" + resourceUsage.get("cpu") + 
+            logger.debug("[Overview] Metrics API tra ve: CPU=" + resourceUsage.get("cpu") + 
                     "%, RAM=" + resourceUsage.get("ram") + "%, Disk=" + resourceUsage.get("disk") + "%");
+            resourceUsageRaw = extractRawUsage(resourceUsage);
+            logger.info("[Overview] Metrics API raw: CPU={}, RAM={}",
+                    resourceUsageRaw.getOrDefault("cpu", ""), resourceUsageRaw.getOrDefault("ram", ""));
             
             // Nếu Metrics API trả về dữ liệu hợp lệ (không phải tất cả 0), sử dụng nó
             // Disk không có trong Metrics API, cần lấy từ SSH fallback
-            if (resourceUsage.get("cpu") > 0.0 || resourceUsage.get("ram") > 0.0) {
-                logger.info("[Resource Usage] Metrics API co du lieu hop le, lay disk tu SSH...");
-                System.out.println("[Resource Usage] Metrics API co du lieu hop le, lay disk tu SSH...");
+            double cpuVal = toDouble(resourceUsage.get("cpu"));
+            double ramVal = toDouble(resourceUsage.get("ram"));
+            if (cpuVal > 0.0 || ramVal > 0.0) {
+                logger.info("[Overview] Metrics API co du lieu hop le, lay disk tu SSH...");
+                logger.debug("[Overview] Metrics API co du lieu hop le, lay disk tu SSH...");
                 // Lấy disk usage từ SSH fallback nếu cần
                 double diskUsage = getDiskUsageFromSSH(request);
-                logger.info("[Resource Usage] Disk usage tu SSH: {}%", diskUsage);
-                System.out.println("[Resource Usage] Disk usage tu SSH: " + diskUsage + "%");
+                logger.info("[Overview] Disk usage tu SSH: {}%", diskUsage);
+                logger.debug("[Overview] Disk usage tu SSH: " + diskUsage + "%");
                 if (diskUsage > 0.0) {
-                    resourceUsage = Map.of(
-                            "cpu", resourceUsage.get("cpu"),
-                            "ram", resourceUsage.get("ram"),
-                            "disk", diskUsage);
+                resourceUsage = Map.of(
+                        "cpu", resourceUsage.get("cpu"),
+                        "ram", resourceUsage.get("ram"),
+                        "disk", diskUsage,
+                        "cpuUsedCores", resourceUsage.get("cpuUsedCores"),
+                        "cpuTotalCores", resourceUsage.get("cpuTotalCores"),
+                        "ramUsedBytes", resourceUsage.get("ramUsedBytes"),
+                        "ramTotalBytes", resourceUsage.get("ramTotalBytes"));
                 }
                 reason = "Lay tu K8s Metrics API thanh cong";
-                return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "reason", reason));
+                resourceUsageRaw = extractRawUsage(resourceUsage);
+                return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "resourceUsageRaw", resourceUsageRaw, "reason", reason, "warning", warning));
             } else {
                 reason = "Metrics API tra ve tat ca 0 (CPU=" + resourceUsage.get("cpu") + 
                         "%, RAM=" + resourceUsage.get("ram") + "%), se fallback ve SSH";
-                logger.info("[Resource Usage] " + reason);
-                System.out.println("[Resource Usage] " + reason);
+                logger.info("[Overview] " + reason);
+                logger.debug("[Overview] " + reason);
             }
         } catch (Exception e) {
             reason = "Khong lay duoc metrics tu K8s Metrics API: " + e.getMessage();
-            logger.info("[Resource Usage] " + reason);
-            System.out.println("[Resource Usage] " + reason);
+            logger.info("[Overview] " + reason);
+            logger.debug("[Overview] " + reason);
             e.printStackTrace();
         }
         
@@ -510,20 +595,23 @@ public class ClusterAdminController {
         // Chỉ fallback khi đã có nodes trong cluster (đã kiểm tra ở trên)
         try {
             var servers = serverService.findByClusterStatus("AVAILABLE");
-            logger.info("[Resource Usage] Fallback SSH: Tim thay {} servers voi clusterStatus=AVAILABLE", 
+            logger.info("[Overview] Fallback SSH: Tim thay {} servers voi clusterStatus=AVAILABLE", 
                     servers != null ? servers.size() : 0);
-            System.out.println("[Resource Usage] Fallback SSH: Tim thay " + 
+            logger.debug("[Overview] Fallback SSH: Tim thay " + 
                     (servers != null ? servers.size() : 0) + " servers voi clusterStatus=AVAILABLE");
             
             if (servers != null && !servers.isEmpty()) {
                 var session = request.getSession(false);
                 java.util.Map<Long, String> pwCache = getPasswordCache(session);
                 java.util.Set<Long> connectedIds = getConnectedServerIds(session);
+                if (connectedIds == null || connectedIds.isEmpty()) {
+                    warning = "Khong co server nao duoc connect de lay metrics (CONNECTED_SERVERS trong session trong).";
+                }
                 java.util.List<ServerData> serverDataList = createServerDataList(servers, connectedIds, 5);
                 
-                logger.info("[Resource Usage] Fallback SSH: Tạo được {} ServerData để lấy metrics", 
+                logger.info("[Overview] Fallback SSH: Tạo được {} ServerData để lấy metrics", 
                         serverDataList.size());
-                System.out.println("[Resource Usage] Fallback SSH: Tạo được " + 
+                logger.debug("[Overview] Fallback SSH: Tạo được " + 
                         serverDataList.size() + " ServerData để lấy metrics");
                 
                 if (!serverDataList.isEmpty()) {
@@ -537,54 +625,237 @@ public class ClusterAdminController {
                             Map<String, Object> metrics = future.get(OVERVIEW_API_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                             metricsList.add(metrics);
                         } catch (java.util.concurrent.TimeoutException e) {
-                            logger.warn("[Resource Usage] Timeout lấy metrics cho overview sau {} giây: {}", OVERVIEW_API_TIMEOUT_SECONDS, e.getMessage());
-                            System.out.println("[Resource Usage] Timeout lấy metrics cho overview sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây: " + e.getMessage());
+                            logger.warn("[Overview] Timeout lấy metrics cho overview sau {} giây: {}", OVERVIEW_API_TIMEOUT_SECONDS, e.getMessage());
+                            logger.debug("[Overview] Timeout lấy metrics cho overview sau " + OVERVIEW_API_TIMEOUT_SECONDS + " giây: " + e.getMessage());
                         } catch (Exception e) {
-                            logger.warn("[Resource Usage] Lỗi lấy metrics cho overview: {}", e.getMessage());
-                            System.out.println("[Resource Usage] Lỗi lấy metrics cho overview: " + e.getMessage());
+                            logger.warn("[Overview] Lỗi lấy metrics cho overview: {}", e.getMessage());
+                            logger.debug("[Overview] Lỗi lấy metrics cho overview: " + e.getMessage());
                         }
                     }
                     
-                    logger.info("[Resource Usage] Fallback SSH: Thu thập được {} metrics", metricsList.size());
-                    System.out.println("[Resource Usage] Fallback SSH: Thu thập được " + 
+                    logger.info("[Overview] Fallback SSH: Thu thập được {} metrics", metricsList.size());
+                    logger.debug("[Overview] Fallback SSH: Thu thập được " + 
                             metricsList.size() + " metrics");
                     
                     if (!metricsList.isEmpty()) {
-                        resourceUsage = calculateAverageResourceUsage(metricsList);
+                        Map<String, Double> avg = calculateAverageResourceUsage(metricsList);
+                        java.util.Map<String, Object> merged = new java.util.HashMap<>();
+                        merged.putAll(avg);
+                        merged.put("cpuUsedCores", 0.0);
+                        merged.put("cpuTotalCores", 0.0);
+                        merged.put("ramUsedBytes", 0.0);
+                        merged.put("ramTotalBytes", 0.0);
+                        resourceUsage = merged;
                         reason = "Lấy từ SSH fallback thành công (" + metricsList.size() + " servers)";
-                        logger.info("[Resource Usage] SSH fallback trả về: CPU={}%, RAM={}%, Disk={}%", 
+                        logger.info("[Overview] SSH fallback trả về: CPU={}%, RAM={}%, Disk={}%", 
                                 resourceUsage.get("cpu"), resourceUsage.get("ram"), resourceUsage.get("disk"));
-                        System.out.println("[Resource Usage] SSH fallback trả về: CPU=" + resourceUsage.get("cpu") + 
+                        logger.debug("[Overview] SSH fallback trả về: CPU=" + resourceUsage.get("cpu") + 
                                 "%, RAM=" + resourceUsage.get("ram") + "%, Disk=" + resourceUsage.get("disk") + "%");
                     } else {
                         reason = "SSH fallback không thu thập được metrics nào";
-                        logger.warn("[Resource Usage] " + reason);
-                        System.out.println("[Resource Usage] " + reason);
+                        warning = warning.isBlank() ? "Không lấy được metrics từ SSH fallback" : warning;
+                        logger.warn("[Overview] " + reason);
+                        logger.debug("[Overview] " + reason);
                     }
                 } else {
                     reason = "Không tạo được ServerData nào (có thể servers không online hoặc không connected)";
-                    logger.warn("[Resource Usage] " + reason);
-                    System.out.println("[Resource Usage] " + reason);
+                    warning = warning.isBlank() ? "Servers không online hoặc không có kết nối SSH hợp lệ" : warning;
+                    logger.warn("[Overview] " + reason);
+                    logger.debug("[Overview] " + reason);
                 }
             } else {
                 reason = "Không có servers nào với clusterStatus=AVAILABLE";
-                logger.warn("[Resource Usage] " + reason);
-                System.out.println("[Resource Usage] " + reason);
+                warning = warning.isBlank() ? "Không có server AVAILABLE để đọc metrics" : warning;
+                logger.warn("[Overview] " + reason);
+                logger.debug("[Overview] " + reason);
             }
         } catch (Exception e) {
             reason = "Lỗi khi fallback về SSH: " + e.getMessage();
-            logger.error("[Resource Usage] " + reason, e);
-            System.out.println("[Resource Usage] " + reason);
+            logger.error("[Overview] " + reason, e);
+            logger.debug("[Overview] " + reason);
             e.printStackTrace();
         }
         
-        logger.info("[Resource Usage] Kết quả cuối cùng: CPU={}%, RAM={}%, Disk={}% | Lý do: {}", 
+        logger.info("[Overview] Kết quả cuối cùng: CPU={}%, RAM={}%, Disk={}% | Lý do: {}", 
                 resourceUsage.get("cpu"), resourceUsage.get("ram"), resourceUsage.get("disk"), reason);
-        System.out.println("[Resource Usage] Kết quả cuối cùng: CPU=" + resourceUsage.get("cpu") + 
+        logger.debug("[Overview] Kết quả cuối cùng: CPU=" + resourceUsage.get("cpu") + 
                 "%, RAM=" + resourceUsage.get("ram") + "%, Disk=" + resourceUsage.get("disk") + 
                 "% | Lý do: " + reason);
-        
-        return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "reason", reason));
+
+        resourceUsageRaw = extractRawUsage(resourceUsage);
+        return ResponseEntity.ok(Map.of("resourceUsage", resourceUsage, "resourceUsageRaw", resourceUsageRaw, "reason", reason, "warning", warning));
+    }
+
+    /**
+     * Convert raw usage values sang chuỗi hiển thị
+     */
+    private Map<String, String> extractRawUsage(Map<String, Object> resourceUsage) {
+        try {
+            double cpuUsed = resourceUsage.get("cpuUsedCores") instanceof Number n ? n.doubleValue() : 0.0;
+            double cpuTotal = resourceUsage.get("cpuTotalCores") instanceof Number n ? n.doubleValue() : 0.0;
+            double ramUsedBytes = resourceUsage.get("ramUsedBytes") instanceof Number n ? n.doubleValue() : 0.0;
+            double ramTotalBytes = resourceUsage.get("ramTotalBytes") instanceof Number n ? n.doubleValue() : 0.0;
+
+            String cpuStr = cpuTotal > 0 ? String.format("%.2f/%.2f cores", cpuUsed, cpuTotal) : "";
+            String ramStr = ramTotalBytes > 0
+                    ? toHumanReadableBytes(ramUsedBytes) + "/" + toHumanReadableBytes(ramTotalBytes)
+                    : "";
+
+            return Map.of("cpu", cpuStr, "ram", ramStr);
+        } catch (Exception e) {
+            logger.debug("extractRawUsage error: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private String toHumanReadableBytes(double bytes) {
+        if (bytes <= 0) return "0 B";
+        String[] units = {"B", "KB", "MB", "GB", "TB"};
+        int idx = 0;
+        double value = bytes;
+        while (value >= 1024 && idx < units.length - 1) {
+            value /= 1024.0;
+            idx++;
+        }
+        return String.format("%.2f %s", value, units[idx]);
+    }
+
+    private double toDouble(Object obj) {
+        if (obj instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (obj instanceof String s) {
+            try {
+                return Double.parseDouble(s);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 0.0;
+    }
+
+    /**
+     * Health summary cho overview: nodes/pods/deployments, networking và events cảnh báo gần đây
+     */
+    @GetMapping("/overview/health")
+    public ResponseEntity<?> getOverviewHealth() {
+        try {
+            // Nodes
+            List<Map<String, Object>> k8sNodes = kubernetesService.getKubernetesNodes();
+            long readyNodes = k8sNodes.stream()
+                    .filter(n -> "Ready".equalsIgnoreCase(String.valueOf(n.getOrDefault("k8sStatus", "")))
+                            || "Ready".equalsIgnoreCase(String.valueOf(n.getOrDefault("status", ""))))
+                    .count();
+            int totalNodes = k8sNodes.size();
+
+            // Pods
+            var podList = k8sWorkloadsService.getPods(null);
+            int totalPods = podList != null ? podList.getItems().size() : 0;
+            int runningPods = 0;
+            int pendingPods = 0;
+            int failedPods = 0;
+            if (podList != null) {
+                for (Pod p : podList.getItems()) {
+                    String phase = p.getStatus() != null ? p.getStatus().getPhase() : "";
+                    if ("Running".equalsIgnoreCase(phase)) {
+                        runningPods++;
+                    } else if ("Pending".equalsIgnoreCase(phase)) {
+                        pendingPods++;
+                    } else if ("Failed".equalsIgnoreCase(phase) || "CrashLoopBackOff".equalsIgnoreCase(phase)) {
+                        failedPods++;
+                    }
+                }
+            }
+
+            // Deployments
+            var deploymentList = k8sWorkloadsService.getDeployments(null);
+            int totalDeployments = deploymentList != null ? deploymentList.getItems().size() : 0;
+            int availableDeployments = 0;
+            if (deploymentList != null) {
+                for (Deployment dep : deploymentList.getItems()) {
+                    Integer available = dep.getStatus() != null ? dep.getStatus().getAvailableReplicas() : null;
+                    Integer desired = dep.getSpec() != null ? dep.getSpec().getReplicas() : null;
+                    if (available != null && desired != null && available >= desired) {
+                        availableDeployments++;
+                    }
+                }
+            }
+
+            // Networking
+            int servicesCount = 0;
+            int ingressCount = 0;
+            try {
+                var services = k8sServiceDiscoveryService.getServices(null);
+                servicesCount = services != null && services.getItems() != null ? services.getItems().size() : 0;
+            } catch (Exception e) {
+                logger.debug("Không lấy được services: {}", e.getMessage());
+            }
+            try {
+                var ingresses = k8sServiceDiscoveryService.getIngress(null);
+                ingressCount = ingresses != null && ingresses.getItems() != null ? ingresses.getItems().size() : 0;
+            } catch (Exception e) {
+                logger.debug("Không lấy được ingresses: {}", e.getMessage());
+            }
+
+            // Events (Warning/Error trong 1 giờ gần nhất)
+            int warningsCount = 0;
+            List<Map<String, Object>> recentEvents = new java.util.ArrayList<>();
+            try (var client = kubernetesService.getKubernetesClientForCluster()) {
+                var events = client.v1().events().inAnyNamespace().list();
+                if (events != null && events.getItems() != null) {
+                    java.time.Instant cutoff = java.time.Instant.now().minus(java.time.Duration.ofHours(1));
+                    for (Event ev : events.getItems()) {
+                        String type = ev.getType();
+                        java.time.Instant eventTime = null;
+                        if (ev.getEventTime() != null && ev.getEventTime().getTime() != null) {
+                            try {
+                                eventTime = java.time.Instant.parse(ev.getEventTime().getTime().toString());
+                            } catch (Exception ignored) {}
+                        } else if (ev.getMetadata() != null && ev.getMetadata().getCreationTimestamp() != null) {
+                            try {
+                                eventTime = java.time.Instant.parse(ev.getMetadata().getCreationTimestamp());
+                            } catch (Exception ignored) {}
+                        }
+                        if (eventTime != null && eventTime.isBefore(cutoff)) {
+                            continue;
+                        }
+                        if ("Warning".equalsIgnoreCase(type) || "Error".equalsIgnoreCase(type)) {
+                            warningsCount++;
+                            if (recentEvents.size() < 10) {
+                                String obj = ev.getInvolvedObject() != null
+                                        ? ev.getInvolvedObject().getKind() + "/" + ev.getInvolvedObject().getName()
+                                        : "";
+                                recentEvents.add(Map.of(
+                                        "type", type != null ? type : "Warning",
+                                        "reason", ev.getReason() != null ? ev.getReason() : "",
+                                        "message", ev.getMessage() != null ? ev.getMessage() : "",
+                                        "object", obj,
+                                        "time", eventTime != null ? eventTime.toString() : (ev.getLastTimestamp() != null ? ev.getLastTimestamp().toString() : "")
+                                ));
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Không lấy được events: {}", e.getMessage());
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "nodes", Map.of("ready", readyNodes, "total", totalNodes),
+                    "pods", Map.of("running", runningPods, "total", totalPods, "pending", pendingPods, "failed", failedPods),
+                    "deployments", Map.of("available", availableDeployments, "total", totalDeployments),
+                    "networking", Map.of("services", servicesCount, "ingress", ingressCount),
+                    "events", Map.of("warnings", warningsCount, "recent", recentEvents)
+            ));
+        } catch (Exception e) {
+            logger.error("Error getting overview health: {}", e.getMessage());
+            return ResponseEntity.ok(Map.of(
+                    "nodes", Map.of("ready", 0, "total", 0),
+                    "pods", Map.of("running", 0, "total", 0, "pending", 0, "failed", 0),
+                    "deployments", Map.of("available", 0, "total", 0),
+                    "networking", Map.of("services", 0, "ingress", 0),
+                    "events", Map.of("warnings", 0, "recent", java.util.List.of())
+            ));
+        }
     }
 
     /**
@@ -1057,15 +1328,18 @@ public class ClusterAdminController {
 	@GetMapping("/k8s/namespaces")
 	public ResponseEntity<?> listNamespaces(HttpServletRequest request) {
         try {
+            logger.info("[Namespaces] Starting to load namespaces data...");
             // Tối ưu: Lấy tất cả dữ liệu một lần thay vì gọi API cho từng namespace
             var namespaceList = kubernetesService.getNamespaces();
             var namespaceItems = namespaceList != null && namespaceList.getItems() != null
                     ? namespaceList.getItems()
                     : java.util.Collections.<io.fabric8.kubernetes.api.model.Namespace>emptyList();
+            logger.info("[Namespaces] Found {} namespaces", namespaceItems.size());
 
             // Lấy tất cả pods một lần (từ tất cả namespaces)
             java.util.Map<String, Integer> podsCountByNamespace = new java.util.HashMap<>();
             try {
+                logger.debug("[Namespaces] Loading pods count...");
                 io.fabric8.kubernetes.api.model.PodList allPods = k8sWorkloadsService.getPods(null); // null = lấy tất cả pods
                 if (allPods != null && allPods.getItems() != null) {
                     // Group pods theo namespace
@@ -1077,6 +1351,7 @@ public class ClusterAdminController {
                                             java.util.stream.Collectors.counting(),
                                             Long::intValue)));
                     podsCountByNamespace.putAll(tempMap);
+                    logger.info("[Namespaces] Pods count loaded: {} namespaces with pods", podsCountByNamespace.size());
                 }
             } catch (Exception e) {
                 logger.debug("Không lấy được pods: " + e.getMessage());
@@ -1085,14 +1360,18 @@ public class ClusterAdminController {
             // Lấy tất cả pod metrics một lần (từ tất cả namespaces)
             java.util.Map<String, Map<String, Double>> metricsByNamespace = new java.util.HashMap<>();
             try {
+                logger.debug("[Namespaces] Loading pod metrics...");
                 var allPodMetrics = kubernetesService.getPodMetrics(null); // null = lấy tất cả metrics
                 if (allPodMetrics != null && !allPodMetrics.isEmpty()) {
+                    logger.info("[Namespaces] Found {} pod metrics", allPodMetrics.size());
                     // Group metrics theo namespace và tính tổng CPU/RAM
                     java.util.Map<String, java.util.List<io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics>> metricsGrouped = 
                             allPodMetrics.stream()
                                     .filter(pm -> pm.getMetadata() != null && pm.getMetadata().getNamespace() != null)
                                     .collect(java.util.stream.Collectors.groupingBy(
                                             pm -> pm.getMetadata().getNamespace()));
+                    
+                    logger.info("[Namespaces] Metrics grouped into {} namespaces", metricsGrouped.size());
                     
                     for (var entry : metricsGrouped.entrySet()) {
                         String nsName = entry.getKey();
@@ -1112,16 +1391,14 @@ public class ClusterAdminController {
                                         if (cpuUsage != null) {
                                             try {
                                                 String cpuStr = cpuUsage.getAmount();
-                                                // Parse quantity: "100m" = 0.1 cores = 100000000 nano cores, "1" = 1000000000 nano cores
+                                                // Sử dụng logic parse tương tự parseQuantityToNanoCores() trong KubernetesService
+                                                // Metrics API trả về nano cores dưới dạng số lớn (ví dụ: "2008901524")
                                                 if (cpuStr != null && !cpuStr.isBlank()) {
                                                     cpuStr = cpuStr.trim();
-                                                    if (cpuStr.endsWith("m")) {
-                                                        double millicores = Double.parseDouble(cpuStr.substring(0, cpuStr.length() - 1));
-                                                        totalCpuNanoCores += millicores * 1_000_000.0;
-                                                    } else {
-                                                        double cores = Double.parseDouble(cpuStr);
-                                                        totalCpuNanoCores += cores * 1_000_000_000.0;
-                                                    }
+                                                    double nanoCores = parseQuantityToNanoCoresForNamespace(cpuStr);
+                                                    totalCpuNanoCores += nanoCores;
+                                                    logger.debug("[Namespaces] Pod {} in {}: CPU raw={}, parsed={} nano cores", 
+                                                            podMetric.getMetadata().getName(), nsName, cpuStr, nanoCores);
                                                 }
                                             } catch (Exception e) {
                                                 logger.debug("Khong parse duoc CPU usage cho pod {}: {}", 
@@ -1152,14 +1429,13 @@ public class ClusterAdminController {
                         
                         // Convert nano cores sang cores
                         double totalCpuCores = totalCpuNanoCores / 1_000_000_000.0;
-                        // Đảm bảo giá trị cores hợp lệ (không phải nano cores)
-                        if (totalCpuCores > 1000) {
-                            // Nếu giá trị lớn hơn 1000, có thể đã là nano cores, convert lại
-                            logger.warn("[Namespaces] CPU value too large for namespace {}: {}, converting from nano cores", nsName, totalCpuCores);
-                            totalCpuCores = totalCpuNanoCores / 1_000_000_000.0;
-                        }
+                        double ramUsageMi = totalMemoryBytes / (1024.0 * 1024.0);
+                        logger.info("[Namespaces] Namespace {}: CPU={} cores ({} nano cores), RAM={} Mi ({} bytes)", 
+                                nsName, totalCpuCores, totalCpuNanoCores, ramUsageMi, totalMemoryBytes);
                         metricsByNamespace.put(nsName, Map.of("cpu", totalCpuCores, "ram", totalMemoryBytes));
                     }
+                } else {
+                    logger.debug("[Namespaces] No pod metrics available");
                 }
             } catch (Exception e) {
                 logger.debug("Khong lay duoc pod metrics: " + e.getMessage());
@@ -1198,9 +1474,14 @@ public class ClusterAdminController {
                         // RAM: convert bytes sang Mi (để hiển thị dễ đọc hơn)
                         double ramUsageMi = ramUsageBytes / (1024.0 * 1024.0);
                         map.put("ram", ramUsageMi);
+                        
+                        logger.debug("[Namespaces] Final data for {}: pods={}, cpu={} cores, ram={} Mi", 
+                                namespaceName, podsCount, cpuUsageCores, ramUsageMi);
                         return map;
                     })
                     .collect(java.util.stream.Collectors.toList());
+            
+            logger.info("[Namespaces] Returning {} namespaces with data", result.size());
             return ResponseEntity.ok(Map.of("namespaces", result));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
             if (e.getCode() == 503 || e.getCode() == 0) {
@@ -2247,17 +2528,17 @@ public class ClusterAdminController {
 
             var session = request.getSession(false);
             if (session == null) {
-                System.out.println("DEBUG: No session found");
+                logger.debug("DEBUG: No session found");
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Không có session. Vui lòng đăng nhập lại."));
             }
 
             java.util.Map<Long, String> pwCache = getPasswordCache(session);
-            System.out.println("DEBUG: Password cache size: " + pwCache.size());
+            logger.debug("DEBUG: Password cache size: " + pwCache.size());
 
             // Lấy thông tin cluster
             var clusterServers = serverService.findByClusterStatus("AVAILABLE");
-            System.out.println("DEBUG: Cluster servers count: " + clusterServers.size());
+            logger.debug("DEBUG: Cluster servers count: " + clusterServers.size());
 
             if (clusterServers.isEmpty()) {
                 return ResponseEntity.badRequest()
@@ -2266,7 +2547,7 @@ public class ClusterAdminController {
 
             // Nếu không có password cache, thử kiểm tra với SSH key
             if (pwCache.isEmpty()) {
-                System.out.println("DEBUG: No password cache, trying SSH key authentication");
+                logger.debug("DEBUG: No password cache, trying SSH key authentication");
                 // Tạo empty password cache để thử SSH key
                 pwCache = new java.util.HashMap<>();
             }
@@ -2387,10 +2668,49 @@ public class ClusterAdminController {
             if (ds.getStatus() != null && ds.getStatus().getNumberReady() != null 
                     && ds.getStatus().getDesiredNumberScheduled() != null) {
                 w.put("status", ds.getStatus().getNumberReady().equals(ds.getStatus().getDesiredNumberScheduled()) 
-                        ? "Ready" : "NotReady");
+                    ? "Ready" : "NotReady");
             } else {
                 w.put("status", "Unknown");
             }
+        } else if (workload instanceof CronJob cj) {
+            w.put("name", cj.getMetadata() != null ? cj.getMetadata().getName() : "-");
+            w.put("type", "CronJob");
+            w.put("namespace", cj.getMetadata() != null ? cj.getMetadata().getNamespace() : "");
+            boolean suspended = cj.getSpec() != null && cj.getSpec().getSuspend() != null ? cj.getSpec().getSuspend() : false;
+            int active = cj.getStatus() != null && cj.getStatus().getActive() != null ? cj.getStatus().getActive().size() : 0;
+            if (suspended) {
+                w.put("status", "Suspended");
+            } else if (active > 0) {
+                w.put("status", "Active");
+            } else {
+                w.put("status", "Ready");
+            }
+        } else if (workload instanceof Job job) {
+            w.put("name", job.getMetadata() != null ? job.getMetadata().getName() : "-");
+            w.put("type", "Job");
+            w.put("namespace", job.getMetadata() != null ? job.getMetadata().getNamespace() : "");
+            if (job.getStatus() != null) {
+                Integer succeeded = job.getStatus().getSucceeded();
+                Integer active = job.getStatus().getActive();
+                Integer failed = job.getStatus().getFailed();
+                if (succeeded != null && succeeded > 0) {
+                    w.put("status", "Succeeded");
+                } else if (failed != null && failed > 0) {
+                    w.put("status", "Failed");
+                } else if (active != null && active > 0) {
+                    w.put("status", "Running");
+                } else {
+                    w.put("status", "Pending");
+                }
+            } else {
+                w.put("status", "Unknown");
+            }
+        } else if (workload instanceof Pod pod) {
+            w.put("name", pod.getMetadata() != null ? pod.getMetadata().getName() : "-");
+            w.put("type", "Pod");
+            w.put("namespace", pod.getMetadata() != null ? pod.getMetadata().getNamespace() : "");
+            String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";
+            w.put("status", phase != null ? phase : "Unknown");
         } else {
             w.put("name", "-");
             w.put("type", "Unknown");
@@ -2399,6 +2719,42 @@ public class ClusterAdminController {
         }
         
         return w;
+    }
+
+    /**
+     * Parse Quantity string sang nano cores (tương tự parseQuantityToNanoCores trong KubernetesService)
+     */
+    private double parseQuantityToNanoCoresForNamespace(String quantity) {
+        if (quantity == null || quantity.isBlank()) return 0.0;
+        quantity = quantity.trim();
+        try {
+            // Nếu có suffix "n", đây là nano cores trực tiếp
+            if (quantity.endsWith("n")) {
+                double nanoCores = Double.parseDouble(quantity.substring(0, quantity.length() - 1));
+                return nanoCores;
+            }
+            // Nếu có suffix "m", đây là millicores
+            if (quantity.endsWith("m")) {
+                // Millicores: "100m" = 0.1 cores = 100000000 nano cores
+                double millicores = Double.parseDouble(quantity.substring(0, quantity.length() - 1));
+                return millicores * 1_000_000.0; // Convert to nano cores
+            }
+            // Nếu là số thuần (không có suffix), cần kiểm tra xem là cores hay nano cores
+            // Metrics API thường trả về nano cores dưới dạng số lớn (như 2008901524)
+            // Nếu số > 1000, có thể là nano cores; nếu < 100, có thể là cores
+            double value = Double.parseDouble(quantity);
+            if (value > 1000) {
+                // Có thể là nano cores (ví dụ: 2008901524)
+                // Metrics API luôn trả về nano cores cho CPU usage, nên giả định đây là nano cores
+                return value;
+            } else {
+                // Nhỏ hơn 1000, có thể là cores (ví dụ: "2.008901524")
+                return value * 1_000_000_000.0; // Convert to nano cores
+            }
+        } catch (Exception e) {
+            logger.debug("Khong parse duoc quantity sang nano cores: {}", quantity);
+            return 0.0;
+        }
     }
 
     /**
