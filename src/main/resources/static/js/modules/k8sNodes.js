@@ -59,8 +59,20 @@
                     status: node.status || 'Unknown',
                     k8sStatus: 'Unknown',
                     k8sRoles: node.role === 'MASTER' ? ['master', 'control-plane'] : ['worker'],
+                    // Lưu metrics từ database
+                    dbCpu: node.cpu || '-',
+                    dbRam: node.ram || '-',
+                    dbDisk: node.disk || '-',
+                    dbRamPercentage: node.ramPercentage || undefined,
+                    // K8s metrics (sẽ được cập nhật sau)
                     k8sCpu: '-',
                     k8sMemory: '-',
+                    cpuUsage: undefined,
+                    ramUsage: undefined,
+                    diskUsage: undefined,
+                    cpuUsagePercent: undefined,
+                    ramUsagePercent: undefined,
+                    diskUsagePercent: undefined,
                     k8sInternalIP: node.ip || node.host || '-',
                     k8sVersion: '-',
                     fromDatabase: true // Flag để biết đây là data từ database
@@ -85,32 +97,6 @@
         if (!tbody || nodesData.length === 0) return;
 
         try {
-            // Hiển thị loading state cho các cột CPU, RAM, Status (chỉ với nodes từ database)
-            const rows = tbody.querySelectorAll('tr');
-            rows.forEach((row, index) => {
-                if (index < filteredNodesData.length) {
-                    const node = filteredNodesData[index];
-                    if (node && node.fromDatabase) {
-                        const cpuCell = row.cells[2]; // CPU column
-                        const ramCell = row.cells[3]; // RAM column
-                        const diskCell = row.cells[4]; // Disk column
-                        const statusCell = row.cells[5]; // Status column
-                        if (cpuCell && (!node.k8sCpu || node.k8sCpu === '-')) {
-                            cpuCell.innerHTML = '<span class="spinner-border spinner-border-sm text-muted"></span>';
-                        }
-                        if (ramCell && (!node.k8sMemory || node.k8sMemory === '-')) {
-                            ramCell.innerHTML = '<span class="spinner-border spinner-border-sm text-muted"></span>';
-                        }
-                        if (diskCell && !node.diskUsage) {
-                            diskCell.innerHTML = '<span class="spinner-border spinner-border-sm text-muted"></span>';
-                        }
-                        if (statusCell && (!node.k8sStatus || node.k8sStatus === 'Unknown')) {
-                            statusCell.innerHTML = '<span class="spinner-border spinner-border-sm text-muted"></span>';
-                        }
-                    }
-                }
-            });
-
             // Load từ Kubernetes API (có thể chậm)
             const response = await window.ApiClient.get('/admin/cluster/k8s/nodes').catch(() => null);
 
@@ -135,11 +121,18 @@
                     }
 
                     if (k8sNode) {
-                        // Merge: ưu tiên K8s data nhưng giữ lại các field từ database
+                        // Merge: giữ lại dữ liệu từ database (dbCpu, dbRam, dbDisk, status)
+                        // và cập nhật thêm dữ liệu từ K8s API
                         return {
                             ...dbNode,
                             ...k8sNode,
                             name: k8sNode.name || dbNode.name,
+                            // Giữ lại dữ liệu từ database
+                            dbCpu: dbNode.dbCpu,
+                            dbRam: dbNode.dbRam,
+                            dbDisk: dbNode.dbDisk,
+                            dbRamPercentage: dbNode.dbRamPercentage,
+                            status: dbNode.status, // Giữ status từ database
                             fromDatabase: false
                         };
                     }
@@ -200,9 +193,9 @@
                 (roleFilter === 'master' && isMaster) ||
                 (roleFilter === 'worker' && isWorker);
 
-            // Status filter
-            const matchStatus = !statusFilter ||
-                (node.k8sStatus && node.k8sStatus === statusFilter);
+            // Status filter - sử dụng status từ database hoặc K8s
+            const displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
+            const matchStatus = !statusFilter || displayStatus === statusFilter;
 
             return matchSearch && matchRole && matchStatus;
         });
@@ -222,28 +215,36 @@
 
         const escapeHtml = getEscapeHtml();
         tbody.innerHTML = filteredNodesData.map(node => {
-            const statusClass = getStatusClass(node.k8sStatus);
+            // Ưu tiên hiển thị status từ database, chỉ dùng k8sStatus khi có giá trị hợp lệ
+            const displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
+            const statusClass = getStatusClass(displayStatus);
             const roleClass = getRoleClass(node.k8sRoles);
             const role = formatRole(node.k8sRoles);
 
-            // Hiển thị usage nếu có, nếu không thì hiển thị capacity
+            // Ưu tiên hiển thị metrics từ database, chỉ cập nhật khi có dữ liệu mới từ K8s/metrics
             let cpuDisplay = '-';
-            if (node.cpuUsage) {
+            if (node.dbCpu && node.dbCpu !== '-') {
+                cpuDisplay = node.dbCpu;
+            } else if (node.cpuUsage) {
                 cpuDisplay = node.cpuUsage;
-            } else if (node.k8sCpu) {
+            } else if (node.k8sCpu && node.k8sCpu !== '-') {
                 cpuDisplay = node.k8sCpu;
             }
 
             let ramDisplay = '-';
-            if (node.ramUsage) {
+            if (node.dbRam && node.dbRam !== '-') {
+                ramDisplay = node.dbRam;
+            } else if (node.ramUsage) {
                 ramDisplay = node.ramUsage;
-            } else if (node.k8sMemory) {
+            } else if (node.k8sMemory && node.k8sMemory !== '-') {
                 ramDisplay = node.k8sMemory;
             }
 
-            // Hiển thị Disk usage
+            // Hiển thị Disk usage - ưu tiên từ database
             let diskDisplay = '-';
-            if (node.diskUsage) {
+            if (node.dbDisk && node.dbDisk !== '-') {
+                diskDisplay = node.dbDisk;
+            } else if (node.diskUsage) {
                 diskDisplay = node.diskUsage;
             }
 
@@ -262,8 +263,6 @@
             const ramClass = node.ramUsagePercent !== undefined ? getUsageClass(ramUsagePercent) : '';
             const diskClass = node.diskUsagePercent !== undefined ? getUsageClass(diskUsagePercent) : '';
 
-            const status = node.k8sStatus || 'Unknown';
-
             return `
                 <tr>
                     <td><span class="fw-medium">${escapeHtml(node.name || '-')}</span></td>
@@ -271,7 +270,7 @@
                     <td><span class="text-muted small ${cpuClass}">${escapeHtml(cpuDisplay)}</span></td>
                     <td><span class="text-muted small ${ramClass}">${escapeHtml(ramDisplay)}</span></td>
                     <td><span class="text-muted small ${diskClass}">${escapeHtml(diskDisplay)}</span></td>
-                    <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
+                    <td><span class="badge ${statusClass}">${escapeHtml(displayStatus)}</span></td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary" onclick="window.K8sNodesModule.showNodeDetail('${escapeHtml(node.name || '')}')">
                             Chi tiết
@@ -309,8 +308,9 @@
         if (infoContentEl) {
             const roleClass = getRoleClass(node.k8sRoles);
             const role = formatRole(node.k8sRoles);
-            const statusClass = getStatusClass(node.k8sStatus);
-            const status = node.k8sStatus || 'Unknown';
+            // Ưu tiên hiển thị status từ database, chỉ dùng k8sStatus khi có giá trị hợp lệ
+            const displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
+            const statusClass = getStatusClass(displayStatus);
 
             infoContentEl.innerHTML = `
                 <table class="table table-sm">
@@ -382,8 +382,9 @@
 
         // Render Resources tab
         if (resourcesContentEl) {
+            // Ưu tiên sử dụng percentage từ database hoặc từ metrics mới
             const cpuUsagePercent = node.cpuUsagePercent || 0;
-            const ramUsagePercent = node.ramUsagePercent || 0;
+            const ramUsagePercent = node.ramUsagePercent || node.dbRamPercentage || 0;
             const diskUsagePercent = node.diskUsagePercent || 0;
             
             function getUsageBarClass(percent) {
@@ -392,9 +393,15 @@
                 return 'bg-success';
             }
             
-            const cpuDisplay = node.cpuUsage || node.k8sCpu || '-';
-            const ramDisplay = node.ramUsage || node.k8sMemory || '-';
-            const diskDisplay = node.diskUsage || '-';
+            // Ưu tiên hiển thị metrics từ database, chỉ cập nhật khi có dữ liệu mới từ K8s/metrics
+            const cpuDisplay = (node.dbCpu && node.dbCpu !== '-') ? node.dbCpu : 
+                              (node.cpuUsage ? node.cpuUsage : 
+                              (node.k8sCpu && node.k8sCpu !== '-' ? node.k8sCpu : '-'));
+            const ramDisplay = (node.dbRam && node.dbRam !== '-') ? node.dbRam : 
+                              (node.ramUsage ? node.ramUsage : 
+                              (node.k8sMemory && node.k8sMemory !== '-' ? node.k8sMemory : '-'));
+            const diskDisplay = (node.dbDisk && node.dbDisk !== '-') ? node.dbDisk : 
+                               (node.diskUsage ? node.diskUsage : '-');
             
             // Tính toán phần trăm CPU để hiển thị (có thể > 100%)
             let cpuPercentDisplay = '-';
@@ -451,7 +458,7 @@
                                  aria-valuenow="${ramUsagePercent}" 
                                  aria-valuemin="0" 
                                  aria-valuemax="100">
-                                ${ramUsagePercent > 0 ? ramUsagePercent + '%' : '-'}
+                                ${ramUsagePercent > 0 ? ramUsagePercent + '%' : (node.dbRamPercentage !== undefined ? node.dbRamPercentage + '%' : '-')}
                             </div>
                         </div>
                     </div>
@@ -478,7 +485,7 @@
 
         // Render Pods tab - load pods on this node
         if (podsContentEl) {
-            podsContentEl.innerHTML = '<p class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải pods...</p>';
+            podsContentEl.innerHTML = '<p class="text-muted">Đang tải pods...</p>';
 
             try {
                 const response = await window.ApiClient.get(`/admin/cluster/k8s/pods?node=${encodeURIComponent(nodeName)}`).catch(() => null);
@@ -555,7 +562,7 @@
                 }
                 
                 // Hiển thị loading state
-                yamlContentEl.innerHTML = '<p class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải YAML...</p>';
+                yamlContentEl.innerHTML = '<p class="text-muted">Đang tải YAML...</p>';
                 
                 // Fetch YAML từ backend
                 try {

@@ -29,6 +29,16 @@
         pods: false
     };
     
+    // Track errors for each tab (để không hiển thị "Không có..." khi có lỗi)
+    let tabErrors = {
+        deployments: null,
+        statefulsets: null,
+        daemonsets: null,
+        cronjobs: null,
+        jobs: null,
+        pods: null
+    };
+    
     // Token để vô hiệu hóa kết quả fetch cũ khi có request mới (tránh race condition)
     let workloadsRequestToken = 0;
 
@@ -51,12 +61,12 @@
 
     // Helper: Cấu hình endpoint và response key cho từng loại workload
     const workloadConfig = {
-        deployments: { endpoint: '/admin/cluster/k8s/workloads/deployments', responseKey: 'deployments', dataKey: 'deployments', colspan: 7, typeFilter: 'deployment' },
-        statefulsets: { endpoint: '/admin/cluster/k8s/workloads/statefulsets', responseKey: 'statefulSets', dataKey: 'statefulSets', colspan: 5, typeFilter: 'statefulset' },
-        daemonsets: { endpoint: '/admin/cluster/k8s/workloads/daemonsets', responseKey: 'daemonSets', dataKey: 'daemonSets', colspan: 9, typeFilter: 'daemonset' },
-        cronjobs: { endpoint: '/admin/cluster/k8s/workloads/cronjobs', responseKey: 'cronJobs', dataKey: 'cronJobs', colspan: 8, typeFilter: 'cronjob' },
-        jobs: { endpoint: '/admin/cluster/k8s/workloads/jobs', responseKey: 'jobs', dataKey: 'jobs', colspan: 8, typeFilter: 'job' },
-        pods: { endpoint: '/admin/cluster/k8s/workloads/pods', responseKey: 'pods', dataKey: 'pods', colspan: 7, typeFilter: 'pod' }
+        deployments: { endpoint: '/admin/cluster/k8s/workloads/deployments', responseKey: 'deployments', dataKey: 'deployments', colspan: 6, typeFilter: 'deployment' },
+        statefulsets: { endpoint: '/admin/cluster/k8s/workloads/statefulsets', responseKey: 'statefulSets', dataKey: 'statefulSets', colspan: 7, typeFilter: 'statefulset' },
+        daemonsets: { endpoint: '/admin/cluster/k8s/workloads/daemonsets', responseKey: 'daemonSets', dataKey: 'daemonSets', colspan: 7, typeFilter: 'daemonset' },
+        cronjobs: { endpoint: '/admin/cluster/k8s/workloads/cronjobs', responseKey: 'cronJobs', dataKey: 'cronJobs', colspan: 6, typeFilter: 'cronjob' },
+        jobs: { endpoint: '/admin/cluster/k8s/workloads/jobs', responseKey: 'jobs', dataKey: 'jobs', colspan: 7, typeFilter: 'job' },
+        pods: { endpoint: '/admin/cluster/k8s/workloads/pods', responseKey: 'pods', dataKey: 'pods', colspan: 8, typeFilter: 'pod' }
     };
 
     // Tab path mapping
@@ -97,14 +107,43 @@
         const config = workloadConfig[tabName];
         if (!tbody || !config) return;
 
-        if (error.status === 503 || error.response?.status === 503) {
-            const errorMsg = error.message || error.response?.data?.error || 'Kubernetes API server không khả dụng - Master node có thể đang NOTREADY';
-            const escapeHtml = getEscapeHtml();
-            tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-warning py-3"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(errorMsg)}</td></tr>`;
+        // Extract error message từ nhiều nguồn khác nhau
+        let errorMsg = '';
+        if (error.message) {
+            errorMsg = error.message;
+        } else if (error.response?.data?.error) {
+            errorMsg = error.response.data.error;
+        } else if (error.response?.data?.message) {
+            errorMsg = error.response.data.message;
+        } else if (typeof error === 'string') {
+            errorMsg = error;
         } else {
-            const errorMsg = error.message || 'Lỗi khi tải dữ liệu';
-            const escapeHtml = getEscapeHtml();
-            tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-danger py-3">${escapeHtml(errorMsg)}</td></tr>`;
+            errorMsg = 'Lỗi khi tải dữ liệu';
+        }
+
+        // Lưu lỗi vào tabErrors để render functions có thể kiểm tra
+        tabErrors[tabName] = {
+            message: errorMsg,
+            status: error.status || error.response?.status,
+            isConnectionError: error.status === 503 || error.response?.status === 503 || 
+                errorMsg.includes('Cannot connect to Kubernetes cluster') ||
+                errorMsg.includes('Không tìm thấy MASTER node')
+        };
+
+        const escapeHtml = getEscapeHtml();
+        
+        // Kiểm tra nếu là lỗi kết nối Kubernetes cluster
+        if (tabErrors[tabName].isConnectionError) {
+            tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-danger py-3">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Lỗi kết nối Kubernetes:</strong><br>
+                <small>${escapeHtml(errorMsg)}</small>
+            </td></tr>`;
+        } else {
+            tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-danger py-3">
+                <i class="bi bi-exclamation-circle me-2"></i>
+                ${escapeHtml(errorMsg)}
+            </td></tr>`;
         }
     }
 
@@ -117,6 +156,7 @@
     function resetAllData() {
         Object.keys(loadedTabs).forEach(key => loadedTabs[key] = false);
         Object.keys(workloadsData).forEach(key => workloadsData[key] = []);
+        Object.keys(tabErrors).forEach(key => tabErrors[key] = null);
     }
 
     // Helper: Đảm bảo workloadsData arrays được khởi tạo
@@ -447,6 +487,8 @@
             if (config) {
                 workloadsData[config.dataKey] = result.data;
                 loadedTabs[result.type] = true;
+                // Clear error khi load thành công
+                tabErrors[result.type] = null;
             }
         });
 
@@ -480,10 +522,14 @@
             
             workloadsData[config.dataKey] = response[config.responseKey] || [];
             loadedTabs[tabName] = true;
+            // Clear error khi reload thành công
+            tabErrors[tabName] = null;
             // applyFilters() sẽ tự gọi updateCounts()
             applyFilters();
         } catch (error) {
             if (!isValidToken(myToken)) return;
+            // Lưu lỗi khi reload thất bại
+            handleApiError(error, tabName);
             if (error.status !== 503 && error.response?.status !== 503) {
                 console.error(`Error reloading ${tabName} silently:`, error);
             }
@@ -578,6 +624,31 @@
         namespaceFilter.value = currentValue;
     }
 
+    // Helper: Render error message nếu có lỗi
+    function renderErrorIfExists(tabName, tbody) {
+        const error = tabErrors[tabName];
+        if (!error) return false;
+        
+        const config = workloadConfig[tabName];
+        if (!config) return false;
+        
+        const escapeHtml = getEscapeHtml();
+        
+        if (error.isConnectionError) {
+            tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-danger py-3">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Lỗi kết nối Kubernetes:</strong><br>
+                <small>${escapeHtml(error.message)}</small>
+            </td></tr>`;
+        } else {
+            tbody.innerHTML = `<tr><td colspan="${config.colspan}" class="text-center text-danger py-3">
+                <i class="bi bi-exclamation-circle me-2"></i>
+                ${escapeHtml(error.message)}
+            </td></tr>`;
+        }
+        return true;
+    }
+
     // Render workloads
     function renderWorkloads() {
         renderDeployments();
@@ -592,6 +663,9 @@
     function renderDeployments() {
         const tbody = document.getElementById('deployments-tbody');
         if (!tbody) return;
+
+        // Kiểm tra lỗi trước - nếu có lỗi thì hiển thị lỗi và không hiển thị empty state
+        if (renderErrorIfExists('deployments', tbody)) return;
 
         if (filteredData.deployments.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Không có deployments</td></tr>';
@@ -671,8 +745,11 @@
         const tbody = document.getElementById('statefulsets-tbody');
         if (!tbody) return;
 
+        // Kiểm tra lỗi trước - nếu có lỗi thì hiển thị lỗi và không hiển thị empty state
+        if (renderErrorIfExists('statefulsets', tbody)) return;
+
         if (filteredData.statefulSets.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Không có statefulsets</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Không có statefulsets</td></tr>';
             return;
         }
 
@@ -731,6 +808,9 @@
         const tbody = document.getElementById('daemonsets-tbody');
         if (!tbody) return;
 
+        // Kiểm tra lỗi trước - nếu có lỗi thì hiển thị lỗi và không hiển thị empty state
+        if (renderErrorIfExists('daemonsets', tbody)) return;
+
         if (filteredData.daemonSets.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Không có daemonsets</td></tr>';
             return;
@@ -775,8 +855,11 @@
         const tbody = document.getElementById('cronjobs-tbody');
         if (!tbody) return;
 
+        // Kiểm tra lỗi trước - nếu có lỗi thì hiển thị lỗi và không hiển thị empty state
+        if (renderErrorIfExists('cronjobs', tbody)) return;
+
         if (filteredData.cronJobs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Không có cronjobs</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Không có cronjobs</td></tr>';
             return;
         }
 
@@ -821,8 +904,11 @@
         const tbody = document.getElementById('jobs-tbody');
         if (!tbody) return;
 
+        // Kiểm tra lỗi trước - nếu có lỗi thì hiển thị lỗi và không hiển thị empty state
+        if (renderErrorIfExists('jobs', tbody)) return;
+
         if (filteredData.jobs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Không có jobs</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Không có jobs</td></tr>';
             return;
         }
 
@@ -871,8 +957,11 @@
         const tbody = document.getElementById('pods-tbody');
         if (!tbody) return;
 
+        // Kiểm tra lỗi trước - nếu có lỗi thì hiển thị lỗi và không hiển thị empty state
+        if (renderErrorIfExists('pods', tbody)) return;
+
         if (filteredData.pods.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Không có pods</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Không có pods</td></tr>';
             return;
         }
 
