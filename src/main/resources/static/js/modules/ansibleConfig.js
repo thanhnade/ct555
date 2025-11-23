@@ -477,6 +477,9 @@
 		const badgeMaster = document.getElementById('ansible-summary-master');
 		if (!badgeInstall || !badgeVersion || !badgeMaster) return;
 
+		// Lấy escapeHtml function để sử dụng trong toàn bộ function
+		const escapeHtml = getEscapeHtml();
+
 		switch (state) {
 			case 'installed':
 				badgeInstall.className = 'badge bg-success';
@@ -497,7 +500,6 @@
 				break;
 			case 'empty':
 				badgeInstall.className = 'badge bg-secondary';
-				const escapeHtml = getEscapeHtml();
 				badgeInstall.innerHTML = `<i class="bi bi-info-circle"></i> ${escapeHtml(message || 'Không có dữ liệu')}`;
 				break;
 			default:

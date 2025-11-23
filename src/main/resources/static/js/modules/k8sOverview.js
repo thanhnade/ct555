@@ -132,36 +132,104 @@
                     renderEvents(true);
                 }),
 
-            // 2. Load nodes data (nhanh - không cần SSH)
-            window.ApiClient.get('/admin/cluster/overview/nodes')
-                .then(data => {
-                    console.log('[Overview] Nodes response:', data);
+            // 2. Load nodes data - load từ database và K8s API để xác định nodes chưa đăng ký
+            Promise.all([
+                window.ApiClient.get('/admin/cluster/api').catch(() => null),
+                window.ApiClient.get('/admin/cluster/k8s/nodes').catch(() => null)
+            ]).then(([clusterInfo, k8sResponse]) => {
+                    console.log('[Overview] Cluster info:', clusterInfo);
+                    console.log('[Overview] K8s nodes response:', k8sResponse);
                     
                     // Lấy lại elements để đảm bảo chúng vẫn tồn tại
                     const nodesListElCurrent = document.getElementById('overview-nodes-list');
                     
                     if (!nodesListElCurrent) {
-                        console.error('[Overview] Elements không tìm thấy:', {
-                            nodesListEl: !!nodesListElCurrent
-                        });
+                        console.error('[Overview] Elements không tìm thấy');
                         return;
                     }
                     
-                    const nodesCount = data.nodesCount || 0;
-                    const masterCount = data.masterCount || 0;
-                    const workerCount = data.workerCount || 0;
-                    
-                    console.log('[Overview] Nodes parsed: count=' + nodesCount + ', master=' + masterCount + ', worker=' + workerCount);
-                    
-                    if (data.recentNodes && Array.isArray(data.recentNodes)) {
-                        nodesData = data.recentNodes;
-                        console.log('[Overview] Recent nodes:', nodesData.length);
-                        renderNodesList();
-                    } else {
-                        nodesData = [];
-                        console.log('[Overview] No recent nodes');
-                        renderNodesList();
+                    // Load nodes từ database
+                    let dbNodes = [];
+                    if (clusterInfo && clusterInfo.nodes && Array.isArray(clusterInfo.nodes)) {
+                        dbNodes = clusterInfo.nodes.map(node => ({
+                            name: node.ip || node.host || '-',
+                            role: node.role || 'WORKER',
+                            status: node.status || 'Unknown',
+                            k8sInternalIP: node.ip || node.host || '-',
+                            isOffline: (node.status && node.status.toUpperCase() === 'OFFLINE'),
+                            isUnregistered: false // Sẽ được cập nhật sau
+                        }));
                     }
+                    
+                    // Tạo map K8s nodes theo IP và name
+                    const k8sNodesMap = new Map();
+                    if (k8sResponse && k8sResponse.nodes && Array.isArray(k8sResponse.nodes)) {
+                        k8sResponse.nodes.forEach(node => {
+                            if (node.k8sInternalIP) {
+                                k8sNodesMap.set(node.k8sInternalIP, node);
+                            }
+                            if (node.name) {
+                                k8sNodesMap.set(node.name, node);
+                            }
+                        });
+                    }
+                    
+                    // Merge và đánh dấu nodes chưa đăng ký
+                    nodesData = dbNodes.map(dbNode => {
+                        // Kiểm tra node có trong K8s không (check cả khi offline)
+                        const k8sNode = k8sNodesMap.get(dbNode.name) || k8sNodesMap.get(dbNode.k8sInternalIP);
+                        
+                        if (k8sNode) {
+                            // Node có trong K8s, merge data
+                            return {
+                                ...dbNode,
+                                ...k8sNode,
+                                name: k8sNode.name || dbNode.name,
+                                role: dbNode.role, // Giữ role từ database
+                                status: dbNode.isOffline ? dbNode.status : (k8sNode.k8sStatus || dbNode.status), // Giữ OFFLINE nếu offline
+                                isUnregistered: false
+                            };
+                        } else {
+                            // Node không có trong K8s - chưa đăng ký (cả khi offline)
+                            return {
+                                ...dbNode,
+                                isUnregistered: true // Node offline và không có trong K8s - hiển thị cả 2 trạng thái
+                            };
+                        }
+                    });
+                    
+                    // Thêm các nodes từ K8s mà không có trong database (chưa được assign vào cụm)
+                    if (k8sResponse && k8sResponse.nodes && Array.isArray(k8sResponse.nodes)) {
+                        k8sResponse.nodes.forEach(k8sNode => {
+                            const exists = nodesData.some(n => 
+                                n.name === k8sNode.name || 
+                                (n.k8sInternalIP && n.k8sInternalIP === k8sNode.k8sInternalIP)
+                            );
+                            if (!exists) {
+                                // Xác định role từ k8sRoles
+                                let role = 'WORKER';
+                                if (k8sNode.k8sRoles && Array.isArray(k8sNode.k8sRoles)) {
+                                    if (k8sNode.k8sRoles.includes('master') || k8sNode.k8sRoles.includes('control-plane')) {
+                                        role = 'MASTER';
+                                    }
+                                }
+                                nodesData.push({
+                                    name: k8sNode.name || '-',
+                                    role: role,
+                                    status: k8sNode.k8sStatus || 'Unknown',
+                                    k8sInternalIP: k8sNode.k8sInternalIP || '-',
+                                    isOffline: false,
+                                    isUnregistered: false,
+                                    isNotAssigned: true // Node có trong K8s nhưng chưa được assign vào cụm (không có trong DB)
+                                });
+                            }
+                        });
+                    }
+                    
+                    console.log('[Overview] Nodes parsed: total=' + nodesData.length);
+                    renderNodesList();
+                    // Cập nhật lại health sau khi có nodesData để đảm bảo số lượng khớp
+                    renderHealth();
                 })
                 .catch(error => {
                     console.error('[Overview] Error loading nodes:', error);
@@ -328,25 +396,43 @@
         const podsHealthEl = document.getElementById('overview-pods-health');
         const podsHealthSubEl = document.getElementById('overview-pods-health-sub');
         const deploymentsHealthEl = document.getElementById('overview-deployments-health');
+        const networkingHealthEl = document.getElementById('overview-networking-health');
         if (!nodesHealthEl || !podsHealthEl || !deploymentsHealthEl) return;
 
+        // Tính toán nodes từ nodesData để đảm bảo khớp với danh sách hiển thị
+        let readyNodes = 0;
+        let totalNodes = 0;
+        if (nodesData && nodesData.length > 0) {
+            totalNodes = nodesData.length;
+            // Đếm nodes Ready (từ K8s status hoặc status)
+            readyNodes = nodesData.filter(node => {
+                const status = (node.k8sStatus || node.status || '').toUpperCase();
+                return status === 'READY';
+            }).length;
+        } else if (healthData) {
+            // Fallback: dùng healthData nếu chưa có nodesData
+            const nodes = healthData.nodes || { ready: 0, total: 0 };
+            readyNodes = nodes.ready ?? 0;
+            totalNodes = nodes.total ?? 0;
+        }
+
         if (!healthData) {
-            nodesHealthEl.textContent = 'N/A';
+            nodesHealthEl.textContent = totalNodes > 0 ? `${readyNodes} / ${totalNodes}` : 'N/A';
             podsHealthEl.textContent = 'N/A';
             deploymentsHealthEl.textContent = 'N/A';
-            networkingHealthEl.textContent = 'N/A';
+            if (networkingHealthEl) networkingHealthEl.textContent = 'N/A';
             if (podsHealthSubEl) podsHealthSubEl.textContent = 'Không có dữ liệu';
             return;
         }
 
-        const nodes = healthData.nodes || { ready: 0, total: 0 };
         const pods = healthData.pods || { running: 0, total: 0, pending: 0, failed: 0 };
         const deployments = healthData.deployments || { available: 0, total: 0 };
         const networking = healthData.networking || { services: 0, ingress: 0 };
         const servicesCountEl = document.getElementById('overview-services-count');
         const ingressCountEl = document.getElementById('overview-ingress-count');
 
-        nodesHealthEl.textContent = `${nodes.ready ?? 0} / ${nodes.total ?? 0}`;
+        // Sử dụng số nodes đã tính từ nodesData để đảm bảo khớp với danh sách
+        nodesHealthEl.textContent = `${readyNodes} / ${totalNodes}`;
         podsHealthEl.textContent = `${pods.running ?? 0} / ${pods.total ?? 0}`;
         if (podsHealthSubEl) podsHealthSubEl.textContent = `${pods.running ?? 0} Running • ${pods.pending ?? 0} Pending • ${pods.failed ?? 0} Failed`;
         deploymentsHealthEl.textContent = `${deployments.available ?? 0} / ${deployments.total ?? 0}`;
@@ -407,11 +493,17 @@
         return 'bg-secondary';
     }
 
-    function getRoleClass(role) {
+    function getRoleClass(role, isUnregistered = false, isNotAssigned = false) {
+        // Nếu node chưa được assign vào cụm, hiển thị màu danger
+        if (isNotAssigned) return 'bg-danger text-white';
+        // Nếu node chưa đăng ký, hiển thị màu warning
+        if (isUnregistered) return 'bg-warning text-dark';
         if (!role) return 'bg-secondary';
         const r = role.toUpperCase();
         if (r === 'MASTER') return 'bg-primary';
         if (r === 'WORKER') return 'bg-info text-dark';
+        if (r === 'NOT JOIN CLUSTER') return 'bg-warning text-dark';
+        if (r === 'NOT ASSIGN') return 'bg-danger text-white';
         return 'bg-secondary';
     }
 
@@ -439,13 +531,20 @@
         const escapeHtml = getEscapeHtml();
         nodesListEl.innerHTML = nodesData.map((node, index) => {
             const chipClass = getChipClass(node.status);
-            const roleClass = getRoleClass(node.role);
+            // Hiển thị role phù hợp: "Chưa assign" > "Chưa đăng ký" > role bình thường
+            let displayRole = node.role || 'WORKER';
+            if (node.isNotAssigned) {
+                displayRole = 'Not Assign';
+            } else if (node.isUnregistered) {
+                displayRole = 'No Join Cluster';
+            }
+            const roleClass = getRoleClass(displayRole, node.isUnregistered, node.isNotAssigned);
             const isLast = index === nodesData.length - 1;
             return `
                 <div class="d-flex justify-content-between align-items-center pt-2 ${isLast ? 'pb-3' : 'pb-2 border-bottom'}">
                     <span class="fw-medium">${escapeHtml(node.name || '-')}</span>
                     <div class="d-flex gap-2 align-items-center">
-                        <span class="badge ${roleClass} small">${escapeHtml(node.role || 'WORKER')}</span>
+                        <span class="badge ${roleClass} small" title="${node.isNotAssigned ? 'Node có trong K8s cluster nhưng chưa được assign vào cụm (chưa có clusterStatus=AVAILABLE trong database)' : (node.isUnregistered ? 'Node có trong database nhưng chưa đăng ký trong K8s cluster' : '')}">${escapeHtml(displayRole)}</span>
                         <span class="badge ${chipClass}">${escapeHtml(node.status || 'Unknown')}</span>
                     </div>
                 </div>

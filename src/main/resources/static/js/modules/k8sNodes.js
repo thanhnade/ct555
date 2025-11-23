@@ -16,16 +16,22 @@
     }
 
     // Helper function để lấy badge class cho status
-    function getStatusClass(status) {
+    function getStatusClass(status, isOfflineInCluster = false) {
         if (!status) return 'bg-secondary';
         const s = status.toUpperCase();
         if (s === 'READY') return 'bg-success';
         if (s === 'NOTREADY') return 'bg-danger';
+        // Nếu node offline nhưng thuộc cluster (clusterStatus=AVAILABLE), hiển thị warning
+        if (s === 'OFFLINE' && isOfflineInCluster) return 'bg-warning text-dark';
         return 'bg-secondary';
     }
 
     // Helper function để lấy badge class cho role
-    function getRoleClass(roles) {
+    function getRoleClass(roles, isUnregistered = false, isNotAssigned = false) {
+        // Nếu node chưa được assign vào cụm, hiển thị màu danger
+        if (isNotAssigned) return 'bg-danger text-white';
+        // Nếu node chưa đăng ký, hiển thị màu warning
+        if (isUnregistered) return 'bg-warning text-dark';
         if (!roles || !Array.isArray(roles) || roles.length === 0) return 'bg-secondary';
         if (roles.includes('master') || roles.includes('control-plane')) return 'bg-primary';
         if (roles.includes('worker')) return 'bg-info text-dark';
@@ -33,27 +39,42 @@
     }
 
     // Helper function để format role
-    function formatRole(roles) {
+    function formatRole(roles, isUnregistered = false, isNotAssigned = false) {
+        // Nếu node chưa được assign vào cụm, hiển thị "Chưa assign"
+        if (isNotAssigned) return 'Not Assign';
+        // Nếu node chưa đăng ký trong K8s cluster, hiển thị "Chưa đăng ký"
+        if (isUnregistered) return 'No Join Cluster';
         if (!roles || !Array.isArray(roles) || roles.length === 0) return 'WORKER';
         if (roles.includes('master') || roles.includes('control-plane')) return 'MASTER';
         if (roles.includes('worker')) return 'WORKER';
         return 'WORKER';
     }
 
-    // Load nodes data nhanh từ database
-    async function loadQuickNodes() {
+    // Load nodes data đầy đủ từ database và Kubernetes API
+    async function loadNodes() {
         const tbody = document.getElementById('nodes-tbody');
         if (!tbody) return;
 
         try {
+            // Hiển thị loading state
             tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Đang tải...</td></tr>';
 
-            // Lấy nodes từ database (nhanh)
+            // Load nodes từ database trước
             const clusterInfo = await window.ApiClient.get('/admin/cluster/api').catch(() => null);
+            
+            if (!clusterInfo || !clusterInfo.nodes || clusterInfo.nodes.length === 0) {
+                nodesData = [];
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Không có nodes</td></tr>';
+                return;
+            }
 
-            if (clusterInfo && clusterInfo.nodes && clusterInfo.nodes.length > 0) {
-                // Chuyển đổi từ database format sang format chuẩn
-                nodesData = clusterInfo.nodes.map(node => ({
+            // Chuyển đổi từ database format sang format chuẩn
+            nodesData = clusterInfo.nodes.map(node => {
+                const isOffline = (node.status && node.status.toUpperCase() === 'OFFLINE');
+                // Node có clusterStatus=AVAILABLE (vì được trả về từ endpoint này) nhưng status=OFFLINE
+                const isOfflineInCluster = isOffline;
+                
+                return {
                     name: node.ip || node.host || '-',
                     role: node.role || 'WORKER',
                     status: node.status || 'Unknown',
@@ -75,29 +96,14 @@
                     diskUsagePercent: undefined,
                     k8sInternalIP: node.ip || node.host || '-',
                     k8sVersion: '-',
-                    fromDatabase: true // Flag để biết đây là data từ database
-                }));
+                    fromDatabase: true, // Flag để biết đây là data từ database
+                    isOffline: isOffline, // Flag để biết node đang offline
+                    isOfflineInCluster: isOfflineInCluster, // Flag để biết node offline nhưng thuộc cluster
+                    isUnregistered: false // Sẽ được cập nhật sau khi check K8s API
+                };
+            });
 
-                // Render ngay với data từ database
-                applyFilters();
-            } else {
-                nodesData = [];
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Không có nodes</td></tr>';
-            }
-        } catch (error) {
-            console.error('Error loading quick nodes:', error);
-            const escapeHtml = getEscapeHtml();
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Lỗi khi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}</td></tr>`;
-        }
-    }
-
-    // Load nodes data đầy đủ từ Kubernetes API
-    async function loadFullNodes() {
-        const tbody = document.getElementById('nodes-tbody');
-        if (!tbody || nodesData.length === 0) return;
-
-        try {
-            // Load từ Kubernetes API (có thể chậm)
+            // Load từ Kubernetes API để merge thêm thông tin
             const response = await window.ApiClient.get('/admin/cluster/k8s/nodes').catch(() => null);
 
             if (response && response.nodes && response.nodes.length > 0) {
@@ -114,62 +120,114 @@
 
                 // Cập nhật nodesData với thông tin từ K8s API
                 nodesData = nodesData.map(dbNode => {
-                    // Tìm node K8s theo name hoặc IP
+                    // Tìm node K8s theo name hoặc IP (check cả khi offline)
                     let k8sNode = k8sNodesMap.get(dbNode.name);
                     if (!k8sNode && dbNode.k8sInternalIP) {
                         k8sNode = k8sNodesMap.get(dbNode.k8sInternalIP);
                     }
 
                     if (k8sNode) {
-                        // Merge: giữ lại dữ liệu từ database (dbCpu, dbRam, dbDisk, status)
-                        // và cập nhật thêm dữ liệu từ K8s API
-                        return {
-                            ...dbNode,
-                            ...k8sNode,
-                            name: k8sNode.name || dbNode.name,
-                            // Giữ lại dữ liệu từ database
-                            dbCpu: dbNode.dbCpu,
-                            dbRam: dbNode.dbRam,
-                            dbDisk: dbNode.dbDisk,
-                            dbRamPercentage: dbNode.dbRamPercentage,
-                            status: dbNode.status, // Giữ status từ database
-                            fromDatabase: false
-                        };
+                        // Node có trong K8s cluster
+                        if (dbNode.isOffline) {
+                            // Node offline nhưng có trong K8s - giữ nguyên offline status
+                            return {
+                                ...dbNode,
+                                ...k8sNode,
+                                name: k8sNode.name || dbNode.name,
+                                // Giữ lại dữ liệu từ database
+                                dbCpu: dbNode.dbCpu,
+                                dbRam: dbNode.dbRam,
+                                dbDisk: dbNode.dbDisk,
+                                dbRamPercentage: dbNode.dbRamPercentage,
+                                status: dbNode.status, // Giữ status OFFLINE từ database
+                                fromDatabase: false,
+                                // Giữ lại flags
+                                isOffline: dbNode.isOffline,
+                                isOfflineInCluster: dbNode.isOfflineInCluster,
+                                isUnregistered: false // Node đã có trong K8s cluster
+                            };
+                        } else {
+                            // Node online và có trong K8s - merge bình thường
+                            return {
+                                ...dbNode,
+                                ...k8sNode,
+                                name: k8sNode.name || dbNode.name,
+                                // Giữ lại dữ liệu từ database
+                                dbCpu: dbNode.dbCpu,
+                                dbRam: dbNode.dbRam,
+                                dbDisk: dbNode.dbDisk,
+                                dbRamPercentage: dbNode.dbRamPercentage,
+                                status: dbNode.status, // Giữ status từ database
+                                fromDatabase: false,
+                                // Giữ lại flags
+                                isOffline: dbNode.isOffline,
+                                isOfflineInCluster: dbNode.isOfflineInCluster,
+                                isUnregistered: false // Node đã có trong K8s cluster
+                            };
+                        }
+                    } else {
+                        // Node không có trong K8s cluster
+                        if (dbNode.isOffline) {
+                            // Node offline và không có trong K8s - hiển thị cả 2 trạng thái
+                            return {
+                                ...dbNode,
+                                isUnregistered: true // Node offline và chưa đăng ký trong K8s cluster
+                            };
+                        } else {
+                            // Node online nhưng không có trong K8s - chưa đăng ký
+                            return {
+                                ...dbNode,
+                                isUnregistered: true // Node có trong DB nhưng chưa đăng ký trong K8s cluster
+                            };
+                        }
                     }
-                    // Nếu không tìm thấy trong K8s, giữ lại data từ database
-                    return dbNode;
                 });
 
-                // Thêm các nodes mới từ K8s API mà không có trong database
+                // Thêm các nodes mới từ K8s API mà không có trong database (chưa được assign vào cụm)
                 response.nodes.forEach(k8sNode => {
                     const exists = nodesData.some(n =>
                         n.name === k8sNode.name ||
                         (n.k8sInternalIP && n.k8sInternalIP === k8sNode.k8sInternalIP)
                     );
                     if (!exists) {
+                        // Xác định role từ k8sRoles
+                        let role = 'WORKER';
+                        if (k8sNode.k8sRoles && Array.isArray(k8sNode.k8sRoles)) {
+                            if (k8sNode.k8sRoles.includes('master') || k8sNode.k8sRoles.includes('control-plane')) {
+                                role = 'MASTER';
+                            }
+                        }
                         nodesData.push({
                             ...k8sNode,
-                            fromDatabase: false
+                            role: role,
+                            fromDatabase: false,
+                            isOffline: false,
+                            isOfflineInCluster: false,
+                            isUnregistered: false,
+                            isNotAssigned: true // Node có trong K8s nhưng chưa được assign vào cụm (không có trong DB)
                         });
                     }
                 });
-
-                // Render lại với data đầy đủ
-                applyFilters();
+            } else {
+                // Nếu không có response từ K8s API (có thể master offline), đánh dấu tất cả nodes online là chưa đăng ký
+                nodesData = nodesData.map(dbNode => {
+                    if (!dbNode.isOffline) {
+                        return {
+                            ...dbNode,
+                            isUnregistered: true // Không thể xác định vì không có K8s API
+                        };
+                    }
+                    return dbNode;
+                });
             }
+
+            // Render với data đầy đủ
+            applyFilters();
         } catch (error) {
-            console.error('Error loading full nodes:', error);
-            // Không hiển thị lỗi vì đã có data từ database
+            console.error('Error loading nodes:', error);
+            const escapeHtml = getEscapeHtml();
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Lỗi khi tải dữ liệu: ${escapeHtml(error.message || 'Unknown error')}</td></tr>`;
         }
-    }
-
-    // Load nodes data (load nhanh trước, sau đó load đầy đủ)
-    async function loadNodes() {
-        // Load nhanh từ database trước
-        await loadQuickNodes();
-
-        // Sau đó load đầy đủ từ K8s API
-        await loadFullNodes();
     }
 
     // Apply filters
@@ -185,13 +243,22 @@
                 (node.k8sInternalIP && node.k8sInternalIP.toLowerCase().includes(searchTerm));
 
             // Role filter
-            const nodeRoles = node.k8sRoles || [];
-            const isMaster = nodeRoles.includes('master') || nodeRoles.includes('control-plane');
-            const isWorker = !isMaster; // Node không phải master thì là worker
-
-            const matchRole = !roleFilter ||
-                (roleFilter === 'master' && isMaster) ||
-                (roleFilter === 'worker' && isWorker);
+            let matchRole = true;
+            if (roleFilter) {
+                // Nếu node chưa được assign vào cụm, chỉ match với filter 'not-assigned'
+                if (node.isNotAssigned) {
+                    matchRole = roleFilter === 'not-assigned';
+                } else if (node.isUnregistered) {
+                    // Nếu node chưa đăng ký, chỉ match với filter 'unregistered'
+                    matchRole = roleFilter === 'unregistered';
+                } else {
+                    const nodeRoles = node.k8sRoles || [];
+                    const isMaster = nodeRoles.includes('master') || nodeRoles.includes('control-plane');
+                    const isWorker = !isMaster; // Node không phải master thì là worker
+                    matchRole = (roleFilter === 'master' && isMaster) ||
+                                (roleFilter === 'worker' && isWorker);
+                }
+            }
 
             // Status filter - sử dụng status từ database hoặc K8s
             const displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
@@ -216,10 +283,21 @@
         const escapeHtml = getEscapeHtml();
         tbody.innerHTML = filteredNodesData.map(node => {
             // Ưu tiên hiển thị status từ database, chỉ dùng k8sStatus khi có giá trị hợp lệ
-            const displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
-            const statusClass = getStatusClass(displayStatus);
-            const roleClass = getRoleClass(node.k8sRoles);
-            const role = formatRole(node.k8sRoles);
+            // Nhưng nếu node offline, luôn hiển thị OFFLINE
+            let displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
+            // Nếu node offline trong cluster, hiển thị OFFLINE với cảnh báo
+            if (node.isOfflineInCluster) {
+                displayStatus = 'OFFLINE';
+            }
+            const statusClass = getStatusClass(displayStatus, node.isOfflineInCluster);
+            const roleClass = getRoleClass(node.k8sRoles, node.isUnregistered, node.isNotAssigned);
+            const role = formatRole(node.k8sRoles, node.isUnregistered, node.isNotAssigned);
+            
+            // Tạo tooltip cho node offline trong cluster
+            let statusTooltip = '';
+            if (node.isOfflineInCluster) {
+                statusTooltip = 'Node thuộc cluster nhưng hiện đang offline - không thể kết nối';
+            }
 
             // Ưu tiên hiển thị metrics từ database, chỉ cập nhật khi có dữ liệu mới từ K8s/metrics
             let cpuDisplay = '-';
@@ -263,14 +341,30 @@
             const ramClass = node.ramUsagePercent !== undefined ? getUsageClass(ramUsagePercent) : '';
             const diskClass = node.diskUsagePercent !== undefined ? getUsageClass(diskUsagePercent) : '';
 
+            // Tạo tooltip cho role badge
+            let roleTooltip = '';
+            if (node.isNotAssigned) {
+                roleTooltip = 'Node có trong K8s cluster nhưng chưa được assign vào cụm (chưa có clusterStatus=AVAILABLE trong database)';
+            } else if (node.isUnregistered) {
+                roleTooltip = 'Node có trong database nhưng chưa join vào cluster (không thấy trong kubectl)';
+            }
+            
             return `
                 <tr>
                     <td><span class="fw-medium">${escapeHtml(node.name || '-')}</span></td>
-                    <td><span class="badge ${roleClass} small">${escapeHtml(role)}</span></td>
+                    <td>
+                        <span class="badge ${roleClass} small" ${roleTooltip ? `title="${escapeHtml(roleTooltip)}"` : ''}>
+                            ${escapeHtml(role)}
+                        </span>
+                    </td>
                     <td><span class="text-muted small ${cpuClass}">${escapeHtml(cpuDisplay)}</span></td>
                     <td><span class="text-muted small ${ramClass}">${escapeHtml(ramDisplay)}</span></td>
                     <td><span class="text-muted small ${diskClass}">${escapeHtml(diskDisplay)}</span></td>
-                    <td><span class="badge ${statusClass}">${escapeHtml(displayStatus)}</span></td>
+                    <td>
+                        <span class="badge ${statusClass}" ${statusTooltip ? `title="${escapeHtml(statusTooltip)}"` : ''}>
+                            ${escapeHtml(displayStatus)}
+                        </span>
+                    </td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary" onclick="window.K8sNodesModule.showNodeDetail('${escapeHtml(node.name || '')}')">
                             Chi tiết
@@ -306,15 +400,32 @@
 
         // Render Info tab
         if (infoContentEl) {
-            const roleClass = getRoleClass(node.k8sRoles);
-            const role = formatRole(node.k8sRoles);
+            const roleClass = getRoleClass(node.k8sRoles, node.isUnregistered, node.isNotAssigned);
+            const role = formatRole(node.k8sRoles, node.isUnregistered, node.isNotAssigned);
             // Ưu tiên hiển thị status từ database, chỉ dùng k8sStatus khi có giá trị hợp lệ
-            const displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
-            const statusClass = getStatusClass(displayStatus);
+            // Nhưng nếu node offline, luôn hiển thị OFFLINE
+            let displayStatus = (node.k8sStatus && node.k8sStatus !== 'Unknown') ? node.k8sStatus : (node.status || 'Unknown');
+            if (node.isOfflineInCluster) {
+                displayStatus = 'OFFLINE';
+            }
+            const statusClass = getStatusClass(displayStatus, node.isOfflineInCluster);
 
+            // Thêm cảnh báo nếu node offline trong cluster
+            const offlineWarning = node.isOfflineInCluster ? `
+                <tr>
+                    <th colspan="2">
+                        <div class="alert alert-warning mb-0 py-2">
+                            <strong>Cảnh báo:</strong> Node này thuộc cluster (clusterStatus=AVAILABLE) nhưng hiện đang offline (status=OFFLINE). 
+                            Không thể kết nối để lấy thông tin chi tiết từ Kubernetes API.
+                        </div>
+                    </th>
+                </tr>
+            ` : '';
+            
             infoContentEl.innerHTML = `
                 <table class="table table-sm">
                     <tbody>
+                        ${offlineWarning}
                         <tr>
                             <th style="width: 200px;">Tên Node:</th>
                             <td>${escapeHtml(node.name || '-')}</td>
@@ -325,7 +436,9 @@
                         </tr>
                         <tr>
                             <th>Trạng thái:</th>
-                            <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
+                            <td>
+                                <span class="badge ${statusClass}">${escapeHtml(displayStatus)}</span>
+                            </td>
                         </tr>
                         <tr>
                             <th>Internal IP:</th>
@@ -654,4 +767,5 @@
         showNodeDetail
     };
 })();
+
 

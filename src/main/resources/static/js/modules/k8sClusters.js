@@ -1358,16 +1358,18 @@
 			}
 
 			const verEl = document.getElementById('cd-version');
-			const version = (detail.version || '').trim();
-			if (!version) {
-				verEl.innerHTML = `
-					<span class="text-muted">Hãy cài đặt K8s trước</span>
-					<button type="button" class="btn btn-sm btn-outline-primary ms-2" data-bs-toggle="modal" data-bs-target="#playbookManagerModal">
-						<i class="bi bi-gear"></i> Chạy playbook cài đặt K8s
-					</button>
-				`;
-			} else {
-				verEl.textContent = version;
+			if (verEl) {
+				const version = (detail.version || '').trim();
+				if (!version) {
+					verEl.innerHTML = `
+						<span class="text-muted">Hãy cài đặt K8s trước</span>
+						<button type="button" class="btn btn-sm btn-outline-primary ms-2" data-bs-toggle="modal" data-bs-target="#playbookManagerModal">
+							<i class="bi bi-gear"></i> Chạy playbook cài đặt K8s
+						</button>
+					`;
+				} else {
+					verEl.textContent = version;
+				}
 			}
 
 			// Load nodes (simplified - can be enhanced later)
@@ -1508,7 +1510,8 @@
 	async function loadClusterNodes(detail) {
 		const tbody = document.getElementById('cd-nodes-tbody');
 		if (!tbody) {
-			console.warn('cd-nodes-tbody element not found');
+			// Element không tồn tại - có thể đang ở trang khác hoặc chưa được render
+			// Không log warning vì đây có thể là trường hợp bình thường
 			return;
 		}
 
